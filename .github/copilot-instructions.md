@@ -1,5 +1,13 @@
 # AI Coding Instructions — adult-ai-app
 
+## 命名規則
+
+- **ファイル名・ディレクトリ名**: 英語小文字単数形ケバブケース（例: `chat-input.tsx`, `settings-panel/`）
+- **コンポーネント**: PascalCase（例: `ChatInput`, `SettingsPanel`）
+- **変数・関数**: camelCase（例: `sendMessage`, `chatStore`）
+- **型名**: PascalCase + 具体的な名前（例: `ChatInputProps`, `MessageBubbleProps`）
+- **定数**: UPPER_SNAKE_CASE（例: `MAX_RETRY_COUNT`）
+
 ## 言語ルール
 
 - **コード内コメントは日本語で書くこと**（「なぜ」のみ記述。自明なコメント禁止）
