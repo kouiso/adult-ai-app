@@ -1,15 +1,15 @@
-import { useEffect } from 'react'
-import { ChatView } from '@/components/chat/ChatView'
-import { SettingsPanel } from '@/components/settings/SettingsPanel'
-import { useSettingsStore } from '@/stores/settings-store'
-import { Toaster } from '@/components/ui/sonner'
+import { ChatView } from "@/component/chat/chat-view";
+import { SettingsPanel } from "@/component/settings/settings-panel";
+import { Toaster } from "@/component/ui/sonner";
+import { useSettingsStore } from "@/store/settings-store";
+import { useEffect } from "react";
 
 export default function App() {
-  const darkMode = useSettingsStore((s) => s.darkMode)
+  const darkMode = useSettingsStore((s) => s.darkMode);
 
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', darkMode)
-  }, [darkMode])
+    document.documentElement.classList.toggle("dark", darkMode);
+  }, [darkMode]);
 
   return (
     <div className="flex h-svh flex-col bg-background">
@@ -22,5 +22,5 @@ export default function App() {
       </main>
       <Toaster />
     </div>
-  )
+  );
 }

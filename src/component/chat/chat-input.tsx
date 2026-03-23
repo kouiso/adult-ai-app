@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback } from 'react'
-import { Textarea } from '@/components/ui/textarea'
-import { Button } from '@/components/ui/button'
+import { Textarea } from '@/component/ui/textarea'
+import { Button } from '@/component/ui/button'
 
 interface ChatInputProps {
   onSend: (message: string) => void

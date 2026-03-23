@@ -1,67 +1,70 @@
 export async function streamChat(
-  messages: { role: string; content: string }[],
+  messages: { role: "system" | "user" | "assistant"; content: string }[],
   model: string,
   onChunk: (text: string) => void,
   onDone: () => void,
   onError: (error: string) => void,
 ) {
   try {
-    const response = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+    const response = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ messages, model }),
-    })
+    });
 
     if (!response.ok || !response.body) {
-      const err = await response.text()
-      onError(err)
-      return
+      const err = await response.text();
+      onError(err);
+      return;
     }
 
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
 
     while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
+      const { done, value } = await reader.read();
+      if (done) break;
 
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || ''
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
 
       for (const line of lines) {
-        if (!line.startsWith('data: ')) continue
-        const data = line.slice(6).trim()
-        if (data === '[DONE]') {
-          onDone()
-          return
+        if (!line.startsWith("data: ")) continue;
+        const data = line.slice(6).trim();
+        if (data === "[DONE]") {
+          onDone();
+          return;
         }
         try {
-          const parsed = JSON.parse(data)
-          const content = parsed.choices?.[0]?.delta?.content
-          if (content) onChunk(content)
-        } catch {
-          // skip malformed JSON
+          const parsed = JSON.parse(data);
+          const content = parsed.choices?.[0]?.delta?.content;
+          if (content) onChunk(content);
+        } catch (e: unknown) {
+          // SSEストリームでの不完全なJSONチャンクは正常の範囲なので次へ進む
+          console.debug("SSE parse skip:", e);
         }
       }
     }
-    onDone()
+    onDone();
   } catch (err) {
-    onError(String(err))
+    onError(String(err));
   }
 }
 
-export async function generateImage(prompt: string): Promise<{ task_id: string } | { error: string }> {
-  const response = await fetch('/api/image', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+export async function generateImage(
+  prompt: string,
+): Promise<{ task_id: string } | { error: string }> {
+  const response = await fetch("/api/image", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       prompt,
-      negative_prompt: 'ugly, deformed, blurry, low quality, text, watermark',
+      negative_prompt: "ugly, deformed, blurry, low quality, text, watermark",
       width: 512,
       height: 768,
     }),
-  })
-  return response.json()
+  });
+  return response.json();
 }
