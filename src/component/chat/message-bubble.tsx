@@ -1,83 +1,158 @@
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import { Avatar, AvatarFallback } from '@/component/ui/avatar'
-import { cn } from '@/lib/utils'
+import ReactMarkdown from "react-markdown";
+
+import { Volume2, VolumeOff } from "lucide-react";
+import remarkGfm from "remark-gfm";
+
+import { Avatar, AvatarFallback } from "@/component/ui/avatar";
+import { cn } from "@/lib/utils";
 
 interface MessageBubbleProps {
-  role: 'user' | 'assistant'
-  content: string
-  imageUrl?: string
-  isStreaming?: boolean
-  characterName?: string
-  nsfwBlur?: boolean
+  role: "user" | "assistant";
+  content: string;
+  imageUrl?: string;
+  isStreaming?: boolean;
+  characterName?: string;
+  nsfwBlur?: boolean;
+  canSpeak?: boolean;
+  isSpeaking?: boolean;
+  onSpeak?: (text: string) => void;
+  onStopSpeaking?: () => void;
 }
 
-export function MessageBubble({
+interface MessageContentProps {
+  content: string;
+  isStreaming?: boolean;
+}
+
+const markdownParagraph = ({ children }: { children?: React.ReactNode }) => (
+  <p className="mb-2 last:mb-0">{children}</p>
+);
+const markdownEm = ({ children }: { children?: React.ReactNode }) => (
+  <em className="italic text-muted-foreground">{children}</em>
+);
+const markdownStrong = ({ children }: { children?: React.ReactNode }) => (
+  <strong className="font-semibold">{children}</strong>
+);
+const markdownComponents = { p: markdownParagraph, em: markdownEm, strong: markdownStrong };
+
+const MessageContent = ({ content, isStreaming }: MessageContentProps) => {
+  if (content) {
+    return (
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+        {content}
+      </ReactMarkdown>
+    );
+  }
+  if (isStreaming) {
+    return (
+      <div className="flex gap-1">
+        <span className="animate-bounce text-xs">●</span>
+        <span className="animate-bounce text-xs [animation-delay:0.2s]">●</span>
+        <span className="animate-bounce text-xs [animation-delay:0.4s]">●</span>
+      </div>
+    );
+  }
+  return null;
+};
+
+interface SpeakButtonProps {
+  isSpeaking: boolean;
+  content: string;
+  onSpeak?: (text: string) => void;
+  onStopSpeaking?: () => void;
+}
+
+const SpeakButton = ({ isSpeaking, content, onSpeak, onStopSpeaking }: SpeakButtonProps) => (
+  <button
+    type="button"
+    onClick={() => (isSpeaking ? onStopSpeaking?.() : onSpeak?.(content))}
+    className={cn(
+      "flex items-center gap-1 rounded-full px-2 py-1 text-xs transition-colors",
+      isSpeaking
+        ? "bg-primary/10 text-primary hover:bg-primary/20"
+        : "text-muted-foreground hover:bg-muted hover:text-foreground",
+    )}
+  >
+    {isSpeaking ? <VolumeOff className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
+    {isSpeaking ? "停止" : "再生"}
+  </button>
+);
+
+interface ImagePreviewProps {
+  imageUrl: string;
+  nsfwBlur: boolean;
+}
+
+const ImagePreview = ({ imageUrl, nsfwBlur }: ImagePreviewProps) => (
+  <div className={cn("relative overflow-hidden rounded-xl", nsfwBlur && "group cursor-pointer")}>
+    <img
+      src={imageUrl}
+      alt="Generated"
+      className={cn(
+        "max-w-full rounded-xl transition-all duration-300",
+        nsfwBlur && "blur-xl group-hover:blur-none",
+      )}
+    />
+    {nsfwBlur && (
+      <div className="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:opacity-0 transition-opacity">
+        <span className="text-white text-xs">クリックで表示</span>
+      </div>
+    )}
+  </div>
+);
+
+interface MessageAvatarProps {
+  isUser: boolean;
+  characterName: string;
+}
+
+const MessageAvatar = ({ isUser, characterName }: MessageAvatarProps) => (
+  <Avatar className="h-8 w-8 shrink-0">
+    <AvatarFallback
+      className={cn(
+        "text-xs",
+        isUser ? "bg-primary text-primary-foreground" : "bg-secondary text-secondary-foreground",
+      )}
+    >
+      {isUser ? "あなた" : characterName.slice(0, 2)}
+    </AvatarFallback>
+  </Avatar>
+);
+
+export const MessageBubble = ({
   role,
   content,
   imageUrl,
   isStreaming,
-  characterName = 'AI',
+  characterName = "AI",
   nsfwBlur = false,
-}: MessageBubbleProps) {
-  const isUser = role === 'user'
+  canSpeak = false,
+  isSpeaking = false,
+  onSpeak,
+  onStopSpeaking,
+}: MessageBubbleProps) => {
+  const isUser = role === "user";
+  const bubbleStyle = isUser
+    ? "bg-primary text-primary-foreground rounded-tr-sm"
+    : "bg-muted text-foreground rounded-tl-sm";
 
   return (
-    <div className={cn('flex gap-3 px-4 py-3', isUser && 'flex-row-reverse')}>
-      <Avatar className="h-8 w-8 shrink-0">
-        <AvatarFallback className={cn(
-          'text-xs',
-          isUser ? 'bg-primary text-primary-foreground' : 'bg-secondary text-secondary-foreground'
-        )}>
-          {isUser ? 'あなた' : characterName.slice(0, 2)}
-        </AvatarFallback>
-      </Avatar>
-      <div className={cn('max-w-[75%] space-y-2', isUser && 'text-right')}>
-        <div
-          className={cn(
-            'rounded-2xl px-4 py-2.5 text-sm leading-relaxed',
-            isUser
-              ? 'bg-primary text-primary-foreground rounded-tr-sm'
-              : 'bg-muted text-foreground rounded-tl-sm'
-          )}
-        >
-          {content ? (
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={{
-                p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-                em: ({ children }) => <em className="italic text-muted-foreground">{children}</em>,
-                strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
-              }}
-            >
-              {content}
-            </ReactMarkdown>
-          ) : isStreaming ? (
-            <div className="flex gap-1">
-              <span className="animate-bounce text-xs">●</span>
-              <span className="animate-bounce text-xs [animation-delay:0.2s]">●</span>
-              <span className="animate-bounce text-xs [animation-delay:0.4s]">●</span>
-            </div>
-          ) : null}
+    <div className={cn("flex gap-3 px-4 py-3", isUser && "flex-row-reverse")}>
+      <MessageAvatar isUser={isUser} characterName={characterName} />
+      <div className={cn("max-w-[75%] space-y-2", isUser && "text-right")}>
+        <div className={cn("rounded-2xl px-4 py-2.5 text-sm leading-relaxed", bubbleStyle)}>
+          <MessageContent content={content} isStreaming={isStreaming} />
         </div>
-        {imageUrl && (
-          <div className={cn('relative overflow-hidden rounded-xl', nsfwBlur && 'group cursor-pointer')}>
-            <img
-              src={imageUrl}
-              alt="Generated"
-              className={cn(
-                'max-w-full rounded-xl transition-all duration-300',
-                nsfwBlur && 'blur-xl group-hover:blur-none'
-              )}
-            />
-            {nsfwBlur && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:opacity-0 transition-opacity">
-                <span className="text-white text-xs">クリックで表示</span>
-              </div>
-            )}
-          </div>
+        {canSpeak && (
+          <SpeakButton
+            isSpeaking={isSpeaking}
+            content={content}
+            onSpeak={onSpeak}
+            onStopSpeaking={onStopSpeaking}
+          />
         )}
+        {imageUrl && <ImagePreview imageUrl={imageUrl} nsfwBlur={nsfwBlur} />}
       </div>
     </div>
-  )
-}
+  );
+};

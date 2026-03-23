@@ -1,40 +1,41 @@
-import { useState, useRef, useCallback } from 'react'
-import { Textarea } from '@/component/ui/textarea'
-import { Button } from '@/component/ui/button'
+import { useCallback, useRef, useState } from "react";
+
+import { Button } from "@/component/ui/button";
+import { Textarea } from "@/component/ui/textarea";
 
 interface ChatInputProps {
-  onSend: (message: string) => void
-  onGenerateImage: () => void
-  isLoading: boolean
+  onSend: (message: string) => void | Promise<void>;
+  onGenerateImage: () => void | Promise<void>;
+  isLoading: boolean;
 }
 
-export function ChatInput({ onSend, onGenerateImage, isLoading }: ChatInputProps) {
-  const [input, setInput] = useState('')
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+export const ChatInput = ({ onSend, onGenerateImage, isLoading }: ChatInputProps) => {
+  const [input, setInput] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const handleSend = useCallback(() => {
-    const trimmed = input.trim()
-    if (!trimmed || isLoading) return
-    onSend(trimmed)
-    setInput('')
+    const trimmed = input.trim();
+    if (!trimmed || isLoading) return;
+    void onSend(trimmed);
+    setInput("");
     if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto'
+      textareaRef.current.style.height = "auto";
     }
-  }, [input, isLoading, onSend])
+  }, [input, isLoading, onSend]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSend()
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
     }
-  }
+  };
 
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setInput(e.target.value)
-    const el = e.target
-    el.style.height = 'auto'
-    el.style.height = `${Math.min(el.scrollHeight, 200)}px`
-  }
+    setInput(e.target.value);
+    const el = e.target;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+  };
 
   return (
     <div className="border-t bg-background p-4">
@@ -51,7 +52,7 @@ export function ChatInput({ onSend, onGenerateImage, isLoading }: ChatInputProps
         />
         <div className="flex gap-1">
           <Button
-            onClick={onGenerateImage}
+            onClick={() => void onGenerateImage()}
             variant="outline"
             size="icon"
             disabled={isLoading}
@@ -65,5 +66,5 @@ export function ChatInput({ onSend, onGenerateImage, isLoading }: ChatInputProps
         </div>
       </div>
     </div>
-  )
-}
+  );
+};

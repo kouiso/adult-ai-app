@@ -1,10 +1,11 @@
+import { useEffect } from "react";
+
 import { ChatView } from "@/component/chat/chat-view";
 import { SettingsPanel } from "@/component/settings/settings-panel";
 import { Toaster } from "@/component/ui/sonner";
 import { useSettingsStore } from "@/store/settings-store";
-import { useEffect } from "react";
 
-export default function App() {
+export const App = () => {
   const darkMode = useSettingsStore((s) => s.darkMode);
 
   useEffect(() => {
@@ -23,4 +24,4 @@ export default function App() {
       <Toaster />
     </div>
   );
-}
+};

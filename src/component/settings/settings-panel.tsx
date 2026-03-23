@@ -1,12 +1,9 @@
+import { Volume2 } from "lucide-react";
+
 import { Separator } from "@/component/ui/separator";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@/component/ui/sheet";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/component/ui/sheet";
 import { Switch } from "@/component/ui/switch";
+import { useSpeechSynthesis } from "@/hook/use-speech-synthesis";
 import { useSettingsStore } from "@/store/settings-store";
 
 const MODELS = [
@@ -52,19 +49,62 @@ const MODELS = [
     tier: "プレミアム",
     desc: "最新・最高品質",
   },
+  {
+    id: "sao10k/l3.1-euryale-70b",
+    name: "Euryale 70B（RP最強）",
+    tier: "プレミアム",
+    desc: "RP特化fine-tune済み70B・業界最高品質",
+  },
+  {
+    id: "sao10k/l3-euryale-70b",
+    name: "Euryale 70B v2（RP）",
+    tier: "プレミアム",
+    desc: "Euryale旧版・安定した人気モデル",
+  },
 ];
 
-export function SettingsPanel() {
+export const SettingsPanel = () => {
   const {
     model,
     nsfwBlur,
     darkMode,
     autoGenerateImages,
+    ttsEnabled,
+    ttsVoiceUri,
+    ttsRate,
+    ttsPitch,
     setModel,
     toggleNsfwBlur,
     toggleDarkMode,
     toggleAutoGenerateImages,
+    toggleTts,
+    setTtsVoiceUri,
+    setTtsRate,
+    setTtsPitch,
   } = useSettingsStore();
+
+  const { categorizedVoices, isSupported, preview, isSpeaking, stop } = useSpeechSynthesis(
+    ttsVoiceUri,
+    ttsRate,
+    ttsPitch,
+  );
+
+  const femaleVoices = categorizedVoices.filter((v) => v.type === "female");
+  const maleVoices = categorizedVoices.filter((v) => v.type === "male");
+  const otherVoices = categorizedVoices.filter((v) => v.type === "other");
+
+  const PREVIEW_TEXT = "こんにちは、今日はいいお天気ですね。" as const;
+
+  const handlePreview = (voiceURI: string) => {
+    if (isSpeaking) {
+      stop();
+      return;
+    }
+    const found = categorizedVoices.find((v) => v.voice.voiceURI === voiceURI);
+    if (found) {
+      preview(PREVIEW_TEXT, found.voice);
+    }
+  };
 
   return (
     <Sheet>
@@ -82,11 +122,10 @@ export function SettingsPanel() {
               {MODELS.map((m) => (
                 <button
                   key={m.id}
+                  type="button"
                   onClick={() => setModel(m.id)}
                   className={`w-full rounded-lg border p-3 text-left text-sm transition-colors ${
-                    model === m.id
-                      ? "border-primary bg-primary/5"
-                      : "border-border hover:bg-muted"
+                    model === m.id ? "border-primary bg-primary/5" : "border-border hover:bg-muted"
                   }`}
                 >
                   <div className="font-medium">{m.name}</div>
@@ -104,36 +143,131 @@ export function SettingsPanel() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium">NSFWぼかし</p>
-                <p className="text-xs text-muted-foreground">
-                  画像をクリックするまでぼかす
-                </p>
+                <p className="text-xs text-muted-foreground">画像をクリックするまでぼかす</p>
               </div>
               <Switch checked={nsfwBlur} onCheckedChange={toggleNsfwBlur} />
             </div>
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium">ダークモード</p>
-                <p className="text-xs text-muted-foreground">
-                  テーマの切り替え
-                </p>
+                <p className="text-xs text-muted-foreground">テーマの切り替え</p>
               </div>
               <Switch checked={darkMode} onCheckedChange={toggleDarkMode} />
             </div>
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium">自動画像生成</p>
-                <p className="text-xs text-muted-foreground">
-                  AIが適切なタイミングで画像を生成
-                </p>
+                <p className="text-xs text-muted-foreground">AIが適切なタイミングで画像を生成</p>
               </div>
-              <Switch
-                checked={autoGenerateImages}
-                onCheckedChange={toggleAutoGenerateImages}
-              />
+              <Switch checked={autoGenerateImages} onCheckedChange={toggleAutoGenerateImages} />
             </div>
+          </div>
+
+          <Separator />
+
+          <div>
+            <h3 className="text-sm font-medium mb-3">音声読み上げ（TTS）</h3>
+            {!isSupported ? (
+              <p className="text-xs text-muted-foreground">
+                このブラウザは音声合成に対応していません
+              </p>
+            ) : (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium">音声読み上げ</p>
+                    <p className="text-xs text-muted-foreground">AIの応答を音声で再生</p>
+                  </div>
+                  <Switch checked={ttsEnabled} onCheckedChange={toggleTts} />
+                </div>
+                {ttsEnabled && (
+                  <>
+                    <div>
+                      <label className="text-sm font-medium mb-1.5 block">音声タイプ</label>
+                      <div className="flex gap-2">
+                        <select
+                          value={ttsVoiceUri}
+                          onChange={(e) => setTtsVoiceUri(e.target.value)}
+                          className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                        >
+                          <option value="">デフォルト</option>
+                          {femaleVoices.length > 0 && (
+                            <optgroup label="👩 女性">
+                              {femaleVoices.map((v) => (
+                                <option key={v.voice.voiceURI} value={v.voice.voiceURI}>
+                                  {v.voice.name}
+                                </option>
+                              ))}
+                            </optgroup>
+                          )}
+                          {maleVoices.length > 0 && (
+                            <optgroup label="👨 男性">
+                              {maleVoices.map((v) => (
+                                <option key={v.voice.voiceURI} value={v.voice.voiceURI}>
+                                  {v.voice.name}
+                                </option>
+                              ))}
+                            </optgroup>
+                          )}
+                          {otherVoices.length > 0 && (
+                            <optgroup label="🔊 その他">
+                              {otherVoices.map((v) => (
+                                <option key={v.voice.voiceURI} value={v.voice.voiceURI}>
+                                  {v.voice.name}
+                                </option>
+                              ))}
+                            </optgroup>
+                          )}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => handlePreview(ttsVoiceUri)}
+                          className="shrink-0 rounded-lg border border-border px-3 py-2 text-sm hover:bg-muted transition-colors"
+                        >
+                          <Volume2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        🔊 ボタンで選択中の声を試聴
+                      </p>
+                    </div>
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-sm font-medium">速度</label>
+                        <span className="text-xs text-muted-foreground">{ttsRate.toFixed(1)}x</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={0.5}
+                        max={2}
+                        step={0.1}
+                        value={ttsRate}
+                        onChange={(e) => setTtsRate(Number(e.target.value))}
+                        className="w-full accent-primary"
+                      />
+                    </div>
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-sm font-medium">ピッチ</label>
+                        <span className="text-xs text-muted-foreground">{ttsPitch.toFixed(1)}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={0.5}
+                        max={2}
+                        step={0.1}
+                        value={ttsPitch}
+                        onChange={(e) => setTtsPitch(Number(e.target.value))}
+                        className="w-full accent-primary"
+                      />
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </SheetContent>
     </Sheet>
   );
-}
+};

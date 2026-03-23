@@ -24,10 +24,7 @@ const chatSchema = z.object({
 
 const imageSchema = z.object({
   prompt: z.string(),
-  negative_prompt: z
-    .string()
-    .optional()
-    .default("ugly, deformed, blurry, low quality"),
+  negative_prompt: z.string().optional().default("ugly, deformed, blurry, low quality"),
   width: z.number().optional().default(512),
   height: z.number().optional().default(768),
 });
@@ -39,25 +36,25 @@ const app = new Hono<{ Bindings: Bindings }>()
   .post("/chat", zValidator("json", chatSchema), async (c) => {
     const { messages, model } = c.req.valid("json");
 
-    const response = await fetch(
-      "https://openrouter.ai/api/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${c.env.OPENROUTER_API_KEY}`,
-          "Content-Type": "application/json",
-          "HTTP-Referer": "https://ai-chat.app",
-        },
-        body: JSON.stringify({
-          model,
-          messages,
-          stream: true,
-          provider: {
-            allow_fallbacks: false,
-          },
-        }),
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${c.env.OPENROUTER_API_KEY}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://ai-chat.app",
       },
-    );
+      body: JSON.stringify({
+        model,
+        messages,
+        stream: true,
+        temperature: 0.9,
+        top_p: 0.95,
+        repetition_penalty: 1.05,
+        provider: {
+          allow_fallbacks: false,
+        },
+      }),
+    });
 
     if (!response.ok || !response.body) {
       const error = await response.text();
@@ -94,6 +91,27 @@ const app = new Hono<{ Bindings: Bindings }>()
         seed: -1,
       }),
     });
+
+    if (!response.ok) {
+      const error = await response.text();
+      return c.json({ error, upstreamStatus: response.status }, 502);
+    }
+
+    const data = await response.json();
+    return c.json(data);
+  })
+
+  .get("/image/task/:taskId", async (c) => {
+    const taskId = c.req.param("taskId");
+
+    const response = await fetch(
+      `https://api.novita.ai/v3/async/task-result?task_id=${encodeURIComponent(taskId)}`,
+      {
+        headers: {
+          Authorization: `Bearer ${c.env.NOVITA_API_KEY}`,
+        },
+      },
+    );
 
     if (!response.ok) {
       const error = await response.text();
