@@ -1,0 +1,9 @@
+name = "adult-ai-app"
+compatibility_date = "2025-01-01"
+pages_build_output_dir = "./dist"
+
+[vars]
+# Non-secret vars go here
+
+# Secret vars are set via: wrangler secret put OPENROUTER_API_KEY
+# wrangler secret put NOVITA_API_KEY
