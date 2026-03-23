@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { useShallow } from "zustand/react/shallow";
+
 import { useSpeechSynthesis } from "@/hook/use-speech-synthesis";
 import { generateImage, getImageTaskResult, streamChat } from "@/lib/api";
 import type { ChatMessage } from "@/store/chat-store";
@@ -25,14 +27,21 @@ const DEFAULT_SYSTEM_PROMPT = `[ABSOLUTE LANGUAGE RULE - TOP PRIORITY] You MUST 
 - 動作・感触・感情は *アスタリスク* で囲む
 - 台詞は「」で囲む`;
 
+const IMAGE_PROMPT_MAX_LENGTH = 500;
+const POLL_INTERVAL_MS = 1000;
+
 export const ChatView = () => {
   const messages = useChatStore((s) => s.messages);
   const isLoading = useChatStore((s) => s.isLoading);
   const nsfwBlur = useSettingsStore((s) => s.nsfwBlur);
-  const ttsEnabled = useSettingsStore((s) => s.ttsEnabled);
-  const ttsVoiceUri = useSettingsStore((s) => s.ttsVoiceUri);
-  const ttsRate = useSettingsStore((s) => s.ttsRate);
-  const ttsPitch = useSettingsStore((s) => s.ttsPitch);
+  const { ttsEnabled, ttsVoiceUri, ttsRate, ttsPitch } = useSettingsStore(
+    useShallow((s) => ({
+      ttsEnabled: s.ttsEnabled,
+      ttsVoiceUri: s.ttsVoiceUri,
+      ttsRate: s.ttsRate,
+      ttsPitch: s.ttsPitch,
+    })),
+  );
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
 
@@ -122,7 +131,7 @@ export const ChatView = () => {
     const lastAssistant = [...msgs].reverse().find((m) => m.role === "assistant" && m.content);
     if (!lastAssistant) return;
 
-    const prompt = lastAssistant.content.slice(0, 500);
+    const prompt = lastAssistant.content.slice(0, IMAGE_PROMPT_MAX_LENGTH);
     const imageMessageId = crypto.randomUUID();
 
     setLoading(true);
@@ -144,7 +153,7 @@ export const ChatView = () => {
       const { task_id } = result;
       const MAX_POLLS = 60;
       for (let i = 0; i < MAX_POLLS; i++) {
-        await new Promise<void>((r) => setTimeout(r, 1000));
+        await new Promise<void>((r) => setTimeout(r, POLL_INTERVAL_MS));
         const poll = await getImageTaskResult(task_id);
         if (poll.task.status === "TASK_STATUS_SUCCEED" && poll.images?.[0]) {
           updateMessage(imageMessageId, "", false);

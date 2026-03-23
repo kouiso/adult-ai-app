@@ -1,9 +1,11 @@
 import { Volume2 } from "lucide-react";
+import { useShallow } from "zustand/react/shallow";
 
 import { Separator } from "@/component/ui/separator";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/component/ui/sheet";
 import { Switch } from "@/component/ui/switch";
-import { TYPE_LABELS, VOICE_TYPE_ORDER, useSpeechSynthesis } from "@/hook/use-speech-synthesis";
+import { useSpeechSynthesis } from "@/hook/use-speech-synthesis";
+import { TYPE_LABELS, VOICE_TYPE_ORDER } from "@/lib/tts-constants";
 import { useSettingsStore } from "@/store/settings-store";
 
 const MODELS = [
@@ -63,6 +65,8 @@ const MODELS = [
   },
 ];
 
+const PREVIEW_TEXT = "こんにちは、今日はいいお天気ですね。" as const;
+
 export const SettingsPanel = () => {
   const {
     model,
@@ -81,7 +85,26 @@ export const SettingsPanel = () => {
     setTtsVoiceUri,
     setTtsRate,
     setTtsPitch,
-  } = useSettingsStore();
+  } = useSettingsStore(
+    useShallow((s) => ({
+      model: s.model,
+      nsfwBlur: s.nsfwBlur,
+      darkMode: s.darkMode,
+      autoGenerateImages: s.autoGenerateImages,
+      ttsEnabled: s.ttsEnabled,
+      ttsVoiceUri: s.ttsVoiceUri,
+      ttsRate: s.ttsRate,
+      ttsPitch: s.ttsPitch,
+      setModel: s.setModel,
+      toggleNsfwBlur: s.toggleNsfwBlur,
+      toggleDarkMode: s.toggleDarkMode,
+      toggleAutoGenerateImages: s.toggleAutoGenerateImages,
+      toggleTts: s.toggleTts,
+      setTtsVoiceUri: s.setTtsVoiceUri,
+      setTtsRate: s.setTtsRate,
+      setTtsPitch: s.setTtsPitch,
+    })),
+  );
 
   const { categorizedVoices, isSupported, preview, isSpeaking, stop } = useSpeechSynthesis(
     ttsVoiceUri,
@@ -94,8 +117,6 @@ export const SettingsPanel = () => {
     label: TYPE_LABELS[type],
     voices: categorizedVoices.filter((v) => v.type === type),
   })).filter((g) => g.voices.length > 0);
-
-  const PREVIEW_TEXT = "こんにちは、今日はいいお天気ですね。" as const;
 
   const handlePreview = (voiceURI: string) => {
     if (isSpeaking) {
@@ -110,7 +131,10 @@ export const SettingsPanel = () => {
 
   return (
     <Sheet>
-      <SheetTrigger className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors hover:bg-accent hover:text-accent-foreground h-10 w-10">
+      <SheetTrigger
+        aria-label="設定を開く"
+        className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors hover:bg-accent hover:text-accent-foreground h-10 w-10"
+      >
         ⚙️
       </SheetTrigger>
       <SheetContent>

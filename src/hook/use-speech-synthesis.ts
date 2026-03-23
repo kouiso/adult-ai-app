@@ -1,12 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-type VoiceType = "female-high" | "female-calm" | "male" | "synthetic" | "multilingual" | "other";
-
-interface CategorizedVoice {
-  voice: SpeechSynthesisVoice;
-  type: VoiceType;
-  label: string;
-}
+import type { CategorizedVoice, VoiceType } from "@/lib/tts-constants";
+import { TYPE_LABELS } from "@/lib/tts-constants";
 
 interface SpeechSynthesisHookResult {
   speak: (text: string) => void;
@@ -58,27 +53,6 @@ const categorizeVoice = (voice: SpeechSynthesisVoice): VoiceType => {
   return "other";
 };
 
-const VOICE_TYPE_ORDER: readonly VoiceType[] = [
-  "female-high",
-  "female-calm",
-  "male",
-  "synthetic",
-  "multilingual",
-  "other",
-] as const;
-
-const TYPE_LABELS: Record<VoiceType, string> = {
-  "female-high": "👩 女性（高め・明るい）",
-  "female-calm": "👩 女性（落ち着き）",
-  male: "👨 男性",
-  synthetic: "🤖 合成音声",
-  multilingual: "🌐 クラウド",
-  other: "🔊 その他",
-} as const;
-
-export { TYPE_LABELS, VOICE_TYPE_ORDER };
-export type { CategorizedVoice, VoiceType };
-
 const categorizeVoices = (jaVoices: SpeechSynthesisVoice[]): CategorizedVoice[] =>
   jaVoices.map((voice) => {
     const type = categorizeVoice(voice);
@@ -99,9 +73,10 @@ export const useSpeechSynthesis = (
   const warmedUpRef = useRef(false);
   const isSupported = typeof window !== "undefined" && "speechSynthesis" in window;
 
+  // 毎レンダー終了後に最新のonEndを同期する（useEventパターン）
   useEffect(() => {
     onEndRef.current = onEnd;
-  }, [onEnd]);
+  });
 
   useEffect(() => {
     if (!isSupported) return;
