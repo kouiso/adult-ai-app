@@ -1,0 +1,1 @@
+../../prompt/commands/e2e.md
