@@ -1,3 +1,5 @@
+import { useMemo } from "react";
+
 import { Volume2 } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 
@@ -5,65 +7,9 @@ import { Separator } from "@/component/ui/separator";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/component/ui/sheet";
 import { Switch } from "@/component/ui/switch";
 import { useSpeechSynthesis } from "@/hook/use-speech-synthesis";
+import { MODEL_CATALOG } from "@/lib/model";
 import { TYPE_LABELS, VOICE_TYPE_ORDER } from "@/lib/tts-constants";
 import { useSettingsStore } from "@/store/settings-store";
-
-const MODELS = [
-  {
-    id: "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
-    name: "Venice Uncensored（無料）",
-    tier: "無料",
-    desc: "24Bモデル・制限なし",
-  },
-  {
-    id: "nousresearch/hermes-3-llama-3.1-405b:free",
-    name: "Hermes 3 405B（無料）",
-    tier: "無料",
-    desc: "405Bモデル・高品質",
-  },
-  {
-    id: "mistralai/mistral-nemo",
-    name: "Mistral Nemo 12B",
-    tier: "スタンダード",
-    desc: "高速・低コスト",
-  },
-  {
-    id: "thedrummer/unslopnemo-12b",
-    name: "UnslopNemo 12B（RP向け）",
-    tier: "スタンダード",
-    desc: "ロールプレイ特化",
-  },
-  {
-    id: "gryphe/mythomax-l2-13b",
-    name: "MythoMax 13B（RP向け）",
-    tier: "スタンダード",
-    desc: "ロールプレイ向け・13B",
-  },
-  {
-    id: "nousresearch/hermes-3-llama-3.1-70b",
-    name: "Hermes 3 70B",
-    tier: "プレミアム",
-    desc: "高品質・汎用",
-  },
-  {
-    id: "nousresearch/hermes-4-70b",
-    name: "Hermes 4 70B",
-    tier: "プレミアム",
-    desc: "最新・最高品質",
-  },
-  {
-    id: "sao10k/l3.1-euryale-70b",
-    name: "Euryale 70B（RP最強）",
-    tier: "プレミアム",
-    desc: "RP特化fine-tune済み70B・業界最高品質",
-  },
-  {
-    id: "sao10k/l3-euryale-70b",
-    name: "Euryale 70B v2（RP）",
-    tier: "プレミアム",
-    desc: "Euryale旧版・安定した人気モデル",
-  },
-];
 
 const PREVIEW_TEXT = "こんにちは、今日はいいお天気ですね。" as const;
 
@@ -112,11 +58,15 @@ export const SettingsPanel = () => {
     ttsPitch,
   );
 
-  const voiceGroups = VOICE_TYPE_ORDER.map((type) => ({
-    type,
-    label: TYPE_LABELS[type],
-    voices: categorizedVoices.filter((v) => v.type === type),
-  })).filter((g) => g.voices.length > 0);
+  const voiceGroups = useMemo(
+    () =>
+      VOICE_TYPE_ORDER.map((type) => ({
+        type,
+        label: TYPE_LABELS[type],
+        voices: categorizedVoices.filter((v) => v.type === type),
+      })).filter((g) => g.voices.length > 0),
+    [categorizedVoices],
+  );
 
   const handlePreview = (voiceURI: string) => {
     if (isSpeaking) {
@@ -145,7 +95,7 @@ export const SettingsPanel = () => {
           <div>
             <h3 className="text-sm font-medium mb-3">モデル選択</h3>
             <div className="space-y-2">
-              {MODELS.map((m) => (
+              {MODEL_CATALOG.map((m) => (
                 <button
                   key={m.id}
                   type="button"
