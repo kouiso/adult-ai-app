@@ -72,9 +72,7 @@ export default defineConfig([
         "error",
         {
           vars: "all",
-          varsIgnorePattern: "^_",
           args: "after-used",
-          argsIgnorePattern: "^_",
         },
       ],
       "unused-imports/no-unused-imports": "error",
