@@ -7,6 +7,7 @@ import { z } from "zod/v4";
 type Bindings = {
   OPENROUTER_API_KEY: string;
   NOVITA_API_KEY: string;
+  APP_ORIGIN?: string;
 };
 
 const ALLOWED_MODELS = [
@@ -32,10 +33,7 @@ const chatSchema = z.object({
       }),
     )
     .max(100),
-  model: z
-    .enum(ALLOWED_MODELS)
-    .optional()
-    .default("cognitivecomputations/dolphin-mistral-24b-venice-edition:free"),
+  model: z.enum(ALLOWED_MODELS).optional().default("sao10k/l3.1-euryale-70b"),
 });
 
 const imageSchema = z.object({
@@ -45,12 +43,33 @@ const imageSchema = z.object({
   height: z.number().int().min(64).max(2_048).optional().default(768),
 });
 
+const novitaInitResponseSchema = z.object({ task_id: z.string() });
+
+const novitaTaskResponseSchema = z.object({
+  task: z.object({
+    task_id: z.string(),
+    status: z.enum([
+      "TASK_STATUS_QUEUED",
+      "TASK_STATUS_PROCESSING",
+      "TASK_STATUS_SUCCEED",
+      "TASK_STATUS_FAILED",
+      "TASK_STATUS_CANCELED",
+    ]),
+    progress_percent: z.number(),
+  }),
+  images: z.array(z.object({ image_url: z.string(), image_url_ttl: z.number() })).optional(),
+});
+
 const app = new Hono<{ Bindings: Bindings }>()
   .basePath("/api")
   .use(
     "*",
     cors({
-      origin: ["http://localhost:5173", "http://localhost:4173", "http://localhost:8788"],
+      // Cloudflare Pages は同一オリジンなので不要だが、ローカル開発用に localhost を許可
+      origin: (origin) => {
+        const allowed = ["http://localhost:5173", "http://localhost:4173", "http://localhost:8788"];
+        return allowed.includes(origin) || !origin ? origin : null;
+      },
     }),
   )
 
@@ -62,15 +81,17 @@ const app = new Hono<{ Bindings: Bindings }>()
       headers: {
         Authorization: `Bearer ${c.env.OPENROUTER_API_KEY}`,
         "Content-Type": "application/json",
-        "HTTP-Referer": "https://ai-chat.app",
+        "HTTP-Referer": c.env.APP_ORIGIN ?? "https://ai-chat.app",
       },
       body: JSON.stringify({
         model,
         messages,
         stream: true,
-        temperature: 0.9,
-        top_p: 0.95,
-        repetition_penalty: 1.05,
+        temperature: 0.75,
+        top_p: 0.9,
+        frequency_penalty: 0.4,
+        presence_penalty: 0.3,
+        max_tokens: 1024,
         provider: {
           allow_fallbacks: false,
         },
@@ -118,8 +139,11 @@ const app = new Hono<{ Bindings: Bindings }>()
       return c.json({ error, upstreamStatus: response.status }, 502);
     }
 
-    const data = await response.json();
-    return c.json(data);
+    const parsed = novitaInitResponseSchema.safeParse(await response.json());
+    if (!parsed.success) {
+      return c.json({ error: "unexpected upstream response shape" }, 502);
+    }
+    return c.json(parsed.data);
   })
 
   .get("/image/task/:taskId", async (c) => {
@@ -143,8 +167,11 @@ const app = new Hono<{ Bindings: Bindings }>()
       return c.json({ error, upstreamStatus: response.status }, 502);
     }
 
-    const data = await response.json();
-    return c.json(data);
+    const parsed = novitaTaskResponseSchema.safeParse(await response.json());
+    if (!parsed.success) {
+      return c.json({ error: "unexpected upstream response shape" }, 502);
+    }
+    return c.json(parsed.data);
   });
 
 export const onRequest = handle(app);

@@ -1,3 +1,15 @@
+import { z } from "zod/v4";
+
+const REPETITION_CHECK_WINDOW = 300;
+// 3〜30文字のフレーズが5回以上連続したら繰り返しと判定
+const REPETITION_PATTERN = /(.{3,30})\1{4,}/;
+
+function detectRepetition(text: string): boolean {
+  if (text.length < 30) return false;
+  const tail = text.slice(-REPETITION_CHECK_WINDOW);
+  return REPETITION_PATTERN.test(tail);
+}
+
 function parseSseChunk(data: string): string | "[DONE]" | null {
   if (data === "[DONE]") return "[DONE]";
   try {
@@ -17,6 +29,7 @@ async function processStream(
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let accumulated = "";
 
   while (true) {
     const { done, value } = await reader.read();
@@ -33,7 +46,16 @@ async function processStream(
         onDone();
         return;
       }
-      if (result) onChunk(result);
+      if (!result) continue;
+
+      accumulated += result;
+      onChunk(result);
+
+      if (detectRepetition(accumulated)) {
+        await reader.cancel();
+        onDone();
+        return;
+      }
     }
   }
   onDone();
@@ -64,6 +86,11 @@ export async function streamChat(
   }
 }
 
+const generateImageResponseSchema = z.union([
+  z.object({ task_id: z.string() }),
+  z.object({ error: z.string() }),
+]);
+
 export async function generateImage(
   prompt: string,
 ): Promise<{ task_id: string } | { error: string }> {
@@ -81,32 +108,33 @@ export async function generateImage(
     if (!response.ok) {
       return { error: await response.text() };
     }
-    return response.json();
+    return generateImageResponseSchema.parse(await response.json());
   } catch (err) {
     return { error: String(err) };
   }
 }
 
-type NovitaTaskStatus =
-  | "TASK_STATUS_QUEUED"
-  | "TASK_STATUS_PROCESSING"
-  | "TASK_STATUS_SUCCEED"
-  | "TASK_STATUS_FAILED"
-  | "TASK_STATUS_CANCELED";
+const novitaTaskResultSchema = z.object({
+  task: z.object({
+    task_id: z.string(),
+    status: z.enum([
+      "TASK_STATUS_QUEUED",
+      "TASK_STATUS_PROCESSING",
+      "TASK_STATUS_SUCCEED",
+      "TASK_STATUS_FAILED",
+      "TASK_STATUS_CANCELED",
+    ]),
+    progress_percent: z.number(),
+  }),
+  images: z.array(z.object({ image_url: z.string(), image_url_ttl: z.number() })).optional(),
+});
 
-interface NovitaTaskResult {
-  task: {
-    task_id: string;
-    status: NovitaTaskStatus;
-    progress_percent: number;
-  };
-  images?: { image_url: string; image_url_ttl: number }[];
-}
+type NovitaTaskResult = z.infer<typeof novitaTaskResultSchema>;
 
 export async function getImageTaskResult(taskId: string): Promise<NovitaTaskResult> {
   const response = await fetch(`/api/image/task/${encodeURIComponent(taskId)}`);
   if (!response.ok) {
     throw new Error(`task result fetch failed: ${response.status}`);
   }
-  return response.json();
+  return novitaTaskResultSchema.parse(await response.json());
 }
