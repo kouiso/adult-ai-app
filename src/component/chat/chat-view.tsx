@@ -142,19 +142,22 @@ export const ChatView = () => {
     scrollToBottom();
   }, [messages, scrollToBottom]);
 
-  const loadMessages = useCallback(async (conversationId: string) => {
-    const rows = await queryClient.fetchQuery({
-      queryKey: conversationMessageQueryKey(conversationId),
-      queryFn: () => listConversationMessages(conversationId),
-    });
-    const nextMessages: ChatMessage[] = rows.map((row) => ({
-      id: row.id,
-      role: row.role,
-      content: row.content,
-      imageUrl: row.imageUrl,
-    }));
-    setMessages(nextMessages);
-  }, [queryClient, setMessages]);
+  const loadMessages = useCallback(
+    async (conversationId: string) => {
+      const rows = await queryClient.fetchQuery({
+        queryKey: conversationMessageQueryKey(conversationId),
+        queryFn: () => listConversationMessages(conversationId),
+      });
+      const nextMessages: ChatMessage[] = rows.map((row) => ({
+        id: row.id,
+        role: row.role,
+        content: row.content,
+        imageUrl: row.imageUrl,
+      }));
+      setMessages(nextMessages);
+    },
+    [queryClient, setMessages],
+  );
 
   const ensureConversation = useCallback(async (): Promise<string> => {
     const currentId = useChatStore.getState().currentConversationId;
@@ -200,7 +203,14 @@ export const ChatView = () => {
     return () => {
       alive = false;
     };
-  }, [conversations, createConversationMutation, currentConversationId, loadMessages, setConversationId, setMessages]);
+  }, [
+    conversations,
+    createConversationMutation,
+    currentConversationId,
+    loadMessages,
+    setConversationId,
+    setMessages,
+  ]);
 
   const handleSelectConversation = useCallback(
     async (conversationId: string) => {

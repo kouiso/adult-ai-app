@@ -22,6 +22,8 @@
     "@hono/zod-validator": "^0.7.6",
     "@supabase/supabase-js": "^2.100.0",
     "@tailwindcss/vite": "^4.2.2",
+    "@tanstack/react-query": "^5.95.1",
+    "@tanstack/react-query-persist-client": "^5.95.1",
     "ai": "^6.0.134",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
