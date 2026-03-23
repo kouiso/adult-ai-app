@@ -1,3 +1,4 @@
+import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 
 import { Volume2, VolumeOff } from "lucide-react";
@@ -78,28 +79,55 @@ const SpeakButton = ({ isSpeaking, content, onSpeak, onStopSpeaking }: SpeakButt
   </button>
 );
 
+const isValidImageUrl = (url: string): boolean => {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+};
+
 interface ImagePreviewProps {
   imageUrl: string;
   nsfwBlur: boolean;
 }
 
-const ImagePreview = ({ imageUrl, nsfwBlur }: ImagePreviewProps) => (
-  <div className={cn("relative overflow-hidden rounded-xl", nsfwBlur && "group cursor-pointer")}>
-    <img
-      src={imageUrl}
-      alt="Generated"
-      className={cn(
-        "max-w-full rounded-xl transition-all duration-300",
-        nsfwBlur && "blur-xl group-hover:blur-none",
-      )}
-    />
-    {nsfwBlur && (
-      <div className="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:opacity-0 transition-opacity">
-        <span className="text-white text-xs">クリックで表示</span>
+const ImagePreview = ({ imageUrl, nsfwBlur }: ImagePreviewProps) => {
+  const [revealed, setRevealed] = useState(false);
+
+  if (!isValidImageUrl(imageUrl)) {
+    return null;
+  }
+
+  if (!nsfwBlur || revealed) {
+    return (
+      <div className="relative overflow-hidden rounded-xl">
+        <img src={imageUrl} alt="Generated" className="max-w-full rounded-xl" />
       </div>
-    )}
-  </div>
-);
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      className="relative cursor-pointer overflow-hidden rounded-xl"
+      onClick={() => setRevealed(true)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") setRevealed(true);
+      }}
+    >
+      <img
+        src={imageUrl}
+        alt="Generated"
+        className="max-w-full rounded-xl blur-xl transition-all duration-300"
+      />
+      <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+        <span className="text-white text-xs">タップで表示</span>
+      </div>
+    </button>
+  );
+};
 
 interface MessageAvatarProps {
   isUser: boolean;
