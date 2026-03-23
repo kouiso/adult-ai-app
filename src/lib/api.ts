@@ -138,3 +138,109 @@ export async function getImageTaskResult(taskId: string): Promise<NovitaTaskResu
   }
   return novitaTaskResultSchema.parse(await response.json());
 }
+
+const conversationSummarySchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+});
+
+const listConversationsSchema = z.object({
+  conversations: z.array(conversationSummarySchema),
+});
+
+const createConversationSchema = z.object({
+  conversation: conversationSummarySchema,
+});
+
+const persistedMessageSchema = z.object({
+  id: z.string(),
+  role: z.enum(["system", "user", "assistant"]),
+  content: z.string(),
+  imageUrl: z.string().optional(),
+  imageKey: z.string().optional(),
+  createdAt: z.number(),
+});
+
+const listMessagesSchema = z.object({
+  messages: z.array(persistedMessageSchema),
+});
+
+export type ConversationSummary = z.infer<typeof conversationSummarySchema>;
+export type PersistedMessage = z.infer<typeof persistedMessageSchema>;
+
+export async function listConversations(): Promise<ConversationSummary[]> {
+  const response = await fetch("/api/conversations");
+  if (!response.ok) {
+    throw new Error(`list conversations failed: ${response.status}`);
+  }
+  return listConversationsSchema.parse(await response.json()).conversations;
+}
+
+export async function createConversation(title?: string): Promise<ConversationSummary> {
+  const response = await fetch("/api/conversations", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title }),
+  });
+  if (!response.ok) {
+    throw new Error(`create conversation failed: ${response.status}`);
+  }
+  return createConversationSchema.parse(await response.json()).conversation;
+}
+
+export async function listConversationMessages(
+  conversationId: string,
+): Promise<PersistedMessage[]> {
+  const response = await fetch(`/api/conversations/${encodeURIComponent(conversationId)}/messages`);
+  if (!response.ok) {
+    throw new Error(`list messages failed: ${response.status}`);
+  }
+  return listMessagesSchema.parse(await response.json()).messages;
+}
+
+export async function createConversationMessage(input: {
+  conversationId: string;
+  id: string;
+  role: "system" | "user" | "assistant";
+  content: string;
+  imageUrl?: string;
+  imageKey?: string;
+}): Promise<void> {
+  const response = await fetch(
+    `/api/conversations/${encodeURIComponent(input.conversationId)}/messages`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: input.id,
+        role: input.role,
+        content: input.content,
+        imageUrl: input.imageUrl,
+        imageKey: input.imageKey,
+      }),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(`create message failed: ${response.status}`);
+  }
+}
+
+export async function updateMessageImage(input: {
+  messageId: string;
+  imageUrl?: string;
+  imageKey?: string;
+}): Promise<void> {
+  const response = await fetch(`/api/messages/${encodeURIComponent(input.messageId)}/image`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      imageUrl: input.imageUrl,
+      imageKey: input.imageKey,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`update message image failed: ${response.status}`);
+  }
+}

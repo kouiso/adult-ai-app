@@ -1,26 +1,20 @@
 import { zValidator } from "@hono/zod-validator";
+import { and, asc, desc, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { handle } from "hono/cloudflare-pages";
 import { cors } from "hono/cors";
 import { z } from "zod/v4";
 
+import { ALLOWED_MODELS } from "../../src/lib/model";
+import { characterTable, conversationTable, messageTable, userTable } from "../../src/schema";
+
 type Bindings = {
+  DB: Parameters<typeof drizzle>[0];
   OPENROUTER_API_KEY: string;
   NOVITA_API_KEY: string;
   APP_ORIGIN?: string;
 };
-
-const ALLOWED_MODELS = [
-  "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
-  "nousresearch/hermes-3-llama-3.1-405b:free",
-  "mistralai/mistral-nemo",
-  "thedrummer/unslopnemo-12b",
-  "gryphe/mythomax-l2-13b",
-  "nousresearch/hermes-3-llama-3.1-70b",
-  "nousresearch/hermes-4-70b",
-  "sao10k/l3.1-euryale-70b",
-  "sao10k/l3-euryale-70b",
-] as const;
 
 const TASK_ID_PATTERN = /^[\w-]{4,128}$/;
 
@@ -60,18 +54,262 @@ const novitaTaskResponseSchema = z.object({
   images: z.array(z.object({ image_url: z.string(), image_url_ttl: z.number() })).optional(),
 });
 
+const conversationCreateSchema = z.object({
+  title: z.string().min(1).max(200).optional(),
+});
+
+const messageCreateSchema = z.object({
+  id: z.string().min(1).max(128),
+  role: z.enum(["system", "user", "assistant"]),
+  content: z.string().max(20_000),
+  imageUrl: z.string().url().optional(),
+  imageKey: z.string().max(500).optional(),
+});
+
+const messageUpdateImageSchema = z.object({
+  imageUrl: z.string().url().optional(),
+  imageKey: z.string().max(500).optional(),
+});
+
+const idSchema = z.string().min(1).max(128);
+
+const getUserEmail = (c: { req: { header: (key: string) => string | undefined } }) => {
+  const accessEmail = c.req.header("CF-Access-Authenticated-User-Email");
+  if (accessEmail) return accessEmail;
+
+  const host = c.req.header("host") ?? "";
+  if (host.includes("localhost") || host.includes("127.0.0.1")) {
+    return "local-dev@adult-ai-app.local";
+  }
+  return null;
+};
+
+const ensureUser = async (
+  database: ReturnType<typeof drizzle>,
+  userEmail: string,
+): Promise<string> => {
+  await database
+    .insert(userTable)
+    .values({
+      id: userEmail,
+      email: userEmail,
+      createdAt: Date.now(),
+    })
+    .onConflictDoNothing();
+  return userEmail;
+};
+
 const app = new Hono<{ Bindings: Bindings }>()
   .basePath("/api")
   .use(
     "*",
     cors({
-      // Cloudflare Pages は同一オリジンなので不要だが、ローカル開発用に localhost を許可
-      origin: (origin) => {
-        const allowed = ["http://localhost:5173", "http://localhost:4173", "http://localhost:8788"];
+      origin: (origin, c) => {
+        const appOrigin = c.env.APP_ORIGIN;
+        const allowed = [
+          "http://localhost:5173",
+          "http://localhost:4173",
+          "http://localhost:8788",
+          ...(appOrigin ? [appOrigin] : []),
+        ];
         return allowed.includes(origin) || !origin ? origin : null;
       },
     }),
   )
+
+  .get("/conversations", async (c) => {
+    const userEmail = getUserEmail(c);
+    if (!userEmail) {
+      return c.json({ error: "unauthorized" }, 401);
+    }
+
+    const database = drizzle(c.env.DB);
+    const userId = await ensureUser(database, userEmail);
+    const conversations = await database
+      .select({
+        id: conversationTable.id,
+        title: conversationTable.title,
+        updatedAt: conversationTable.updatedAt,
+        createdAt: conversationTable.createdAt,
+      })
+      .from(conversationTable)
+      .where(eq(conversationTable.userId, userId))
+      .orderBy(desc(conversationTable.updatedAt));
+
+    return c.json({ conversations });
+  })
+
+  .post("/conversations", zValidator("json", conversationCreateSchema), async (c) => {
+    const userEmail = getUserEmail(c);
+    if (!userEmail) {
+      return c.json({ error: "unauthorized" }, 401);
+    }
+
+    const { title } = c.req.valid("json");
+    const database = drizzle(c.env.DB);
+    const userId = await ensureUser(database, userEmail);
+    const now = Date.now();
+    const conversationId = crypto.randomUUID();
+    const fallbackCharacterId = "default-character";
+
+    await database
+      .insert(characterTable)
+      .values({
+        id: fallbackCharacterId,
+        userId,
+        name: "AI",
+        avatar: undefined,
+        systemPrompt: "",
+        greeting: "",
+        tags: [],
+        createdAt: now,
+      })
+      .onConflictDoNothing();
+
+    await database
+      .insert(conversationTable)
+      .values({
+        id: conversationId,
+        userId,
+        characterId: fallbackCharacterId,
+        title: title ?? "新しい会話",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoNothing();
+
+    return c.json(
+      {
+        conversation: {
+          id: conversationId,
+          title: title ?? "新しい会話",
+          createdAt: now,
+          updatedAt: now,
+        },
+      },
+      201,
+    );
+  })
+
+  .get("/conversations/:conversationId/messages", async (c) => {
+    const userEmail = getUserEmail(c);
+    if (!userEmail) {
+      return c.json({ error: "unauthorized" }, 401);
+    }
+
+    const conversationId = c.req.param("conversationId");
+    if (!idSchema.safeParse(conversationId).success) {
+      return c.json({ error: "invalid conversation id" }, 400);
+    }
+
+    const database = drizzle(c.env.DB);
+    const userId = await ensureUser(database, userEmail);
+
+    const ownConversation = await database
+      .select({ id: conversationTable.id })
+      .from(conversationTable)
+      .where(and(eq(conversationTable.id, conversationId), eq(conversationTable.userId, userId)))
+      .limit(1);
+
+    if (ownConversation.length === 0) {
+      return c.json({ error: "conversation not found" }, 404);
+    }
+
+    const messages = await database
+      .select({
+        id: messageTable.id,
+        role: messageTable.role,
+        content: messageTable.content,
+        imageUrl: messageTable.imageUrl,
+        imageKey: messageTable.imageKey,
+        createdAt: messageTable.createdAt,
+      })
+      .from(messageTable)
+      .where(and(eq(messageTable.conversationId, conversationId), eq(messageTable.userId, userId)))
+      .orderBy(asc(messageTable.createdAt));
+
+    return c.json({ messages });
+  })
+
+  .post(
+    "/conversations/:conversationId/messages",
+    zValidator("json", messageCreateSchema),
+    async (c) => {
+      const userEmail = getUserEmail(c);
+      if (!userEmail) {
+        return c.json({ error: "unauthorized" }, 401);
+      }
+
+      const conversationId = c.req.param("conversationId");
+      if (!idSchema.safeParse(conversationId).success) {
+        return c.json({ error: "invalid conversation id" }, 400);
+      }
+
+      const database = drizzle(c.env.DB);
+      const userId = await ensureUser(database, userEmail);
+      const payload = c.req.valid("json");
+
+      const conversation = await database
+        .select({ id: conversationTable.id, characterId: conversationTable.characterId })
+        .from(conversationTable)
+        .where(and(eq(conversationTable.id, conversationId), eq(conversationTable.userId, userId)))
+        .limit(1);
+
+      const currentConversation = conversation[0];
+      if (!currentConversation) {
+        return c.json({ error: "conversation not found" }, 404);
+      }
+
+      await database.insert(messageTable).values({
+        id: payload.id,
+        userId,
+        conversationId,
+        characterId: currentConversation.characterId,
+        role: payload.role,
+        content: payload.content,
+        imageUrl: payload.imageUrl,
+        imageKey: payload.imageKey,
+        createdAt: Date.now(),
+      });
+
+      await database
+        .update(conversationTable)
+        .set({ updatedAt: Date.now() })
+        .where(and(eq(conversationTable.id, conversationId), eq(conversationTable.userId, userId)));
+
+      return c.json({ ok: true }, 201);
+    },
+  )
+
+  .patch("/messages/:messageId/image", zValidator("json", messageUpdateImageSchema), async (c) => {
+    const userEmail = getUserEmail(c);
+    if (!userEmail) {
+      return c.json({ error: "unauthorized" }, 401);
+    }
+
+    const messageId = c.req.param("messageId");
+    if (!idSchema.safeParse(messageId).success) {
+      return c.json({ error: "invalid message id" }, 400);
+    }
+
+    const payload = c.req.valid("json");
+    if (!payload.imageUrl && !payload.imageKey) {
+      return c.json({ error: "imageUrl or imageKey is required" }, 400);
+    }
+
+    const database = drizzle(c.env.DB);
+    const userId = await ensureUser(database, userEmail);
+
+    await database
+      .update(messageTable)
+      .set({
+        imageUrl: payload.imageUrl,
+        imageKey: payload.imageKey,
+      })
+      .where(and(eq(messageTable.id, messageId), eq(messageTable.userId, userId)));
+
+    return c.json({ ok: true });
+  })
 
   .post("/chat", zValidator("json", chatSchema), async (c) => {
     const { messages, model } = c.req.valid("json");
@@ -99,8 +337,9 @@ const app = new Hono<{ Bindings: Bindings }>()
     });
 
     if (!response.ok || !response.body) {
-      const error = await response.text();
-      return c.json({ error, upstreamStatus: response.status }, 502);
+      // アップストリームのエラー詳細をクライアントに漏らさない（APIキーや内部情報が含まれうる）
+      console.error("OpenRouter upstream error:", response.status, await response.text());
+      return c.json({ error: "upstream service error" }, 502);
     }
 
     return new Response(response.body, {
@@ -135,8 +374,8 @@ const app = new Hono<{ Bindings: Bindings }>()
     });
 
     if (!response.ok) {
-      const error = await response.text();
-      return c.json({ error, upstreamStatus: response.status }, 502);
+      console.error("Novita init upstream error:", response.status, await response.text());
+      return c.json({ error: "upstream service error" }, 502);
     }
 
     const parsed = novitaInitResponseSchema.safeParse(await response.json());
@@ -163,8 +402,8 @@ const app = new Hono<{ Bindings: Bindings }>()
     );
 
     if (!response.ok) {
-      const error = await response.text();
-      return c.json({ error, upstreamStatus: response.status }, 502);
+      console.error("Novita task upstream error:", response.status, await response.text());
+      return c.json({ error: "upstream service error" }, 502);
     }
 
     const parsed = novitaTaskResponseSchema.safeParse(await response.json());
