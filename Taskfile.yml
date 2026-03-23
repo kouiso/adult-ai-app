@@ -1,6 +1,6 @@
 # https://taskfile.dev
 
-version: '3'
+version: "3"
 
 vars:
   D1_DB_NAME: adult-ai-db
@@ -13,21 +13,26 @@ tasks:
 
   # ===== セットアップ =====
 
-  setup:
-    desc: '開発環境の完全セットアップ（冪等・何度実行しても安全）'
+  init:
+    desc: "初期セットアップ（何度実行しても安全）"
     cmds:
-      - task: check-tools
-      - task: install
-      - task: setup:cf
-      - task: db:migrate:local
-      - task: build
+      - task: _check-tools
+      - task: _install
+      - task: _setup-cf
+      - task: _db-migrate-local
+      - task: _build
       - 'echo ""'
       - 'echo "=========================================="'
-      - 'echo "  ✅ Setup complete"'
+      - 'echo "  ✅ Init complete"'
       - 'echo "=========================================="'
 
-  check-tools:
-    desc: '必須ツールの存在確認'
+  setup:
+    internal: true
+    cmds:
+      - task: init
+
+  _check-tools:
+    internal: true
     silent: true
     cmds:
       - |
@@ -42,8 +47,8 @@ tasks:
         fi
         echo "✓ Required tools available"
 
-  install:
-    desc: 'pnpm install'
+  _install:
+    internal: true
     cmds:
       - pnpm install
     sources:
@@ -52,16 +57,16 @@ tasks:
     generates:
       - node_modules/.pnpm/lock.yaml
 
-  setup:cf:
-    desc: 'Cloudflareリソース作成（D1 + R2）— wrangler認証必須'
+  _setup-cf:
+    internal: true
     cmds:
-      - task: check-wrangler-auth
-      - task: setup:d1
-      - task: setup:r2
-      - task: setup:wrangler-toml
+      - task: _check-wrangler-auth
+      - task: _setup-d1
+      - task: _setup-r2
+      - task: _setup-wrangler-toml
 
-  check-wrangler-auth:
-    desc: 'wrangler認証チェック'
+  _check-wrangler-auth:
+    internal: true
     silent: true
     cmds:
       - |
@@ -71,8 +76,8 @@ tasks:
         fi
         echo "✓ wrangler authenticated"
 
-  setup:d1:
-    desc: 'D1データベース作成（既存なら何もしない）'
+  _setup-d1:
+    internal: true
     cmds:
       - |
         if npx wrangler d1 list 2>&1 | grep -q "{{.D1_DB_NAME}}"; then
@@ -82,19 +87,34 @@ tasks:
           npx wrangler d1 create "{{.D1_DB_NAME}}"
         fi
 
-  setup:r2:
-    desc: 'R2バケット作成（既存なら何もしない）'
+  _setup-r2:
+    internal: true
     cmds:
       - |
-        if npx wrangler r2 bucket list 2>&1 | grep -q "{{.R2_BUCKET_NAME}}"; then
+        set +e
+        bucket_list_output="$(npx wrangler r2 bucket list 2>&1)"
+        bucket_list_status=$?
+        set -e
+
+        if [ "$bucket_list_status" -ne 0 ] && echo "$bucket_list_output" | grep -q "code: 10042"; then
+          echo "⚠️  R2が未有効です。Cloudflare DashboardでR2を有効化後に再実行してください"
+          exit 0
+        fi
+
+        if [ "$bucket_list_status" -ne 0 ]; then
+          echo "$bucket_list_output"
+          exit "$bucket_list_status"
+        fi
+
+        if echo "$bucket_list_output" | grep -q "{{.R2_BUCKET_NAME}}"; then
           echo "✓ R2 bucket '{{.R2_BUCKET_NAME}}' already exists"
         else
           echo "Creating R2 bucket '{{.R2_BUCKET_NAME}}'..."
           npx wrangler r2 bucket create "{{.R2_BUCKET_NAME}}"
         fi
 
-  setup:wrangler-toml:
-    desc: 'wrangler.tomlにD1/R2バインディングがあるか確認'
+  _setup-wrangler-toml:
+    internal: true
     silent: true
     cmds:
       - |
@@ -113,55 +133,64 @@ tasks:
   # ===== DB =====
 
   db:generate:
-    desc: 'Drizzleスキーマからマイグレーション生成'
+    desc: "マイグレーション生成"
     cmds:
       - pnpm db:generate
 
-  db:migrate:local:
-    desc: 'ローカルD1にマイグレーション適用'
+  _db-migrate-local:
+    internal: true
     cmds:
       - npx wrangler d1 migrations apply {{.D1_DB_NAME}} --local
 
-  db:migrate:remote:
-    desc: 'リモートD1にマイグレーション適用'
+  db:migrate:
+    desc: "本番D1にマイグレーション適用"
     cmds:
-      - task: check-wrangler-auth
+      - task: _check-wrangler-auth
       - npx wrangler d1 migrations apply {{.D1_DB_NAME}} --remote
 
   # ===== 開発 =====
 
+  up:
+    desc: "開発起動（Vite + Worker）"
+    cmds:
+      - |
+        trap 'kill 0' EXIT INT TERM
+        pnpm dev:worker &
+        pnpm dev &
+        wait
+
   dev:
-    desc: 'Vite開発サーバー起動'
+    internal: true
     cmds:
       - pnpm dev
 
-  dev:worker:
-    desc: 'Cloudflare Pages Functions + D1/R2ローカル起動'
+  worker:
+    internal: true
     cmds:
       - pnpm dev:worker
 
   # ===== 品質 =====
 
-  build:
-    desc: 'tsc + vite build'
+  _build:
+    internal: true
     cmds:
       - pnpm build
 
-  lint:
-    desc: 'ESLint実行'
+  _lint:
+    internal: true
     cmds:
       - pnpm lint
 
-  lint:fix:
-    desc: 'ESLint --fix'
+  fix:
+    desc: "lint自動修正"
     cmds:
       - pnpm lint --fix
 
   ci:
-    desc: 'ローカルCI（lint → build）'
+    desc: "CIチェック（lint + build）"
     cmds:
-      - task: lint
-      - task: build
+      - task: _lint
+      - task: _build
       - 'echo ""'
       - 'echo "=========================================="'
       - 'echo "  ✅ CI: All steps passed"'
@@ -170,9 +199,9 @@ tasks:
   # ===== デプロイ =====
 
   deploy:
-    desc: 'Cloudflare Pagesへデプロイ'
+    desc: "デプロイ"
     cmds:
-      - task: check-wrangler-auth
+      - task: _check-wrangler-auth
       - task: ci
-      - task: db:migrate:remote
+      - task: db:migrate
       - pnpm deploy
