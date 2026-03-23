@@ -7,8 +7,9 @@ import {
   OctagonXIcon,
   TriangleAlertIcon,
 } from "lucide-react";
-import { useTheme } from "next-themes";
 import { Toaster as Sonner, type ToasterProps } from "sonner";
+
+import { useSettingsStore } from "@/store/settings-store";
 
 // ReactのCSSPropertiesにCSSカスタムプロパティ（--で始まる変数）のサポートを追加
 declare module "react" {
@@ -17,17 +18,13 @@ declare module "react" {
   }
 }
 
-type ThemeValue = NonNullable<ToasterProps["theme"]>;
-
-const toTheme = (t: string): ThemeValue =>
-  t === "light" || t === "dark" || t === "system" ? t : "system";
-
 const Toaster = ({ ...props }: ToasterProps) => {
-  const { theme = "system" } = useTheme();
+  const darkMode = useSettingsStore((s) => s.darkMode);
+  const theme = darkMode ? "dark" : "light";
 
   return (
     <Sonner
-      theme={toTheme(theme)}
+      theme={theme}
       className="toaster group"
       icons={{
         success: <CircleCheckIcon className="size-4" />,
