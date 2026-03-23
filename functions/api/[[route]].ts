@@ -9,29 +9,50 @@ type Bindings = {
   NOVITA_API_KEY: string;
 };
 
+const ALLOWED_MODELS = [
+  "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
+  "nousresearch/hermes-3-llama-3.1-405b:free",
+  "mistralai/mistral-nemo",
+  "thedrummer/unslopnemo-12b",
+  "gryphe/mythomax-l2-13b",
+  "nousresearch/hermes-3-llama-3.1-70b",
+  "nousresearch/hermes-4-70b",
+  "sao10k/l3.1-euryale-70b",
+  "sao10k/l3-euryale-70b",
+] as const;
+
+const TASK_ID_PATTERN = /^[\w-]{4,128}$/;
+
 const chatSchema = z.object({
-  messages: z.array(
-    z.object({
-      role: z.enum(["system", "user", "assistant"]),
-      content: z.string(),
-    }),
-  ),
+  messages: z
+    .array(
+      z.object({
+        role: z.enum(["system", "user", "assistant"]),
+        content: z.string().max(10_000),
+      }),
+    )
+    .max(100),
   model: z
-    .string()
+    .enum(ALLOWED_MODELS)
     .optional()
     .default("cognitivecomputations/dolphin-mistral-24b-venice-edition:free"),
 });
 
 const imageSchema = z.object({
-  prompt: z.string(),
-  negative_prompt: z.string().optional().default("ugly, deformed, blurry, low quality"),
-  width: z.number().optional().default(512),
-  height: z.number().optional().default(768),
+  prompt: z.string().min(1).max(1_000),
+  negative_prompt: z.string().max(500).optional().default("ugly, deformed, blurry, low quality"),
+  width: z.number().int().min(64).max(2_048).optional().default(512),
+  height: z.number().int().min(64).max(2_048).optional().default(768),
 });
 
 const app = new Hono<{ Bindings: Bindings }>()
   .basePath("/api")
-  .use("*", cors())
+  .use(
+    "*",
+    cors({
+      origin: ["http://localhost:5173", "http://localhost:4173", "http://localhost:8788"],
+    }),
+  )
 
   .post("/chat", zValidator("json", chatSchema), async (c) => {
     const { messages, model } = c.req.valid("json");
@@ -103,6 +124,10 @@ const app = new Hono<{ Bindings: Bindings }>()
 
   .get("/image/task/:taskId", async (c) => {
     const taskId = c.req.param("taskId");
+
+    if (!TASK_ID_PATTERN.test(taskId)) {
+      return c.json({ error: "invalid task_id format" }, 400);
+    }
 
     const response = await fetch(
       `https://api.novita.ai/v3/async/task-result?task_id=${encodeURIComponent(taskId)}`,

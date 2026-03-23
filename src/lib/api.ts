@@ -67,17 +67,24 @@ export async function streamChat(
 export async function generateImage(
   prompt: string,
 ): Promise<{ task_id: string } | { error: string }> {
-  const response = await fetch("/api/image", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      prompt,
-      negative_prompt: "ugly, deformed, blurry, low quality, text, watermark",
-      width: 512,
-      height: 768,
-    }),
-  });
-  return response.json();
+  try {
+    const response = await fetch("/api/image", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt,
+        negative_prompt: "ugly, deformed, blurry, low quality, text, watermark",
+        width: 512,
+        height: 768,
+      }),
+    });
+    if (!response.ok) {
+      return { error: await response.text() };
+    }
+    return response.json();
+  } catch (err) {
+    return { error: String(err) };
+  }
 }
 
 type NovitaTaskStatus =

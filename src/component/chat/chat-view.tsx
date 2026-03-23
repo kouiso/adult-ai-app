@@ -36,9 +36,13 @@ export const ChatView = () => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
 
-  const { speak, stop, isSpeaking } = useSpeechSynthesis(ttsVoiceUri, ttsRate, ttsPitch, () => {
-    setSpeakingMessageId(null);
-  });
+  const handleSpeakEnd = useCallback(() => setSpeakingMessageId(null), []);
+  const { speak, stop, isSpeaking } = useSpeechSynthesis(
+    ttsVoiceUri,
+    ttsRate,
+    ttsPitch,
+    handleSpeakEnd,
+  );
 
   const scrollToBottom = useCallback(() => {
     requestAnimationFrame(() => {
@@ -73,16 +77,16 @@ export const ChatView = () => {
       setLoading(true);
 
       const currentMessages = useChatStore.getState().messages;
+      const filtered = currentMessages.filter((m) => m.role !== "system" && m.id !== assistantId);
       const LANG_REMINDER = "\n\n(必ず日本語のみで返答すること。他の言語を一切使わないこと)";
       const apiMessages = [
         { role: "system" as const, content: DEFAULT_SYSTEM_PROMPT },
-        ...currentMessages
-          .filter((m) => m.role !== "system" && m.id !== assistantId)
-          .map((m) =>
-            m.role === "user"
-              ? { role: m.role, content: m.content + LANG_REMINDER }
-              : { role: m.role, content: m.content },
-          ),
+        ...filtered.map((m, i) => {
+          // 最後の user メッセージにのみリマインダーを付与する（全履歴に付けるとコンテキストが汚染される）
+          const isLastUser =
+            m.role === "user" && filtered.slice(i + 1).every((later) => later.role !== "user");
+          return { role: m.role, content: isLastUser ? m.content + LANG_REMINDER : m.content };
+        }),
       ];
 
       let accumulated = "";
@@ -130,24 +134,22 @@ export const ChatView = () => {
     });
     scrollToBottom();
 
-    const result = await generateImage(prompt);
-    if ("error" in result) {
-      updateMessage(imageMessageId, `❌ 画像生成エラー: ${result.error}`, false);
-      setLoading(false);
-      return;
-    }
+    try {
+      const result = await generateImage(prompt);
+      if ("error" in result) {
+        updateMessage(imageMessageId, `❌ 画像生成エラー: ${result.error}`, false);
+        return;
+      }
 
-    const { task_id } = result;
-    const MAX_POLLS = 60;
-    for (let i = 0; i < MAX_POLLS; i++) {
-      await new Promise<void>((r) => setTimeout(r, 1000));
-      try {
+      const { task_id } = result;
+      const MAX_POLLS = 60;
+      for (let i = 0; i < MAX_POLLS; i++) {
+        await new Promise<void>((r) => setTimeout(r, 1000));
         const poll = await getImageTaskResult(task_id);
         if (poll.task.status === "TASK_STATUS_SUCCEED" && poll.images?.[0]) {
           updateMessage(imageMessageId, "", false);
           updateMessageImage(imageMessageId, poll.images[0].image_url);
           scrollToBottom();
-          setLoading(false);
           return;
         }
         if (
@@ -155,18 +157,15 @@ export const ChatView = () => {
           poll.task.status === "TASK_STATUS_CANCELED"
         ) {
           updateMessage(imageMessageId, "❌ 画像生成に失敗しました", false);
-          setLoading(false);
           return;
         }
-      } catch {
-        updateMessage(imageMessageId, "❌ 画像生成中にネットワークエラーが発生しました", false);
-        setLoading(false);
-        return;
       }
+      updateMessage(imageMessageId, "⏱️ タイムアウト：画像生成が完了しませんでした", false);
+    } catch (err) {
+      updateMessage(imageMessageId, `❌ ネットワークエラー: ${String(err)}`, false);
+    } finally {
+      setLoading(false);
     }
-
-    updateMessage(imageMessageId, "⏱️ タイムアウト：画像生成が完了しませんでした", false);
-    setLoading(false);
   }, [scrollToBottom]);
 
   return (

@@ -3,7 +3,8 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 const DEFAULT_MODEL = "cognitivecomputations/dolphin-mistral-24b-venice-edition:free" as const;
-const LEGACY_DEFAULT_MODEL = "mistralai/mistral-nemo" as const;
+const LEGACY_MODEL_NEMO = "mistralai/mistral-nemo" as const;
+const LEGACY_MODEL_HERMES = "nousresearch/hermes-3-llama-3.1-405b:free" as const;
 
 const persistedSettingsSchema = z.object({
   model: z.string().default(DEFAULT_MODEL),
@@ -59,7 +60,7 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: "ai-chat-settings",
-      version: 3,
+      version: 5,
       migrate: (persistedState: unknown, version: number): PersistedSettings => {
         const result = persistedSettingsSchema.safeParse(persistedState);
         const parsed = result.success
@@ -74,7 +75,10 @@ export const useSettingsStore = create<SettingsState>()(
               ttsRate: 1,
               ttsPitch: 1,
             } satisfies PersistedSettings);
-        if (version < 2 && parsed.model === LEGACY_DEFAULT_MODEL) {
+        if (
+          (version < 2 && parsed.model === LEGACY_MODEL_NEMO) ||
+          (version < 5 && parsed.model === LEGACY_MODEL_HERMES)
+        ) {
           return { ...parsed, model: DEFAULT_MODEL };
         }
         return parsed;

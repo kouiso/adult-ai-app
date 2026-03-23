@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-type VoiceType = "female" | "male" | "other";
+type VoiceType = "female-high" | "female-calm" | "male" | "synthetic" | "multilingual" | "other";
 
 interface CategorizedVoice {
   voice: SpeechSynthesisVoice;
@@ -28,44 +28,56 @@ const warmUpSpeechSynthesis = () => {
   speechSynthesis.cancel();
 };
 
-const FEMALE_PATTERNS = [
-  /kyoko/i,
-  /o-ren/i,
-  /nanami/i,
-  /haruka/i,
-  /sayaka/i,
-  /ayumi/i,
-  /female/i,
-  /woman/i,
-  /keiko/i,
-  /misaki/i,
-  /mei-jia/i,
-  /ting-ting/i,
-];
+// macOS: Kyoko(高め・明るい), O-Ren(Siri高め)
+const FEMALE_HIGH_PATTERNS = [/kyoko/i, /o-ren/i, /sayaka/i, /misaki/i, /mei-jia/i];
 
-const MALE_PATTERNS = [
-  /otoya/i,
-  /ichiro/i,
-  /hattori/i,
-  /male/i,
-  /man\b/i,
-  /takumi/i,
-  /kenta/i,
-  /ryo/i,
-];
+// macOS: Nanami(Edge系・落ち着き), Haruka(低めの落ち着いた声)
+// Windows: Nanami, Haruka, Ayumi
+const FEMALE_CALM_PATTERNS = [/nanami/i, /haruka/i, /ayumi/i, /keiko/i, /ting-ting/i];
+
+// macOS: Otoya(Siri男性), Hattori(Siri Enhanced男性)
+const MALE_PATTERNS = [/otoya/i, /ichiro/i, /hattori/i, /takumi/i, /kenta/i, /ryo/i];
+
+// Google/Edge/Chromeが提供する合成音声
+const SYNTHETIC_PATTERNS = [/google/i, /microsoft.*online/i, /edge/i];
+
+// 汎用パターンで性別判定
+const GENERIC_FEMALE_PATTERNS = [/female/i, /woman/i];
+const GENERIC_MALE_PATTERNS = [/male/i, /\bman\b/i];
 
 const categorizeVoice = (voice: SpeechSynthesisVoice): VoiceType => {
   const name = voice.name;
-  if (FEMALE_PATTERNS.some((p) => p.test(name))) return "female";
+  if (FEMALE_HIGH_PATTERNS.some((p) => p.test(name))) return "female-high";
+  if (FEMALE_CALM_PATTERNS.some((p) => p.test(name))) return "female-calm";
   if (MALE_PATTERNS.some((p) => p.test(name))) return "male";
+  if (SYNTHETIC_PATTERNS.some((p) => p.test(name))) return "synthetic";
+  if (GENERIC_FEMALE_PATTERNS.some((p) => p.test(name))) return "female-high";
+  if (GENERIC_MALE_PATTERNS.some((p) => p.test(name))) return "male";
+  // localService=falseかつ上記に該当しない → クラウド系の多言語音声
+  if (!voice.localService) return "multilingual";
   return "other";
 };
 
+const VOICE_TYPE_ORDER: readonly VoiceType[] = [
+  "female-high",
+  "female-calm",
+  "male",
+  "synthetic",
+  "multilingual",
+  "other",
+] as const;
+
 const TYPE_LABELS: Record<VoiceType, string> = {
-  female: "👩 女性",
+  "female-high": "👩 女性（高め・明るい）",
+  "female-calm": "👩 女性（落ち着き）",
   male: "👨 男性",
+  synthetic: "🤖 合成音声",
+  multilingual: "🌐 クラウド",
   other: "🔊 その他",
 } as const;
+
+export { TYPE_LABELS, VOICE_TYPE_ORDER };
+export type { CategorizedVoice, VoiceType };
 
 const categorizeVoices = (jaVoices: SpeechSynthesisVoice[]): CategorizedVoice[] =>
   jaVoices.map((voice) => {
@@ -89,7 +101,7 @@ export const useSpeechSynthesis = (
 
   useEffect(() => {
     onEndRef.current = onEnd;
-  });
+  }, [onEnd]);
 
   useEffect(() => {
     if (!isSupported) return;

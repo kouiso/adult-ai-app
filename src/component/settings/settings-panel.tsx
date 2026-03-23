@@ -3,7 +3,7 @@ import { Volume2 } from "lucide-react";
 import { Separator } from "@/component/ui/separator";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/component/ui/sheet";
 import { Switch } from "@/component/ui/switch";
-import { useSpeechSynthesis } from "@/hook/use-speech-synthesis";
+import { TYPE_LABELS, VOICE_TYPE_ORDER, useSpeechSynthesis } from "@/hook/use-speech-synthesis";
 import { useSettingsStore } from "@/store/settings-store";
 
 const MODELS = [
@@ -89,9 +89,11 @@ export const SettingsPanel = () => {
     ttsPitch,
   );
 
-  const femaleVoices = categorizedVoices.filter((v) => v.type === "female");
-  const maleVoices = categorizedVoices.filter((v) => v.type === "male");
-  const otherVoices = categorizedVoices.filter((v) => v.type === "other");
+  const voiceGroups = VOICE_TYPE_ORDER.map((type) => ({
+    type,
+    label: TYPE_LABELS[type],
+    voices: categorizedVoices.filter((v) => v.type === type),
+  })).filter((g) => g.voices.length > 0);
 
   const PREVIEW_TEXT = "こんにちは、今日はいいお天気ですね。" as const;
 
@@ -191,33 +193,15 @@ export const SettingsPanel = () => {
                           className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-sm"
                         >
                           <option value="">デフォルト</option>
-                          {femaleVoices.length > 0 && (
-                            <optgroup label="👩 女性">
-                              {femaleVoices.map((v) => (
+                          {voiceGroups.map((group) => (
+                            <optgroup key={group.type} label={group.label}>
+                              {group.voices.map((v) => (
                                 <option key={v.voice.voiceURI} value={v.voice.voiceURI}>
                                   {v.voice.name}
                                 </option>
                               ))}
                             </optgroup>
-                          )}
-                          {maleVoices.length > 0 && (
-                            <optgroup label="👨 男性">
-                              {maleVoices.map((v) => (
-                                <option key={v.voice.voiceURI} value={v.voice.voiceURI}>
-                                  {v.voice.name}
-                                </option>
-                              ))}
-                            </optgroup>
-                          )}
-                          {otherVoices.length > 0 && (
-                            <optgroup label="🔊 その他">
-                              {otherVoices.map((v) => (
-                                <option key={v.voice.voiceURI} value={v.voice.voiceURI}>
-                                  {v.voice.name}
-                                </option>
-                              ))}
-                            </optgroup>
-                          )}
+                          ))}
                         </select>
                         <button
                           type="button"
