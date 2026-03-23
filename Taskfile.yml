@@ -1,0 +1,178 @@
+# https://taskfile.dev
+
+version: '3'
+
+vars:
+  D1_DB_NAME: adult-ai-db
+  R2_BUCKET_NAME: adult-ai-images
+
+tasks:
+  default:
+    cmds:
+      - task -l
+
+  # ===== セットアップ =====
+
+  setup:
+    desc: '開発環境の完全セットアップ（冪等・何度実行しても安全）'
+    cmds:
+      - task: check-tools
+      - task: install
+      - task: setup:cf
+      - task: db:migrate:local
+      - task: build
+      - 'echo ""'
+      - 'echo "=========================================="'
+      - 'echo "  ✅ Setup complete"'
+      - 'echo "=========================================="'
+
+  check-tools:
+    desc: '必須ツールの存在確認'
+    silent: true
+    cmds:
+      - |
+        missing=""
+        command -v node >/dev/null 2>&1 || missing="$missing node"
+        command -v pnpm >/dev/null 2>&1 || missing="$missing pnpm"
+        if [ -n "$missing" ]; then
+          echo "❌ Missing tools:$missing"
+          echo "  Install node: https://nodejs.org/"
+          echo "  Install pnpm: corepack enable && corepack prepare pnpm@9 --activate"
+          exit 1
+        fi
+        echo "✓ Required tools available"
+
+  install:
+    desc: 'pnpm install'
+    cmds:
+      - pnpm install
+    sources:
+      - package.json
+      - pnpm-lock.yaml
+    generates:
+      - node_modules/.pnpm/lock.yaml
+
+  setup:cf:
+    desc: 'Cloudflareリソース作成（D1 + R2）— wrangler認証必須'
+    cmds:
+      - task: check-wrangler-auth
+      - task: setup:d1
+      - task: setup:r2
+      - task: setup:wrangler-toml
+
+  check-wrangler-auth:
+    desc: 'wrangler認証チェック'
+    silent: true
+    cmds:
+      - |
+        if ! npx wrangler whoami 2>&1 | grep -q "Account ID"; then
+          echo "❌ wrangler未認証。先に npx wrangler login を実行してください"
+          exit 1
+        fi
+        echo "✓ wrangler authenticated"
+
+  setup:d1:
+    desc: 'D1データベース作成（既存なら何もしない）'
+    cmds:
+      - |
+        if npx wrangler d1 list 2>&1 | grep -q "{{.D1_DB_NAME}}"; then
+          echo "✓ D1 database '{{.D1_DB_NAME}}' already exists"
+        else
+          echo "Creating D1 database '{{.D1_DB_NAME}}'..."
+          npx wrangler d1 create "{{.D1_DB_NAME}}"
+        fi
+
+  setup:r2:
+    desc: 'R2バケット作成（既存なら何もしない）'
+    cmds:
+      - |
+        if npx wrangler r2 bucket list 2>&1 | grep -q "{{.R2_BUCKET_NAME}}"; then
+          echo "✓ R2 bucket '{{.R2_BUCKET_NAME}}' already exists"
+        else
+          echo "Creating R2 bucket '{{.R2_BUCKET_NAME}}'..."
+          npx wrangler r2 bucket create "{{.R2_BUCKET_NAME}}"
+        fi
+
+  setup:wrangler-toml:
+    desc: 'wrangler.tomlにD1/R2バインディングがあるか確認'
+    silent: true
+    cmds:
+      - |
+        if ! grep -q "d1_databases" wrangler.toml; then
+          echo "⚠️  wrangler.toml に D1バインディングがありません"
+          echo "  D1のdatabase_idを確認して wrangler.toml に追記してください"
+          echo "  確認: npx wrangler d1 list"
+          exit 1
+        fi
+        if ! grep -q "r2_buckets" wrangler.toml; then
+          echo "⚠️  wrangler.toml に R2バインディングがありません"
+          exit 1
+        fi
+        echo "✓ wrangler.toml bindings OK"
+
+  # ===== DB =====
+
+  db:generate:
+    desc: 'Drizzleスキーマからマイグレーション生成'
+    cmds:
+      - pnpm db:generate
+
+  db:migrate:local:
+    desc: 'ローカルD1にマイグレーション適用'
+    cmds:
+      - npx wrangler d1 migrations apply {{.D1_DB_NAME}} --local
+
+  db:migrate:remote:
+    desc: 'リモートD1にマイグレーション適用'
+    cmds:
+      - task: check-wrangler-auth
+      - npx wrangler d1 migrations apply {{.D1_DB_NAME}} --remote
+
+  # ===== 開発 =====
+
+  dev:
+    desc: 'Vite開発サーバー起動'
+    cmds:
+      - pnpm dev
+
+  dev:worker:
+    desc: 'Cloudflare Pages Functions + D1/R2ローカル起動'
+    cmds:
+      - pnpm dev:worker
+
+  # ===== 品質 =====
+
+  build:
+    desc: 'tsc + vite build'
+    cmds:
+      - pnpm build
+
+  lint:
+    desc: 'ESLint実行'
+    cmds:
+      - pnpm lint
+
+  lint:fix:
+    desc: 'ESLint --fix'
+    cmds:
+      - pnpm lint --fix
+
+  ci:
+    desc: 'ローカルCI（lint → build）'
+    cmds:
+      - task: lint
+      - task: build
+      - 'echo ""'
+      - 'echo "=========================================="'
+      - 'echo "  ✅ CI: All steps passed"'
+      - 'echo "=========================================="'
+
+  # ===== デプロイ =====
+
+  deploy:
+    desc: 'Cloudflare Pagesへデプロイ'
+    cmds:
+      - task: check-wrangler-auth
+      - task: ci
+      - task: db:migrate:remote
+      - pnpm deploy
