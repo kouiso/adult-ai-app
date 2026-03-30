@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { toast } from "sonner";
+
 import type { CategorizedVoice, VoiceType } from "@/lib/tts-constants";
 import { TYPE_LABELS } from "@/lib/tts-constants";
 
@@ -142,7 +144,7 @@ export const useSpeechSynthesis = (
       utterance.onerror = (event) => {
         // "canceled"はstop()による正常中断なので無視
         if (event.error !== "canceled") {
-          console.error("Speech synthesis error:", event.error);
+          toast.error("音声再生に失敗しました");
         }
         setIsSpeaking(false);
         utteranceRef.current = null;
