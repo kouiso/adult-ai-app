@@ -14,9 +14,12 @@ type Bindings = {
   OPENROUTER_API_KEY: string;
   NOVITA_API_KEY: string;
   APP_ORIGIN?: string;
+  BUCKET: R2Bucket;
 };
 
 const TASK_ID_PATTERN = /^[\w-]{4,128}$/;
+// R2キーはサーバー側で `images/{uuid}.{ext}` 形式で生成されるため、それ以外を拒否する
+const R2_KEY_PATTERN = /^images\/[\da-f-]+\.(jpg|png)$/;
 
 const chatSchema = z.object({
   messages: z
@@ -54,8 +57,23 @@ const novitaTaskResponseSchema = z.object({
   images: z.array(z.object({ image_url: z.string(), image_url_ttl: z.number() })).optional(),
 });
 
+const characterCreateSchema = z.object({
+  name: z.string().min(1).max(100),
+  systemPrompt: z.string().min(1).max(10_000),
+  greeting: z.string().max(2_000).optional().default(""),
+  tags: z.array(z.string().max(50)).max(20).optional().default([]),
+});
+
+const characterUpdateSchema = z.object({
+  name: z.string().min(1).max(100).optional(),
+  systemPrompt: z.string().min(1).max(10_000).optional(),
+  greeting: z.string().max(2_000).optional(),
+  tags: z.array(z.string().max(50)).max(20).optional(),
+});
+
 const conversationCreateSchema = z.object({
   title: z.string().min(1).max(200).optional(),
+  characterId: z.string().min(1).max(128).optional(),
 });
 
 const messageCreateSchema = z.object({
@@ -125,16 +143,24 @@ const app = new Hono<{ Bindings: Bindings }>()
 
     const database = drizzle(c.env.DB);
     const userId = await ensureUser(database, userEmail);
-    const conversations = await database
+    const rows = await database
       .select({
         id: conversationTable.id,
         title: conversationTable.title,
+        characterId: conversationTable.characterId,
+        characterName: characterTable.name,
         updatedAt: conversationTable.updatedAt,
         createdAt: conversationTable.createdAt,
       })
       .from(conversationTable)
+      .leftJoin(characterTable, eq(conversationTable.characterId, characterTable.id))
       .where(eq(conversationTable.userId, userId))
       .orderBy(desc(conversationTable.updatedAt));
+
+    const conversations = rows.map((r) => ({
+      ...r,
+      characterName: r.characterName ?? "AI",
+    }));
 
     return c.json({ conversations });
   })
@@ -145,33 +171,45 @@ const app = new Hono<{ Bindings: Bindings }>()
       return c.json({ error: "unauthorized" }, 401);
     }
 
-    const { title } = c.req.valid("json");
+    const { title, characterId: requestedCharacterId } = c.req.valid("json");
     const database = drizzle(c.env.DB);
     const userId = await ensureUser(database, userEmail);
     const now = Date.now();
     const conversationId = crypto.randomUUID();
-    const fallbackCharacterId = "default-character";
+    const DEFAULT_CHARACTER_ID = "default-character";
 
-    await database
-      .insert(characterTable)
-      .values({
-        id: fallbackCharacterId,
-        userId,
-        name: "AI",
-        avatar: undefined,
-        systemPrompt: "",
-        greeting: "",
-        tags: [],
-        createdAt: now,
-      })
-      .onConflictDoNothing();
+    // characterIdが指定されていない場合はデフォルトキャラクターを自動生成
+    const resolvedCharacterId = requestedCharacterId ?? DEFAULT_CHARACTER_ID;
+    if (!requestedCharacterId) {
+      await database
+        .insert(characterTable)
+        .values({
+          id: DEFAULT_CHARACTER_ID,
+          userId,
+          name: "AI",
+          avatar: null,
+          systemPrompt: "",
+          greeting: "",
+          tags: [],
+          createdAt: now,
+        })
+        .onConflictDoNothing();
+    }
+
+    // キャラクターの名前を取得
+    const characterRow = await database
+      .select({ name: characterTable.name })
+      .from(characterTable)
+      .where(eq(characterTable.id, resolvedCharacterId))
+      .limit(1);
+    const characterName = characterRow[0]?.name ?? "AI";
 
     await database
       .insert(conversationTable)
       .values({
         id: conversationId,
         userId,
-        characterId: fallbackCharacterId,
+        characterId: resolvedCharacterId,
         title: title ?? "新しい会話",
         createdAt: now,
         updatedAt: now,
@@ -183,6 +221,8 @@ const app = new Hono<{ Bindings: Bindings }>()
         conversation: {
           id: conversationId,
           title: title ?? "新しい会話",
+          characterId: resolvedCharacterId,
+          characterName,
           createdAt: now,
           updatedAt: now,
         },
@@ -337,8 +377,7 @@ const app = new Hono<{ Bindings: Bindings }>()
     });
 
     if (!response.ok || !response.body) {
-      // アップストリームのエラー詳細をクライアントに漏らさない（APIキーや内部情報が含まれうる）
-      console.error("OpenRouter upstream error:", response.status, await response.text());
+      console.error("OpenRouter upstream error:", response.status);
       return c.json({ error: "upstream service error" }, 502);
     }
 
@@ -374,7 +413,7 @@ const app = new Hono<{ Bindings: Bindings }>()
     });
 
     if (!response.ok) {
-      console.error("Novita init upstream error:", response.status, await response.text());
+      console.error("Novita init upstream error:", response.status);
       return c.json({ error: "upstream service error" }, 502);
     }
 
@@ -402,7 +441,7 @@ const app = new Hono<{ Bindings: Bindings }>()
     );
 
     if (!response.ok) {
-      console.error("Novita task upstream error:", response.status, await response.text());
+      console.error("Novita task upstream error:", response.status);
       return c.json({ error: "upstream service error" }, 502);
     }
 
@@ -411,6 +450,251 @@ const app = new Hono<{ Bindings: Bindings }>()
       return c.json({ error: "unexpected upstream response shape" }, 502);
     }
     return c.json(parsed.data);
+  })
+
+  // ──── Character CRUD ────
+
+  .get("/characters", async (c) => {
+    const userEmail = getUserEmail(c);
+    if (!userEmail) {
+      return c.json({ error: "unauthorized" }, 401);
+    }
+
+    const database = drizzle(c.env.DB);
+    const userId = await ensureUser(database, userEmail);
+    const characters = await database
+      .select({
+        id: characterTable.id,
+        name: characterTable.name,
+        avatar: characterTable.avatar,
+        systemPrompt: characterTable.systemPrompt,
+        greeting: characterTable.greeting,
+        tags: characterTable.tags,
+        createdAt: characterTable.createdAt,
+      })
+      .from(characterTable)
+      .where(eq(characterTable.userId, userId))
+      .orderBy(desc(characterTable.createdAt));
+
+    return c.json({ characters });
+  })
+
+  .get("/characters/:characterId", async (c) => {
+    const userEmail = getUserEmail(c);
+    if (!userEmail) {
+      return c.json({ error: "unauthorized" }, 401);
+    }
+
+    const characterId = c.req.param("characterId");
+    if (!idSchema.safeParse(characterId).success) {
+      return c.json({ error: "invalid character id" }, 400);
+    }
+
+    const database = drizzle(c.env.DB);
+    const userId = await ensureUser(database, userEmail);
+    const rows = await database
+      .select({
+        id: characterTable.id,
+        name: characterTable.name,
+        avatar: characterTable.avatar,
+        systemPrompt: characterTable.systemPrompt,
+        greeting: characterTable.greeting,
+        tags: characterTable.tags,
+        createdAt: characterTable.createdAt,
+      })
+      .from(characterTable)
+      .where(and(eq(characterTable.id, characterId), eq(characterTable.userId, userId)))
+      .limit(1);
+
+    if (rows.length === 0) {
+      return c.json({ error: "character not found" }, 404);
+    }
+
+    return c.json({ character: rows[0] });
+  })
+
+  .post("/characters", zValidator("json", characterCreateSchema), async (c) => {
+    const userEmail = getUserEmail(c);
+    if (!userEmail) {
+      return c.json({ error: "unauthorized" }, 401);
+    }
+
+    const payload = c.req.valid("json");
+    const database = drizzle(c.env.DB);
+    const userId = await ensureUser(database, userEmail);
+    const characterId = crypto.randomUUID();
+    const now = Date.now();
+
+    await database.insert(characterTable).values({
+      id: characterId,
+      userId,
+      name: payload.name,
+      avatar: null,
+      systemPrompt: payload.systemPrompt,
+      greeting: payload.greeting,
+      tags: payload.tags,
+      createdAt: now,
+    });
+
+    return c.json(
+      {
+        character: {
+          id: characterId,
+          name: payload.name,
+          avatar: null,
+          systemPrompt: payload.systemPrompt,
+          greeting: payload.greeting,
+          tags: payload.tags,
+          createdAt: now,
+        },
+      },
+      201,
+    );
+  })
+
+  .put("/characters/:characterId", zValidator("json", characterUpdateSchema), async (c) => {
+    const userEmail = getUserEmail(c);
+    if (!userEmail) {
+      return c.json({ error: "unauthorized" }, 401);
+    }
+
+    const characterId = c.req.param("characterId");
+    if (!idSchema.safeParse(characterId).success) {
+      return c.json({ error: "invalid character id" }, 400);
+    }
+
+    const payload = c.req.valid("json");
+    const database = drizzle(c.env.DB);
+    const userId = await ensureUser(database, userEmail);
+
+    const existing = await database
+      .select({ id: characterTable.id })
+      .from(characterTable)
+      .where(and(eq(characterTable.id, characterId), eq(characterTable.userId, userId)))
+      .limit(1);
+
+    if (existing.length === 0) {
+      return c.json({ error: "character not found" }, 404);
+    }
+
+    const updates: Partial<typeof characterTable.$inferInsert> = {};
+    if (payload.name !== undefined) updates.name = payload.name;
+    if (payload.systemPrompt !== undefined) updates.systemPrompt = payload.systemPrompt;
+    if (payload.greeting !== undefined) updates.greeting = payload.greeting;
+    if (payload.tags !== undefined) updates.tags = payload.tags;
+
+    if (Object.keys(updates).length > 0) {
+      await database
+        .update(characterTable)
+        .set(updates)
+        .where(and(eq(characterTable.id, characterId), eq(characterTable.userId, userId)));
+    }
+
+    return c.json({ ok: true });
+  })
+
+  .delete("/characters/:characterId", async (c) => {
+    const userEmail = getUserEmail(c);
+    if (!userEmail) {
+      return c.json({ error: "unauthorized" }, 401);
+    }
+
+    const characterId = c.req.param("characterId");
+    if (!idSchema.safeParse(characterId).success) {
+      return c.json({ error: "invalid character id" }, 400);
+    }
+
+    const database = drizzle(c.env.DB);
+    const userId = await ensureUser(database, userEmail);
+
+    // このキャラクターを使用中の会話があれば削除不可
+    const inUse = await database
+      .select({ id: conversationTable.id })
+      .from(conversationTable)
+      .where(
+        and(eq(conversationTable.characterId, characterId), eq(conversationTable.userId, userId)),
+      )
+      .limit(1);
+
+    if (inUse.length > 0) {
+      return c.json({ error: "character is in use by conversations" }, 409);
+    }
+
+    await database
+      .delete(characterTable)
+      .where(and(eq(characterTable.id, characterId), eq(characterTable.userId, userId)));
+
+    return c.json({ ok: true });
+  })
+
+  // ──── R2 Image Persistence ────
+
+  .post(
+    "/image/persist",
+    zValidator("json", z.object({ imageUrl: z.string().url(), messageId: z.string().max(128) })),
+    async (c) => {
+      const userEmail = getUserEmail(c);
+      if (!userEmail) {
+        return c.json({ error: "unauthorized" }, 401);
+      }
+
+      const { imageUrl, messageId } = c.req.valid("json");
+      const database = drizzle(c.env.DB);
+      const userId = await ensureUser(database, userEmail);
+
+      // 画像をダウンロード
+      const imageResponse = await fetch(imageUrl);
+      if (!imageResponse.ok || !imageResponse.body) {
+        return c.json({ error: "failed to fetch image" }, 502);
+      }
+
+      const rawContentType = imageResponse.headers.get("content-type") ?? "";
+      // 許可するContent-Typeを厳密にマッチ
+      const ALLOWED_IMAGE_TYPES: Record<string, string> = {
+        "image/jpeg": "jpg",
+        "image/jpg": "jpg",
+        "image/png": "png",
+      };
+      const matched = Object.entries(ALLOWED_IMAGE_TYPES).find(([type]) =>
+        rawContentType.startsWith(type),
+      );
+      const ext = matched ? matched[1] : "png";
+      const contentType = matched ? matched[0] : "image/png";
+      const key = `images/${crypto.randomUUID()}.${ext}`;
+
+      await c.env.BUCKET.put(key, imageResponse.body, {
+        httpMetadata: { contentType },
+      });
+
+      // DBのmessageレコードにimageKeyを保存
+      await database
+        .update(messageTable)
+        .set({ imageKey: key })
+        .where(and(eq(messageTable.id, messageId), eq(messageTable.userId, userId)));
+
+      return c.json({ imageKey: key });
+    },
+  )
+
+  .get("/image/r2/:key{.+}", async (c) => {
+    const key = c.req.param("key");
+
+    if (!R2_KEY_PATTERN.test(key)) {
+      return c.json({ error: "invalid key format" }, 400);
+    }
+
+    const object = await c.env.BUCKET.get(key);
+
+    if (!object) {
+      return c.json({ error: "not found" }, 404);
+    }
+
+    return new Response(object.body, {
+      headers: {
+        "Content-Type": object.httpMetadata?.contentType ?? "image/png",
+        "Cache-Control": "public, max-age=31536000, immutable",
+      },
+    });
   });
 
 export const onRequest = handle(app);

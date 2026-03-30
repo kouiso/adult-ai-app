@@ -47,9 +47,11 @@ export const ConversationList = ({
             )}
           >
             <p className="line-clamp-1 text-sm font-medium">{conversation.title}</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {formatDateTime(conversation.updatedAt)}
-            </p>
+            <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span>{conversation.characterName}</span>
+              <span>·</span>
+              <span>{formatDateTime(conversation.updatedAt)}</span>
+            </div>
           </button>
         ))}
         {conversations.length === 0 && (

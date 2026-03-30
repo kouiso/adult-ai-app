@@ -142,6 +142,8 @@ export async function getImageTaskResult(taskId: string): Promise<NovitaTaskResu
 const conversationSummarySchema = z.object({
   id: z.string(),
   title: z.string(),
+  characterId: z.string(),
+  characterName: z.string(),
   createdAt: z.number(),
   updatedAt: z.number(),
 });
@@ -152,6 +154,24 @@ const listConversationsSchema = z.object({
 
 const createConversationSchema = z.object({
   conversation: conversationSummarySchema,
+});
+
+const characterSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  avatar: z.string().nullable(),
+  systemPrompt: z.string(),
+  greeting: z.string(),
+  tags: z.array(z.string()),
+  createdAt: z.number(),
+});
+
+const listCharactersSchema = z.object({
+  characters: z.array(characterSchema),
+});
+
+const getCharacterSchema = z.object({
+  character: characterSchema,
 });
 
 const persistedMessageSchema = z.object({
@@ -169,6 +189,7 @@ const listMessagesSchema = z.object({
 
 export type ConversationSummary = z.infer<typeof conversationSummarySchema>;
 export type PersistedMessage = z.infer<typeof persistedMessageSchema>;
+export type Character = z.infer<typeof characterSchema>;
 
 export async function listConversations(): Promise<ConversationSummary[]> {
   const response = await fetch("/api/conversations");
@@ -178,17 +199,105 @@ export async function listConversations(): Promise<ConversationSummary[]> {
   return listConversationsSchema.parse(await response.json()).conversations;
 }
 
-export async function createConversation(title?: string): Promise<ConversationSummary> {
+export async function createConversation(input?: {
+  title?: string;
+  characterId?: string;
+}): Promise<ConversationSummary> {
   const response = await fetch("/api/conversations", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title }),
+    body: JSON.stringify(input ?? {}),
   });
   if (!response.ok) {
     throw new Error(`create conversation failed: ${response.status}`);
   }
   return createConversationSchema.parse(await response.json()).conversation;
 }
+
+// ──── Character API ────
+
+export async function listCharacters(): Promise<Character[]> {
+  const response = await fetch("/api/characters");
+  if (!response.ok) {
+    throw new Error(`list characters failed: ${response.status}`);
+  }
+  return listCharactersSchema.parse(await response.json()).characters;
+}
+
+export async function getCharacter(characterId: string): Promise<Character> {
+  const response = await fetch(`/api/characters/${encodeURIComponent(characterId)}`);
+  if (!response.ok) {
+    throw new Error(`get character failed: ${response.status}`);
+  }
+  return getCharacterSchema.parse(await response.json()).character;
+}
+
+export async function createCharacter(input: {
+  name: string;
+  systemPrompt: string;
+  greeting?: string;
+  tags?: string[];
+}): Promise<Character> {
+  const response = await fetch("/api/characters", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    throw new Error(`create character failed: ${response.status}`);
+  }
+  return getCharacterSchema.parse(await response.json()).character;
+}
+
+export async function updateCharacter(
+  characterId: string,
+  input: {
+    name?: string;
+    systemPrompt?: string;
+    greeting?: string;
+    tags?: string[];
+  },
+): Promise<void> {
+  const response = await fetch(`/api/characters/${encodeURIComponent(characterId)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    throw new Error(`update character failed: ${response.status}`);
+  }
+}
+
+export async function deleteCharacter(characterId: string): Promise<void> {
+  const response = await fetch(`/api/characters/${encodeURIComponent(characterId)}`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    throw new Error(`delete character failed: ${response.status}`);
+  }
+}
+
+// ──── R2 Image Persistence ────
+
+export async function persistImageToR2(input: {
+  imageUrl: string;
+  messageId: string;
+}): Promise<string> {
+  const response = await fetch("/api/image/persist", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    throw new Error(`persist image failed: ${response.status}`);
+  }
+  const result = z.object({ imageKey: z.string() }).parse(await response.json());
+  return result.imageKey;
+}
+
+// キーは `images/{uuid}.{ext}` 形式でサーバー側で生成されるため、パス構造を維持する
+export const r2ImageUrl = (key: string): string =>
+  `/api/image/r2/${key.split("/").map(encodeURIComponent).join("/")}`;
 
 export async function listConversationMessages(
   conversationId: string,

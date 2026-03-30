@@ -4,20 +4,24 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useShallow } from "zustand/react/shallow";
 
+import { CharacterDialog } from "@/component/character/character-dialog";
 import { useSpeechSynthesis } from "@/hook/use-speech-synthesis";
 import {
   createConversation,
   createConversationMessage,
   generateImage,
+  getCharacter,
   getImageTaskResult,
   listConversationMessages,
   listConversations,
+  persistImageToR2,
+  r2ImageUrl,
   updateMessageImage as persistMessageImage,
   streamChat,
+  type Character,
   type ConversationSummary,
 } from "@/lib/api";
 import {
-  DEFAULT_CHARACTER_NAME,
   DEFAULT_SYSTEM_PROMPT,
   IMAGE_POLL_INTERVAL_MS,
   IMAGE_POLL_MAX_ATTEMPTS,
@@ -30,10 +34,13 @@ import { useSettingsStore } from "@/store/settings-store";
 import { ChatInput } from "./chat-input";
 import { ConversationList } from "./conversation-list";
 import { MessageBubble } from "./message-bubble";
+
 const CONVERSATION_QUERY_KEY = ["conversation-list"] as const;
 
 const conversationMessageQueryKey = (conversationId: string) =>
   ["conversation-message-list", conversationId] as const;
+
+const characterQueryKey = (characterId: string) => ["character", characterId] as const;
 
 type ImagePollingResult =
   | { status: "succeeded"; imageUrl: string }
@@ -75,6 +82,8 @@ export const ChatView = () => {
   );
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
+  const [showCharacterDialog, setShowCharacterDialog] = useState(false);
+  const [currentCharacter, setCurrentCharacter] = useState<Character | null>(null);
   const queryClient = useQueryClient();
 
   const { data: conversations = [] } = useQuery({
@@ -130,6 +139,18 @@ export const ChatView = () => {
     scrollToBottom();
   }, [messages, scrollToBottom]);
 
+  const loadCharacter = useCallback(
+    async (characterId: string) => {
+      const character = await queryClient.fetchQuery({
+        queryKey: characterQueryKey(characterId),
+        queryFn: () => getCharacter(characterId),
+        staleTime: 5 * 60 * 1000,
+      });
+      setCurrentCharacter(character);
+    },
+    [queryClient],
+  );
+
   const loadMessages = useCallback(
     async (conversationId: string) => {
       const rows = await queryClient.fetchQuery({
@@ -140,7 +161,8 @@ export const ChatView = () => {
         id: row.id,
         role: row.role,
         content: row.content,
-        imageUrl: row.imageUrl,
+        // R2に永続化された画像があればそちらを優先
+        imageUrl: row.imageKey ? r2ImageUrl(row.imageKey) : row.imageUrl,
       }));
       setMessages(nextMessages);
     },
@@ -155,14 +177,23 @@ export const ChatView = () => {
       const first = conversations[0];
       setConversationId(first.id);
       await loadMessages(first.id);
+      await loadCharacter(first.characterId);
       return first.id;
     }
 
     const created = await createConversationMutation.mutateAsync(undefined);
     setConversationId(created.id);
     setMessages([]);
+    await loadCharacter(created.characterId);
     return created.id;
-  }, [conversations, createConversationMutation, loadMessages, setConversationId, setMessages]);
+  }, [
+    conversations,
+    createConversationMutation,
+    loadCharacter,
+    loadMessages,
+    setConversationId,
+    setMessages,
+  ]);
 
   useEffect(() => {
     let alive = true;
@@ -177,11 +208,13 @@ export const ChatView = () => {
           if (!alive) return;
           setConversationId(created.id);
           setMessages([]);
+          await loadCharacter(created.characterId);
           return;
         }
 
         setConversationId(listed[0].id);
         await loadMessages(listed[0].id);
+        await loadCharacter(listed[0].characterId);
       } catch {
         toast.error("会話の初期化に失敗しました");
       }
@@ -195,6 +228,7 @@ export const ChatView = () => {
     conversations,
     createConversationMutation,
     currentConversationId,
+    loadCharacter,
     loadMessages,
     setConversationId,
     setMessages,
@@ -206,22 +240,58 @@ export const ChatView = () => {
       setMessages([]);
       try {
         await loadMessages(conversationId);
+        const conversation = conversations.find((c) => c.id === conversationId);
+        if (conversation) {
+          await loadCharacter(conversation.characterId);
+        }
       } catch {
         toast.error("会話の読み込みに失敗しました");
       }
     },
-    [loadMessages, setConversationId, setMessages],
+    [conversations, loadCharacter, loadMessages, setConversationId, setMessages],
   );
 
-  const handleCreateConversation = useCallback(async () => {
-    try {
-      const created = await createConversationMutation.mutateAsync(undefined);
-      setConversationId(created.id);
-      setMessages([]);
-    } catch {
-      toast.error("会話の作成に失敗しました");
-    }
-  }, [createConversationMutation, setConversationId, setMessages]);
+  const handleCreateConversation = useCallback(() => {
+    setShowCharacterDialog(true);
+  }, []);
+
+  const handleCharacterSelected = useCallback(
+    async (characterId: string) => {
+      try {
+        const created = await createConversationMutation.mutateAsync({ characterId });
+        setConversationId(created.id);
+        setMessages([]);
+        await loadCharacter(characterId);
+
+        // グリーティングメッセージがあればアシスタントメッセージとして追加
+        const character = queryClient.getQueryData<Character>(characterQueryKey(characterId));
+        if (character?.greeting) {
+          const greetingId = crypto.randomUUID();
+          useChatStore.getState().addMessage({
+            id: greetingId,
+            role: "assistant",
+            content: character.greeting,
+          });
+          await createConversationMessageMutation.mutateAsync({
+            conversationId: created.id,
+            id: greetingId,
+            role: "assistant",
+            content: character.greeting,
+          });
+        }
+      } catch {
+        toast.error("会話の作成に失敗しました");
+      }
+    },
+    [
+      createConversationMutation,
+      createConversationMessageMutation,
+      loadCharacter,
+      queryClient,
+      setConversationId,
+      setMessages,
+    ],
+  );
 
   const handleGenerateImage = useCallback(async () => {
     const {
@@ -271,6 +341,18 @@ export const ChatView = () => {
           messageId: imageMessageId,
           imageUrl: imageResult.imageUrl,
         });
+
+        // R2に永続化（TTL付きURLの期限切れ対策）
+        try {
+          const imageKey = await persistImageToR2({
+            imageUrl: imageResult.imageUrl,
+            messageId: imageMessageId,
+          });
+          updateMessageImage(imageMessageId, r2ImageUrl(imageKey));
+        } catch {
+          // R2永続化失敗はクリティカルではないのでNovita URLのまま
+        }
+
         scrollToBottom();
         return;
       }
@@ -293,6 +375,9 @@ export const ChatView = () => {
       const { addMessage, updateMessage, setLoading } = useChatStore.getState();
       const currentModel = useSettingsStore.getState().model;
       const conversationId = await ensureConversation();
+
+      // キャラクターのsystemPromptを使用、なければデフォルト
+      const systemPrompt = currentCharacter?.systemPrompt || DEFAULT_SYSTEM_PROMPT;
 
       const userMsg = {
         id: crypto.randomUUID(),
@@ -328,7 +413,7 @@ export const ChatView = () => {
         }
       }
       const apiMessages = [
-        { role: "system" as const, content: DEFAULT_SYSTEM_PROMPT },
+        { role: "system" as const, content: systemPrompt },
         ...filtered.map((m, i) => ({
           role: m.role,
           content: i === lastUserIndex ? m.content + LANG_REMINDER : m.content,
@@ -370,8 +455,16 @@ export const ChatView = () => {
         },
       );
     },
-    [createConversationMessageMutation, ensureConversation, handleGenerateImage, scrollToBottom],
+    [
+      createConversationMessageMutation,
+      currentCharacter,
+      ensureConversation,
+      handleGenerateImage,
+      scrollToBottom,
+    ],
   );
+
+  const characterName = currentCharacter?.name ?? "AI";
 
   return (
     <div className="flex h-full">
@@ -379,7 +472,7 @@ export const ChatView = () => {
         conversations={conversations}
         currentConversationId={currentConversationId}
         onSelect={(conversationId) => void handleSelectConversation(conversationId)}
-        onCreate={() => void handleCreateConversation()}
+        onCreate={handleCreateConversation}
       />
       <div className="flex h-full min-w-0 flex-1 flex-col">
         <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
@@ -405,7 +498,7 @@ export const ChatView = () => {
                   content={message.content}
                   imageUrl={message.imageUrl}
                   isStreaming={message.isStreaming}
-                  characterName={DEFAULT_CHARACTER_NAME}
+                  characterName={characterName}
                   nsfwBlur={nsfwBlur}
                   canSpeak={
                     ttsEnabled &&
@@ -432,6 +525,11 @@ export const ChatView = () => {
           isLoading={isLoading}
         />
       </div>
+      <CharacterDialog
+        open={showCharacterDialog}
+        onOpenChange={setShowCharacterDialog}
+        onSelect={(characterId) => void handleCharacterSelected(characterId)}
+      />
     </div>
   );
 };

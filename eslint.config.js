@@ -104,7 +104,7 @@ export default defineConfig([
       "import/no-extraneous-dependencies": [
         "error",
         {
-          devDependencies: ["**/*.test.{ts,tsx}", "**/*.spec.{ts,tsx}", "vite.config.ts", "drizzle.config.ts"],
+          devDependencies: ["**/*.test.{ts,tsx}", "**/*.spec.{ts,tsx}", "src/test/**/*.ts", "vite.config.ts", "vitest.config.ts", "drizzle.config.ts"],
           optionalDependencies: false,
         },
       ],
@@ -203,7 +203,7 @@ export default defineConfig([
 
   {
     // エントリポイント・設定ファイルはdefault exportが必要
-    files: ["src/main.tsx", "vite.config.ts", "drizzle.config.ts"],
+    files: ["src/main.tsx", "vite.config.ts", "vitest.config.ts", "drizzle.config.ts"],
     rules: {
       "import/no-default-export": "off",
     },

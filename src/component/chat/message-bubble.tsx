@@ -80,6 +80,8 @@ const SpeakButton = ({ isSpeaking, content, onSpeak, onStopSpeaking }: SpeakButt
 );
 
 const isValidImageUrl = (url: string): boolean => {
+  // R2永続化された画像はローカルパスで配信される
+  if (url.startsWith("/api/image/r2/")) return true;
   try {
     const parsed = new URL(url);
     return parsed.protocol === "https:";
