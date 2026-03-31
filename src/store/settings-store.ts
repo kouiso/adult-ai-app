@@ -17,6 +17,7 @@ const persistedSettingsSchema = z.object({
   ttsVoiceUri: z.string().default(""),
   ttsRate: z.number().min(0.5).max(2).default(1),
   ttsPitch: z.number().min(0.5).max(2).default(1),
+  activeCharacterId: z.string().nullable().default(null),
 });
 
 type PersistedSettings = z.infer<typeof persistedSettingsSchema>;
@@ -30,6 +31,7 @@ interface SettingsState {
   ttsVoiceUri: string;
   ttsRate: number;
   ttsPitch: number;
+  activeCharacterId: string | null;
   setModel: (model: string) => void;
   toggleNsfwBlur: () => void;
   toggleDarkMode: () => void;
@@ -38,6 +40,7 @@ interface SettingsState {
   setTtsVoiceUri: (uri: string) => void;
   setTtsRate: (rate: number) => void;
   setTtsPitch: (pitch: number) => void;
+  setActiveCharacterId: (id: string | null) => void;
 }
 
 export const useSettingsStore = create<SettingsState>()(
@@ -51,6 +54,7 @@ export const useSettingsStore = create<SettingsState>()(
       ttsVoiceUri: "",
       ttsRate: 1,
       ttsPitch: 1,
+      activeCharacterId: null,
       setModel: (model) => set({ model }),
       toggleNsfwBlur: () => set((s) => ({ nsfwBlur: !s.nsfwBlur })),
       toggleDarkMode: () => set((s) => ({ darkMode: !s.darkMode })),
@@ -59,10 +63,11 @@ export const useSettingsStore = create<SettingsState>()(
       setTtsVoiceUri: (uri) => set({ ttsVoiceUri: uri }),
       setTtsRate: (rate) => set({ ttsRate: rate }),
       setTtsPitch: (pitch) => set({ ttsPitch: pitch }),
+      setActiveCharacterId: (id) => set({ activeCharacterId: id }),
     }),
     {
       name: "ai-chat-settings",
-      version: 6,
+      version: 7,
       migrate: (persistedState: unknown, version: number): PersistedSettings => {
         const result = persistedSettingsSchema.safeParse(persistedState);
         const parsed = result.success
@@ -76,6 +81,7 @@ export const useSettingsStore = create<SettingsState>()(
               ttsVoiceUri: "",
               ttsRate: 1,
               ttsPitch: 1,
+              activeCharacterId: null,
             } satisfies PersistedSettings);
         if (
           (version < 2 && parsed.model === LEGACY_MODEL_NEMO) ||
@@ -95,6 +101,7 @@ export const useSettingsStore = create<SettingsState>()(
         ttsVoiceUri: state.ttsVoiceUri,
         ttsRate: state.ttsRate,
         ttsPitch: state.ttsPitch,
+        activeCharacterId: state.activeCharacterId,
       }),
     },
   ),
