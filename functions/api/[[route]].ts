@@ -180,7 +180,17 @@ const app = new Hono<{ Bindings: Bindings }>()
 
     // characterIdが指定されていない場合はデフォルトキャラクターを自動生成
     const resolvedCharacterId = requestedCharacterId ?? DEFAULT_CHARACTER_ID;
-    if (!requestedCharacterId) {
+    if (requestedCharacterId) {
+      // 指定されたcharacterIdが自分のものか検証（他人のキャラクター/存在しないIDを拒否）
+      const owned = await database
+        .select({ id: characterTable.id })
+        .from(characterTable)
+        .where(and(eq(characterTable.id, requestedCharacterId), eq(characterTable.userId, userId)))
+        .limit(1);
+      if (owned.length === 0) {
+        return c.json({ error: "character not found" }, 404);
+      }
+    } else {
       await database
         .insert(characterTable)
         .values({
