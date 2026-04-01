@@ -642,7 +642,13 @@ const app = new Hono<{ Bindings: Bindings }>()
       const database = drizzle(c.env.DB);
       const userId = await ensureUser(database, userEmail);
 
-      // 画像をダウンロード
+      // Novitaドメイン以外からのfetchを拒否（SSRF防御）
+      const ALLOWED_IMAGE_HOSTS = ["image.novita.ai", "novita-output.s3.amazonaws.com"];
+      const parsedUrl = new URL(imageUrl);
+      if (!ALLOWED_IMAGE_HOSTS.includes(parsedUrl.hostname)) {
+        return c.json({ error: "disallowed image source" }, 400);
+      }
+
       const imageResponse = await fetch(imageUrl);
       if (!imageResponse.ok || !imageResponse.body) {
         return c.json({ error: "failed to fetch image" }, 502);
@@ -658,8 +664,11 @@ const app = new Hono<{ Bindings: Bindings }>()
       const matched = Object.entries(ALLOWED_IMAGE_TYPES).find(([type]) =>
         rawContentType.startsWith(type),
       );
-      const ext = matched ? matched[1] : "png";
-      const contentType = matched ? matched[0] : "image/png";
+      if (!matched) {
+        return c.json({ error: "unsupported content type" }, 400);
+      }
+      const ext = matched[1];
+      const contentType = matched[0];
       const key = `images/${crypto.randomUUID()}.${ext}`;
 
       await c.env.BUCKET.put(key, imageResponse.body, {

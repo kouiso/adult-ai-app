@@ -349,8 +349,9 @@ export const ChatView = () => {
             messageId: imageMessageId,
           });
           updateMessageImage(imageMessageId, r2ImageUrl(imageKey));
-        } catch {
-          // R2永続化失敗はクリティカルではないのでNovita URLのまま
+        } catch (error) {
+          // R2永続化失敗はクリティカルではないのでNovita URLのまま（系統的障害検知のためログは残す）
+          console.warn("R2 persist failed:", error);
         }
 
         scrollToBottom();
