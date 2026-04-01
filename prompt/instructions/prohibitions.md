@@ -1,5 +1,5 @@
 ---
-applyTo: "**"
+applyTo: "**/*.ts,**/*.tsx,**/*.js,**/*.jsx,**/*.py,**/*.dart"
 ---
 
 # Absolute Prohibitions
@@ -69,24 +69,40 @@ Creating temporary test files inside the repository is strictly banned.
 
 ---
 
-## 4. Behavioral Prohibitions
+## 4. GitHub Operation Prohibitions
 
-### 4.1. Delegating Work to the User
+### 4.1. Resolving Review Threads Without Reading
+
+NEVER resolve a review thread without first reading and evaluating the full comment body.
+
+❌ GraphQL resolveReviewThread のIDだけ取得して一括resolve。
+❌ 「Info/Self-reviewだろう」と推測してbodyを読まずにresolve。
+❌ 問題を見つけた後「次はちゃんとやる」と先送り。
+
+✅ 必ずコメント本文を全文取得・読解してから resolve の可否を判断する。
+✅ BUG/Flag/有効な指摘が含まれている場合は、対応完了後にresolveする。
+✅ 問題を発見したら即座に是正行動を取る。「次から」は禁止、「今すぐ」が原則。
+
+---
+
+## 5. Behavioral Prohibitions
+
+### 5.1. Delegating Work to the User
 
 ❌ Asking user to check CI/verify/run commands.
 ✅ Execute, analyze, fix, and report results yourself.
 
-### 4.2. Open-Ended Questions Without Research
+### 5.2. Open-Ended Questions Without Research
 
 ❌ "What should we do?" without research.
 ✅ Research options, present recommendation, then ask for approval.
 
-### 4.3. Speculation and Guessing
+### 5.3. Speculation and Guessing
 
 ❌ "It should probably work."
 ✅ Report only executed and confirmed results.
 
-### 4.4. Workload as an Excuse
+### 5.4. Workload as an Excuse
 
 ❌ "It takes too long" / "Let me implement just part of it."
 ✅ Execute every instructed task in full. AI has no fatigue.

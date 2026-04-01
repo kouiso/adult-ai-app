@@ -4,9 +4,9 @@ import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client
 import { createRoot } from "react-dom/client";
 
 import { App } from "./app";
+import "./index.css";
 import { queryClient } from "./lib/query-client";
 import { queryPersister } from "./lib/query-persister";
-import "./index.css";
 
 createRoot(document.querySelector("#root")!).render(
   <StrictMode>

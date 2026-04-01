@@ -139,13 +139,18 @@ export async function getImageTaskResult(taskId: string): Promise<NovitaTaskResu
   return novitaTaskResultSchema.parse(await response.json());
 }
 
+// ── 会話 ──────────────────────────────────────────────────────────────────
+
 const conversationSummarySchema = z.object({
   id: z.string(),
   title: z.string(),
-  characterId: z.string(),
-  characterName: z.string(),
   createdAt: z.number(),
   updatedAt: z.number(),
+  characterId: z.string(),
+  characterName: z.string(),
+  characterGreeting: z.string(),
+  characterSystemPrompt: z.string(),
+  characterAvatar: z.string().nullable(),
 });
 
 const listConversationsSchema = z.object({
@@ -154,24 +159,6 @@ const listConversationsSchema = z.object({
 
 const createConversationSchema = z.object({
   conversation: conversationSummarySchema,
-});
-
-const characterSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  avatar: z.string().nullable(),
-  systemPrompt: z.string(),
-  greeting: z.string(),
-  tags: z.array(z.string()),
-  createdAt: z.number(),
-});
-
-const listCharactersSchema = z.object({
-  characters: z.array(characterSchema),
-});
-
-const getCharacterSchema = z.object({
-  character: characterSchema,
 });
 
 const persistedMessageSchema = z.object({
@@ -189,7 +176,6 @@ const listMessagesSchema = z.object({
 
 export type ConversationSummary = z.infer<typeof conversationSummarySchema>;
 export type PersistedMessage = z.infer<typeof persistedMessageSchema>;
-export type Character = z.infer<typeof characterSchema>;
 
 export async function listConversations(): Promise<ConversationSummary[]> {
   const response = await fetch("/api/conversations");
@@ -206,7 +192,7 @@ export async function createConversation(input?: {
   const response = await fetch("/api/conversations", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input ?? {}),
+    body: JSON.stringify({ title: input?.title, characterId: input?.characterId }),
   });
   if (!response.ok) {
     throw new Error(`create conversation failed: ${response.status}`);
@@ -214,90 +200,63 @@ export async function createConversation(input?: {
   return createConversationSchema.parse(await response.json()).conversation;
 }
 
-// ──── Character API ────
-
-export async function listCharacters(): Promise<Character[]> {
-  const response = await fetch("/api/characters");
-  if (!response.ok) {
-    throw new Error(`list characters failed: ${response.status}`);
-  }
-  return listCharactersSchema.parse(await response.json()).characters;
-}
-
-export async function getCharacter(characterId: string): Promise<Character> {
-  const response = await fetch(`/api/characters/${encodeURIComponent(characterId)}`);
-  if (!response.ok) {
-    throw new Error(`get character failed: ${response.status}`);
-  }
-  return getCharacterSchema.parse(await response.json()).character;
-}
-
-export async function createCharacter(input: {
-  name: string;
-  systemPrompt: string;
-  greeting?: string;
-  tags?: string[];
-}): Promise<Character> {
-  const response = await fetch("/api/characters", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  });
-  if (!response.ok) {
-    throw new Error(`create character failed: ${response.status}`);
-  }
-  return getCharacterSchema.parse(await response.json()).character;
-}
-
-export async function updateCharacter(
-  characterId: string,
-  input: {
-    name?: string;
-    systemPrompt?: string;
-    greeting?: string;
-    tags?: string[];
-  },
-): Promise<void> {
-  const response = await fetch(`/api/characters/${encodeURIComponent(characterId)}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  });
-  if (!response.ok) {
-    throw new Error(`update character failed: ${response.status}`);
-  }
-}
-
-export async function deleteCharacter(characterId: string): Promise<void> {
-  const response = await fetch(`/api/characters/${encodeURIComponent(characterId)}`, {
+export async function deleteConversation(conversationId: string): Promise<void> {
+  const response = await fetch(`/api/conversations/${encodeURIComponent(conversationId)}`, {
     method: "DELETE",
   });
   if (!response.ok) {
-    throw new Error(`delete character failed: ${response.status}`);
+    throw new Error(`delete conversation failed: ${response.status}`);
   }
 }
 
-// ──── R2 Image Persistence ────
-
-export async function persistImageToR2(input: {
-  imageUrl: string;
-  messageId: string;
-}): Promise<string> {
-  const response = await fetch("/api/image/persist", {
-    method: "POST",
+export async function updateConversationTitle(
+  conversationId: string,
+  title: string,
+): Promise<void> {
+  const response = await fetch(`/api/conversations/${encodeURIComponent(conversationId)}/title`, {
+    method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
+    body: JSON.stringify({ title }),
   });
   if (!response.ok) {
-    throw new Error(`persist image failed: ${response.status}`);
+    throw new Error(`update conversation title failed: ${response.status}`);
   }
-  const result = z.object({ imageKey: z.string() }).parse(await response.json());
-  return result.imageKey;
 }
 
-// キーは `images/{uuid}.{ext}` 形式でサーバー側で生成されるため、パス構造を維持する
-export const r2ImageUrl = (key: string): string =>
-  `/api/image/r2/${key.split("/").map(encodeURIComponent).join("/")}`;
+export async function updateConversationCharacter(
+  conversationId: string,
+  characterId: string,
+): Promise<void> {
+  const response = await fetch(
+    `/api/conversations/${encodeURIComponent(conversationId)}/character`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ characterId }),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(`update conversation character failed: ${response.status}`);
+  }
+}
+
+export async function generateConversationTitle(
+  conversationId: string,
+  messages: { role: "system" | "user" | "assistant"; content: string }[],
+  model: string,
+): Promise<string | null> {
+  const response = await fetch(
+    `/api/conversations/${encodeURIComponent(conversationId)}/generate-title`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages, model }),
+    },
+  );
+  if (!response.ok) return null;
+  const data = await response.json();
+  return data.title;
+}
 
 export async function listConversationMessages(
   conversationId: string,
@@ -336,6 +295,19 @@ export async function createConversationMessage(input: {
   }
 }
 
+export async function deleteMessagesAfterMessage(
+  conversationId: string,
+  messageId: string,
+): Promise<void> {
+  const response = await fetch(
+    `/api/conversations/${encodeURIComponent(conversationId)}/messages-after/${encodeURIComponent(messageId)}`,
+    { method: "DELETE" },
+  );
+  if (!response.ok) {
+    throw new Error(`delete messages after failed: ${response.status}`);
+  }
+}
+
 export async function updateMessageImage(input: {
   messageId: string;
   imageUrl?: string;
@@ -351,5 +323,87 @@ export async function updateMessageImage(input: {
   });
   if (!response.ok) {
     throw new Error(`update message image failed: ${response.status}`);
+  }
+}
+
+export async function updateMessageContent(messageId: string, content: string): Promise<void> {
+  const response = await fetch(`/api/messages/${encodeURIComponent(messageId)}/content`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+  if (!response.ok) {
+    throw new Error(`update message content failed: ${response.status}`);
+  }
+}
+
+// ── キャラクター ──────────────────────────────────────────────────────────
+
+const characterSchema = z.object({
+  id: z.string(),
+  userId: z.string(),
+  name: z.string(),
+  avatar: z.string().nullable(),
+  systemPrompt: z.string(),
+  greeting: z.string(),
+  tags: z.array(z.string()),
+  createdAt: z.number(),
+});
+
+const listCharactersSchema = z.object({
+  characters: z.array(characterSchema),
+});
+
+const createCharacterResponseSchema = z.object({
+  character: characterSchema,
+});
+
+export type Character = z.infer<typeof characterSchema>;
+
+export type CharacterInput = {
+  name: string;
+  avatar?: string;
+  systemPrompt: string;
+  greeting: string;
+  tags: string[];
+};
+
+export async function listCharacters(): Promise<Character[]> {
+  const response = await fetch("/api/characters");
+  if (!response.ok) {
+    throw new Error(`list characters failed: ${response.status}`);
+  }
+  return listCharactersSchema.parse(await response.json()).characters;
+}
+
+export async function createCharacter(input: CharacterInput): Promise<Character> {
+  const response = await fetch("/api/characters", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    throw new Error(`create character failed: ${response.status}`);
+  }
+  return createCharacterResponseSchema.parse(await response.json()).character;
+}
+
+export async function updateCharacter(id: string, input: CharacterInput): Promise<void> {
+  const response = await fetch(`/api/characters/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    throw new Error(`update character failed: ${response.status}`);
+  }
+}
+
+export async function deleteCharacter(id: string): Promise<void> {
+  const response = await fetch(`/api/characters/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    throw new Error(`delete character failed: ${response.status}`);
   }
 }
