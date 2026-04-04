@@ -15,6 +15,43 @@ function hasFrequentItem(items: string[], threshold: number): boolean {
   return false;
 }
 
+// 2文字bigram集合のJaccard類似度で近似的な繰り返しを検出する
+function bigramSimilarity(a: string, b: string): number {
+  if (a.length < 2 || b.length < 2) return 0;
+  const bigrams = (s: string) => {
+    const set = new Set<string>();
+    for (let i = 0; i < s.length - 1; i++) set.add(s.slice(i, i + 2));
+    return set;
+  };
+  const setA = bigrams(a);
+  const setB = bigrams(b);
+  let intersection = 0;
+  for (const bg of setA) if (setB.has(bg)) intersection++;
+  return intersection / (setA.size + setB.size - intersection);
+}
+
+// フレーズ群の中に類似度0.6以上のペアが閾値回以上あるか判定
+function findSimilarGroup(groups: string[][], phrase: string): string[] | null {
+  for (const group of groups) {
+    if (bigramSimilarity(phrase, group[0]) >= 0.6) return group;
+  }
+  return null;
+}
+
+function hasSimilarRepetition(phrases: string[], threshold: number): boolean {
+  const groups: string[][] = [];
+  for (const phrase of phrases) {
+    const group = findSimilarGroup(groups, phrase);
+    if (group) {
+      group.push(phrase);
+      if (group.length >= threshold) return true;
+    } else {
+      groups.push([phrase]);
+    }
+  }
+  return false;
+}
+
 function detectRepetition(text: string): boolean {
   if (text.length < 50) return false;
   const tail = text.slice(-REPETITION_CHECK_WINDOW);
@@ -25,9 +62,27 @@ function detectRepetition(text: string): boolean {
   const quotes = tail.match(/「[^」]{2,30}」/g);
   if (quotes && quotes.length >= 6 && hasFrequentItem(quotes, FREQ_THRESHOLD)) return true;
 
-  // 句読点区切りフレーズの頻出検出
-  const phrases = tail.split(/[\n…。！？]+/).filter((p) => p.length >= 3 && p.length <= 15);
-  if (phrases.length >= 8 && hasFrequentItem(phrases, FREQ_THRESHOLD)) return true;
+  // 句読点・スペース区切りフレーズの頻出検出
+  // スペース区切りの短フレーズ繰り返し（「もう死にそう おかしくなりそう」等）も検出する
+  const phrases = tail.split(/[\n…。！？\s　]+/).filter((p) => p.length >= 3 && p.length <= 30);
+  if (phrases.length >= 6 && hasFrequentItem(phrases, FREQ_THRESHOLD)) return true;
+
+  // N-gram類似度による近似繰り返し検出
+  if (phrases.length >= 6 && hasSimilarRepetition(phrases, FREQ_THRESHOLD)) return true;
+
+  // スライディングウィンドウによる部分文字列繰り返し検出
+  // 10〜40文字の部分文字列が3回以上出現したらループとみなす
+  if (tail.length >= 60) {
+    for (const windowSize of [15, 25, 40]) {
+      const seen = new Map<string, number>();
+      for (let i = 0; i <= tail.length - windowSize; i += 5) {
+        const chunk = tail.slice(i, i + windowSize);
+        const count = (seen.get(chunk) ?? 0) + 1;
+        if (count >= 3) return true;
+        seen.set(chunk, count);
+      }
+    }
+  }
 
   return false;
 }

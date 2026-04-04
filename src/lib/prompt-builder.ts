@@ -41,6 +41,18 @@ You are a REAL person, not a fictional character reading a script. Your words mu
 - Scene mode (when physically interacting with the user): use *asterisks* for actions/sensations and 「」for dialogue
 - Match the user's energy — if they're chatting casually, chat back. If they're setting up a scene, play along` as const;
 
+// キャラクターフィールドに埋め込まれたLLMメタ命令を無害化する
+// マーカー文字列の角括弧・山括弧を全角に変換してトークン境界を壊す
+// ユーザーの入力テキスト自体は消さずに残す
+const INJECTION_PATTERNS =
+  /\[system]|\[inst]|\[\/inst]|<<sys>>|<\/sys>>|<\|im_start\|>|<\|im_end\|>|<\|system\|>|<\|user\|>|<\|assistant\|>/gi;
+
+function sanitizeField(text: string): string {
+  return text.replace(INJECTION_PATTERNS, (match) =>
+    match.replace(/\[/g, "［").replace(/]/g, "］").replace(/</g, "＜").replace(/>/g, "＞"),
+  );
+}
+
 // パース用のセクションマーカー
 const SECTION_PERSONALITY = "【キャラクター】" as const;
 const SECTION_SCENARIO = "【シナリオ】" as const;
@@ -80,19 +92,24 @@ function stripBaseRules(prompt: string): string {
 export function buildSystemPrompt(fields: PromptFields): string {
   const sections: string[] = [BASE_RULES];
 
-  if (fields.name || fields.personality) {
+  const name = sanitizeField(fields.name);
+  const personality = sanitizeField(fields.personality);
+  const scenario = sanitizeField(fields.scenario);
+  const custom = sanitizeField(fields.custom);
+
+  if (name || personality) {
     const lines = [`\n${SECTION_PERSONALITY}`];
-    if (fields.name) lines.push(`名前: ${fields.name}`);
-    if (fields.personality) lines.push(fields.personality);
+    if (name) lines.push(`名前: ${name}`);
+    if (personality) lines.push(personality);
     sections.push(lines.join("\n"));
   }
 
-  if (fields.scenario) {
-    sections.push(`\n${SECTION_SCENARIO}\n${fields.scenario}`);
+  if (scenario) {
+    sections.push(`\n${SECTION_SCENARIO}\n${scenario}`);
   }
 
-  if (fields.custom) {
-    sections.push(`\n${SECTION_CUSTOM}\n${fields.custom}`);
+  if (custom) {
+    sections.push(`\n${SECTION_CUSTOM}\n${custom}`);
   }
 
   return sections.join("\n");

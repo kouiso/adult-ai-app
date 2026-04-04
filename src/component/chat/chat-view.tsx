@@ -39,7 +39,8 @@ const LANG_REMINDER =
 type ApiMessage = { role: "system" | "user" | "assistant"; content: string };
 
 const IMAGE_PROMPT_MAX_LENGTH = 500;
-const POLL_INTERVAL_MS = 1000;
+// exponential backoff: 1s → 2s → 4s → 8s → cap 10s
+const POLL_MAX_DELAY_MS = 10_000;
 
 type ImagePollingResult =
   | { status: "succeeded"; imageUrl: string }
@@ -50,11 +51,12 @@ const pollGeneratedImage = async (
   taskId: string,
   onProgress?: (attempt: number, maxAttempts: number) => void,
 ): Promise<ImagePollingResult> => {
-  const maxPolls = 60;
+  const maxPolls = 20;
   for (let i = 0; i < maxPolls; i++) {
+    const delay = Math.min(1000 * 2 ** Math.min(i, 3), POLL_MAX_DELAY_MS);
     onProgress?.(i + 1, maxPolls);
     await new Promise<void>((resolve) => {
-      setTimeout(resolve, POLL_INTERVAL_MS);
+      setTimeout(resolve, delay);
     });
 
     const poll = await getImageTaskResult(taskId);

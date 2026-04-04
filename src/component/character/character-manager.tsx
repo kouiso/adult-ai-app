@@ -118,9 +118,11 @@ function formStateToInput(state: CharacterFormState): CharacterInput {
 interface CharacterFormFieldsProps {
   state: CharacterFormState;
   onChange: (patch: Partial<CharacterFormState>) => void;
+  touched: Set<string>;
+  onBlur: (field: string) => void;
 }
 
-const CharacterFormFields = ({ state, onChange }: CharacterFormFieldsProps) => (
+const CharacterFormFields = ({ state, onChange, touched, onBlur }: CharacterFormFieldsProps) => (
   <>
     <div>
       <label className="mb-1.5 block text-sm font-medium">キャラクター名 *</label>
@@ -128,10 +130,14 @@ const CharacterFormFields = ({ state, onChange }: CharacterFormFieldsProps) => (
         type="text"
         value={state.name}
         onChange={(e) => onChange({ name: e.target.value })}
+        onBlur={() => onBlur("name")}
         placeholder="例: 美咲"
-        className={FIELD_CLASS}
+        className={`${FIELD_CLASS} ${touched.has("name") && !state.name.trim() ? "border-destructive" : ""}`}
         maxLength={100}
       />
+      {touched.has("name") && !state.name.trim() && (
+        <p className="mt-1 text-xs text-destructive">キャラクター名は必須です</p>
+      )}
     </div>
 
     <div>
@@ -196,10 +202,13 @@ const CharacterFormFields = ({ state, onChange }: CharacterFormFieldsProps) => (
 
 const CharacterForm = ({ initial, onSave, onCancel, isSaving }: CharacterFormProps) => {
   const [state, setState] = useState(() => createInitialFormState(initial));
+  const [touched, setTouched] = useState<Set<string>>(new Set());
   const updateField = (patch: Partial<CharacterFormState>) =>
     setState((prev) => ({ ...prev, ...patch }));
+  const handleBlur = (field: string) => setTouched((prev) => new Set(prev).add(field));
 
   const handleSave = async () => {
+    setTouched(new Set(["name"]));
     if (!state.name.trim()) {
       toast.error("キャラクター名を入力してください");
       return;
@@ -209,7 +218,12 @@ const CharacterForm = ({ initial, onSave, onCancel, isSaving }: CharacterFormPro
 
   return (
     <div className="space-y-4">
-      <CharacterFormFields state={state} onChange={updateField} />
+      <CharacterFormFields
+        state={state}
+        onChange={updateField}
+        touched={touched}
+        onBlur={handleBlur}
+      />
       <AdvancedPromptSection
         value={state.customPrompt}
         onChange={(v) => updateField({ customPrompt: v })}

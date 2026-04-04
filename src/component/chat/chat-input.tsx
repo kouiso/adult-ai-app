@@ -14,6 +14,7 @@ interface ChatInputProps {
 export const ChatInput = memo(({ onSend, onGenerateImage, isLoading }: ChatInputProps) => {
   const [input, setInput] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const rafRef = useRef(0);
 
   const handleSend = useCallback(() => {
     const trimmed = input.trim();
@@ -36,8 +37,11 @@ export const ChatInput = memo(({ onSend, onGenerateImage, isLoading }: ChatInput
   const handleInput = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInput(e.target.value);
     const el = e.target;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+    cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(() => {
+      el.style.height = "auto";
+      el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+    });
   };
 
   return (

@@ -1,6 +1,6 @@
 import { z } from "zod/v4";
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { createJSONStorage, persist } from "zustand/middleware";
 
 const DEFAULT_MODEL = "sao10k/l3.3-euryale-70b" as const;
 const LEGACY_MODEL_NEMO = "mistralai/mistral-nemo" as const;
@@ -106,6 +106,31 @@ export const useSettingsStore = create<SettingsState>()(
         ttsPitch: state.ttsPitch,
         activeCharacterId: state.activeCharacterId,
       }),
+      // localStorage quota超過やプライベートブラウジング時のエラーを吸収する
+      storage: createJSONStorage(() => ({
+        getItem: (name: string) => {
+          try {
+            return localStorage.getItem(name);
+          } catch {
+            console.warn(`settings: localStorage.getItem("${name}") failed`);
+            return null;
+          }
+        },
+        setItem: (name: string, value: string) => {
+          try {
+            localStorage.setItem(name, value);
+          } catch {
+            console.warn(`settings: localStorage.setItem("${name}") failed (quota?)`);
+          }
+        },
+        removeItem: (name: string) => {
+          try {
+            localStorage.removeItem(name);
+          } catch {
+            console.warn(`settings: localStorage.removeItem("${name}") failed`);
+          }
+        },
+      })),
     },
   ),
 );

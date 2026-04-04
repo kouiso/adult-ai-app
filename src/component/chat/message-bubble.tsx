@@ -2,6 +2,7 @@ import { memo, useCallback, useState } from "react";
 import ReactMarkdown from "react-markdown";
 
 import { Pencil, RefreshCw, RotateCcw, Volume2, VolumeOff } from "lucide-react";
+import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 
 import { Avatar, AvatarFallback } from "@/component/ui/avatar";
@@ -45,6 +46,7 @@ const markdownStrong = ({ children }: { children?: React.ReactNode }) => (
 const markdownComponents = { p: markdownParagraph, em: markdownEm, strong: markdownStrong };
 // レンダー毎の配列再生成を防ぎ、ReactMarkdownのプラグイン再初期化をスキップさせる
 const remarkPlugins = [remarkGfm];
+const rehypePlugins = [rehypeSanitize];
 
 // ストリーミング中はReactMarkdownのフルパースを避けて生テキスト表示にする
 // ReactMarkdown+remarkGfmはチャンク毎に数十msメインスレッドをブロックするため
@@ -69,7 +71,11 @@ const MessageContent = memo(({ content, isStreaming }: MessageContentProps) => {
   }
   if (content) {
     return (
-      <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
+      <ReactMarkdown
+        remarkPlugins={remarkPlugins}
+        rehypePlugins={rehypePlugins}
+        components={markdownComponents}
+      >
         {content}
       </ReactMarkdown>
     );
@@ -109,12 +115,14 @@ const SpeakButton = ({
   </button>
 );
 
+// 画像生成APIのドメインのみ許可し、外部サイトからの意図しないリクエストを防ぐ
+const ALLOWED_IMAGE_HOSTS = new Set(["image.novita.ai", "novita.ai"]);
+
 const isValidImageUrl = (url: string): boolean => {
-  // R2永続化された画像はローカルパスで配信される
   if (url.startsWith("/api/image/r2/")) return true;
   try {
     const parsed = new URL(url);
-    return parsed.protocol === "https:";
+    return parsed.protocol === "https:" && ALLOWED_IMAGE_HOSTS.has(parsed.hostname);
   } catch {
     return false;
   }

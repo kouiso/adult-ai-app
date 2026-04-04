@@ -1,7 +1,8 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 
 import { useQuery } from "@tanstack/react-query";
 import { Volume2 } from "lucide-react";
+import { toast } from "sonner";
 import { useShallow } from "zustand/react/shallow";
 
 import { Separator } from "@/component/ui/separator";
@@ -80,6 +81,48 @@ export const SettingsPanel = () => {
     [categorizedVoices],
   );
 
+  const handleToggleNsfwBlur = useCallback(() => {
+    toggleNsfwBlur();
+    toast.success(nsfwBlur ? "NSFWぼかし OFF" : "NSFWぼかし ON");
+  }, [nsfwBlur, toggleNsfwBlur]);
+
+  const handleToggleDarkMode = useCallback(() => {
+    toggleDarkMode();
+    toast.success(darkMode ? "ライトモードに切替" : "ダークモードに切替");
+  }, [darkMode, toggleDarkMode]);
+
+  const handleToggleAutoImages = useCallback(() => {
+    toggleAutoGenerateImages();
+    toast.success(autoGenerateImages ? "自動画像生成 OFF" : "自動画像生成 ON");
+  }, [autoGenerateImages, toggleAutoGenerateImages]);
+
+  const handleToggleTts = useCallback(() => {
+    toggleTts();
+    toast.success(ttsEnabled ? "読み上げ OFF" : "読み上げ ON");
+  }, [ttsEnabled, toggleTts]);
+
+  const handleSetModel = useCallback(
+    (id: string) => {
+      setModel(id);
+      const modelName = MODEL_CATALOG.find((m) => m.id === id)?.name ?? id;
+      toast.success(`モデル: ${modelName}`);
+    },
+    [setModel],
+  );
+
+  const handleSetCharacter = useCallback(
+    (id: string | null) => {
+      setActiveCharacterId(id);
+      if (id === null) {
+        toast.success("デフォルトキャラクターに切替");
+      } else {
+        const ch = characters.find((c) => c.id === id);
+        toast.success(`キャラクター: ${ch?.name ?? id}`);
+      }
+    },
+    [setActiveCharacterId, characters],
+  );
+
   const handlePreview = (voiceURI: string) => {
     if (isSpeaking) {
       stop();
@@ -111,7 +154,7 @@ export const SettingsPanel = () => {
                 <button
                   key={m.id}
                   type="button"
-                  onClick={() => setModel(m.id)}
+                  onClick={() => handleSetModel(m.id)}
                   className={`w-full rounded-lg border p-3 text-left text-sm transition-colors ${
                     model === m.id ? "border-primary bg-primary/5" : "border-border hover:bg-muted"
                   }`}
@@ -132,7 +175,7 @@ export const SettingsPanel = () => {
             <div className="space-y-2">
               <button
                 type="button"
-                onClick={() => setActiveCharacterId(null)}
+                onClick={() => handleSetCharacter(null)}
                 className={`w-full rounded-lg border p-3 text-left text-sm transition-colors ${
                   activeCharacterId === null
                     ? "border-primary bg-primary/5"
@@ -148,7 +191,7 @@ export const SettingsPanel = () => {
                 <button
                   key={ch.id}
                   type="button"
-                  onClick={() => setActiveCharacterId(ch.id)}
+                  onClick={() => handleSetCharacter(ch.id)}
                   className={`w-full rounded-lg border p-3 text-left text-sm transition-colors ${
                     activeCharacterId === ch.id
                       ? "border-primary bg-primary/5"
@@ -186,21 +229,21 @@ export const SettingsPanel = () => {
                 <p className="text-sm font-medium">NSFWぼかし</p>
                 <p className="text-xs text-muted-foreground">画像をクリックするまでぼかす</p>
               </div>
-              <Switch checked={nsfwBlur} onCheckedChange={toggleNsfwBlur} />
+              <Switch checked={nsfwBlur} onCheckedChange={handleToggleNsfwBlur} />
             </div>
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium">ダークモード</p>
                 <p className="text-xs text-muted-foreground">テーマの切り替え</p>
               </div>
-              <Switch checked={darkMode} onCheckedChange={toggleDarkMode} />
+              <Switch checked={darkMode} onCheckedChange={handleToggleDarkMode} />
             </div>
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium">自動画像生成</p>
                 <p className="text-xs text-muted-foreground">AIが適切なタイミングで画像を生成</p>
               </div>
-              <Switch checked={autoGenerateImages} onCheckedChange={toggleAutoGenerateImages} />
+              <Switch checked={autoGenerateImages} onCheckedChange={handleToggleAutoImages} />
             </div>
           </div>
 
@@ -219,7 +262,7 @@ export const SettingsPanel = () => {
                     <p className="text-sm font-medium">音声読み上げ</p>
                     <p className="text-xs text-muted-foreground">AIの応答を音声で再生</p>
                   </div>
-                  <Switch checked={ttsEnabled} onCheckedChange={toggleTts} />
+                  <Switch checked={ttsEnabled} onCheckedChange={handleToggleTts} />
                 </div>
                 {ttsEnabled && (
                   <>
