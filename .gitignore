@@ -29,3 +29,6 @@ dist-ssr
 
 # Task runner cache
 .task/
+
+# Playwright MCP artifacts (開発時の自動スクショ・ログ)
+.playwright-mcp/
