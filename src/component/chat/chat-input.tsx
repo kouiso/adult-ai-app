@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { memo, useCallback, useRef, useState } from "react";
 
 import { Button } from "@/component/ui/button";
 import { Textarea } from "@/component/ui/textarea";
@@ -9,7 +9,7 @@ interface ChatInputProps {
   isLoading: boolean;
 }
 
-export const ChatInput = ({ onSend, onGenerateImage, isLoading }: ChatInputProps) => {
+export const ChatInput = memo(({ onSend, onGenerateImage, isLoading }: ChatInputProps) => {
   const [input, setInput] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -67,4 +67,6 @@ export const ChatInput = ({ onSend, onGenerateImage, isLoading }: ChatInputProps
       </div>
     </div>
   );
-};
+});
+
+ChatInput.displayName = "ChatInput";

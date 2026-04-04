@@ -1,13 +1,35 @@
 import { z } from "zod/v4";
 
-const REPETITION_CHECK_WINDOW = 300;
-// 3〜30文字のフレーズが5回以上連続したら繰り返しと判定
-const REPETITION_PATTERN = /(.{3,30})\1{4,}/;
+const REPETITION_CHECK_WINDOW = 500;
+const EXACT_REPETITION = /(.{3,30})\1{3,}/;
+const FREQ_THRESHOLD = 4;
+
+// フレーズ配列の中に閾値以上の頻出がないか判定
+function hasFrequentItem(items: string[], threshold: number): boolean {
+  const freq = new Map<string, number>();
+  for (const item of items) {
+    const count = (freq.get(item) ?? 0) + 1;
+    if (count >= threshold) return true;
+    freq.set(item, count);
+  }
+  return false;
+}
 
 function detectRepetition(text: string): boolean {
-  if (text.length < 30) return false;
+  if (text.length < 50) return false;
   const tail = text.slice(-REPETITION_CHECK_WINDOW);
-  return REPETITION_PATTERN.test(tail);
+
+  if (EXACT_REPETITION.test(tail)) return true;
+
+  // 「」で囲まれたセリフの頻出検出
+  const quotes = tail.match(/「[^」]{2,30}」/g);
+  if (quotes && quotes.length >= 6 && hasFrequentItem(quotes, FREQ_THRESHOLD)) return true;
+
+  // 句読点区切りフレーズの頻出検出
+  const phrases = tail.split(/[\n…。！？]+/).filter((p) => p.length >= 3 && p.length <= 15);
+  if (phrases.length >= 8 && hasFrequentItem(phrases, FREQ_THRESHOLD)) return true;
+
+  return false;
 }
 
 function parseSseChunk(data: string): string | "[DONE]" | null {
@@ -21,6 +43,27 @@ function parseSseChunk(data: string): string | "[DONE]" | null {
   }
 }
 
+// UIの再レンダーを間引くため、チャンクをバッファして一定間隔でフラッシュする
+const STREAM_FLUSH_INTERVAL_MS = 50;
+
+type SseLineResult = "done" | "repetition" | "continue";
+
+function processSseLine(
+  line: string,
+  state: { accumulated: string; pendingChunks: string },
+): SseLineResult {
+  if (!line.startsWith("data: ")) return "continue";
+  const result = parseSseChunk(line.slice(6).trim());
+  if (result === "[DONE]") return "done";
+  if (!result) return "continue";
+
+  state.accumulated += result;
+  state.pendingChunks += result;
+
+  if (detectRepetition(state.accumulated)) return "repetition";
+  return "continue";
+}
+
 async function processStream(
   body: ReadableStream<Uint8Array>,
   onChunk: (text: string) => void,
@@ -29,7 +72,21 @@ async function processStream(
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  let accumulated = "";
+  const state = { accumulated: "", pendingChunks: "" };
+  let flushTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const flush = () => {
+    if (state.pendingChunks) {
+      onChunk(state.pendingChunks);
+      state.pendingChunks = "";
+    }
+    flushTimer = null;
+  };
+
+  const cleanup = () => {
+    if (flushTimer) clearTimeout(flushTimer);
+    flush();
+  };
 
   while (true) {
     const { done, value } = await reader.read();
@@ -40,24 +97,24 @@ async function processStream(
     buffer = lines.pop() ?? "";
 
     for (const line of lines) {
-      if (!line.startsWith("data: ")) continue;
-      const result = parseSseChunk(line.slice(6).trim());
-      if (result === "[DONE]") {
+      const lineResult = processSseLine(line, state);
+      if (lineResult === "done") {
+        cleanup();
         onDone();
         return;
       }
-      if (!result) continue;
-
-      accumulated += result;
-      onChunk(result);
-
-      if (detectRepetition(accumulated)) {
+      if (lineResult === "repetition") {
+        cleanup();
         await reader.cancel();
         onDone();
         return;
       }
+      if (lineResult === "continue" && state.pendingChunks && !flushTimer) {
+        flushTimer = setTimeout(flush, STREAM_FLUSH_INTERVAL_MS);
+      }
     }
   }
+  cleanup();
   onDone();
 }
 
@@ -209,6 +266,15 @@ export async function deleteConversation(conversationId: string): Promise<void> 
   }
 }
 
+export async function deleteAllConversations(): Promise<void> {
+  const response = await fetch("/api/conversations", {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    throw new Error(`delete all conversations failed: ${response.status}`);
+  }
+}
+
 export async function updateConversationTitle(
   conversationId: string,
   title: string,
@@ -254,8 +320,8 @@ export async function generateConversationTitle(
     },
   );
   if (!response.ok) return null;
-  const data = await response.json();
-  return data.title;
+  const data: { title?: string } = await response.json();
+  return data.title ?? null;
 }
 
 export async function listConversationMessages(
