@@ -258,7 +258,7 @@ interface CharacterListItemProps {
 const CharacterAvatar = ({ character }: { character: Character }) => {
   const av = character.avatar;
   if (!av) return <>{character.name.slice(0, 2)}</>;
-  if (av.startsWith("http")) {
+  if (av.startsWith("http") || av.startsWith("/")) {
     return <img src={av} alt={character.name} className="h-8 w-8 rounded-full object-cover" />;
   }
   return <>{av}</>;

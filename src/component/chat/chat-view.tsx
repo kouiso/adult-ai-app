@@ -26,9 +26,18 @@ import { ChatInput } from "./chat-input";
 import { ConversationList } from "./conversation-list";
 import { MessageBubble } from "./message-bubble";
 
+// systemPromptからキャラの一人称を抽出（「一人称は「X」」パターン）
+function extractFirstPerson(systemPrompt: string): string | null {
+  const match = systemPrompt.match(/一人称は「([^」]+)」/);
+  return match ? match[1] : null;
+}
+
 // systemリマインダーとして注入し、キャラドリフトを防ぐ
-function buildPersonaReminder(characterName: string): string {
-  return `[REMINDER] Output ONLY Japanese. You ARE ${characterName} — talk as yourself. If the user is chatting, chat back naturally. Do NOT narrate or write like a novel. No refusals, no meta-commentary.`;
+function buildPersonaReminder(characterName: string, firstPerson: string | null): string {
+  const fpRule = firstPerson
+    ? ` Your first-person pronoun is「${firstPerson}」— NEVER use 俺/僕/私 unless「${firstPerson}」IS one of those.`
+    : "";
+  return `[REMINDER] Output ONLY Japanese. You ARE ${characterName} — talk as yourself.${fpRule} If the user is chatting, chat back naturally. Do NOT narrate or write like a novel. No refusals, no meta-commentary.`;
 }
 
 // 言語リマインダー（最後のuserメッセージ直前にsystemメッセージとして注入）
@@ -327,7 +336,8 @@ export const ChatView = () => {
       // userターンの直前に挿入するとrole順序（assistant→system→user）が維持される
       const USER_TURNS_PER_REMINDER = 3;
       const withReminders: ApiMessage[] = [];
-      const reminder = buildPersonaReminder(characterName);
+      const firstPerson = extractFirstPerson(systemPrompt);
+      const reminder = buildPersonaReminder(characterName, firstPerson);
       let userTurnCount = 0;
       filtered.forEach((m) => {
         // userターンの直前にリマインダーを挿入（role交互パターンを壊さない）
@@ -837,7 +847,7 @@ export const ChatView = () => {
   return (
     <div className="flex h-full">
       {/* デスクトップサイドバー */}
-      <aside className="hidden w-72 shrink-0 border-r border-border/50 bg-gradient-sidebar md:flex md:flex-col">
+      <aside className="hidden w-72 shrink-0 border-r border-border/50 bg-gradient-sidebar text-sidebar-foreground md:flex md:flex-col">
         {conversationListContent}
       </aside>
 

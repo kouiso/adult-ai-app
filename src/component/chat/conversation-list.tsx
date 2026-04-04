@@ -110,8 +110,8 @@ export const ConversationList = memo(
                 className={cn(
                   "w-full rounded-md border px-3 py-2 text-left transition-colors pr-8",
                   currentConversationId === conversation.id
-                    ? "border-primary/50 bg-primary/10 shadow-sm"
-                    : "border-transparent hover:bg-accent/60",
+                    ? "border-primary/60 bg-primary/15 shadow-sm"
+                    : "border-transparent hover:bg-accent/70",
                 )}
               >
                 <p className="line-clamp-1 text-sm font-medium">{conversation.title}</p>
@@ -119,7 +119,8 @@ export const ConversationList = memo(
                   {conversation.characterName !== "AI" && (
                     <span className="mr-1">
                       {conversation.characterAvatar &&
-                      !conversation.characterAvatar.startsWith("http")
+                      !conversation.characterAvatar.startsWith("http") &&
+                      !conversation.characterAvatar.startsWith("/")
                         ? conversation.characterAvatar
                         : "👤"}{" "}
                       {conversation.characterName} ·{" "}

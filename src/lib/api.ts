@@ -281,8 +281,8 @@ const persistedMessageSchema = z.object({
   id: z.string(),
   role: z.enum(["system", "user", "assistant"]),
   content: z.string(),
-  imageUrl: z.string().optional(),
-  imageKey: z.string().optional(),
+  imageUrl: z.string().nullable().optional(),
+  imageKey: z.string().nullable().optional(),
   createdAt: z.number(),
 });
 
