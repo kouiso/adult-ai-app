@@ -1,0 +1,1 @@
+../../prompt/commands/security-check.md

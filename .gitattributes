@@ -1,0 +1,2 @@
+# git-crypt: prompt/配下のAIプロンプトを暗号化
+prompt/** filter=git-crypt diff=git-crypt

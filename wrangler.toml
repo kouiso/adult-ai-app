@@ -1,0 +1,20 @@
+name = "adult-ai-app"
+compatibility_date = "2025-01-01"
+pages_build_output_dir = "./dist"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "adult-ai-db"
+database_id = "b617800c-cf4c-4122-adbb-ce872a258da6"
+preview_database_id = "b617800c-cf4c-4122-adbb-ce872a258da6"
+migrations_dir = "drizzle"
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "adult-ai-images"
+
+[vars]
+# Non-secret vars go here
+
+# Secret vars are set via: wrangler secret put OPENROUTER_API_KEY
+# wrangler secret put NOVITA_API_KEY

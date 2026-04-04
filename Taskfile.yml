@@ -1,0 +1,208 @@
+# https://taskfile.dev
+
+version: "3"
+
+vars:
+  D1_DB_NAME: adult-ai-db
+  R2_BUCKET_NAME: adult-ai-images
+
+tasks:
+  default:
+    cmds:
+      - task -l
+
+  # ===== セットアップ =====
+
+  init:
+    desc: "初期セットアップ（何度実行しても安全）"
+    cmds:
+      - task: _check-tools
+      - task: _install
+      - task: _setup-cf
+      - task: _db-migrate-local
+      - task: _build
+      - 'echo ""'
+      - 'echo "=========================================="'
+      - 'echo "  ✅ Init complete"'
+      - 'echo "=========================================="'
+
+  setup:
+    internal: true
+    cmds:
+      - task: init
+
+  _check-tools:
+    internal: true
+    silent: true
+    cmds:
+      - |
+        missing=""
+        command -v node >/dev/null 2>&1 || missing="$missing node"
+        command -v pnpm >/dev/null 2>&1 || missing="$missing pnpm"
+        if [ -n "$missing" ]; then
+          echo "❌ Missing tools:$missing"
+          echo "  Install node: https://nodejs.org/"
+          echo "  Install pnpm: corepack enable && corepack prepare pnpm@9 --activate"
+          exit 1
+        fi
+        echo "✓ Required tools available"
+
+  _install:
+    internal: true
+    cmds:
+      - pnpm install
+    sources:
+      - package.json
+      - pnpm-lock.yaml
+    generates:
+      - node_modules/.pnpm/lock.yaml
+
+  _setup-cf:
+    internal: true
+    cmds:
+      - task: _check-wrangler-auth
+      - task: _setup-d1
+      - task: _setup-r2
+      - task: _setup-wrangler-toml
+
+  _check-wrangler-auth:
+    internal: true
+    silent: true
+    cmds:
+      - |
+        if ! npx wrangler whoami 2>&1 | grep -q "Account ID"; then
+          echo "❌ wrangler未認証。先に npx wrangler login を実行してください"
+          exit 1
+        fi
+        echo "✓ wrangler authenticated"
+
+  _setup-d1:
+    internal: true
+    cmds:
+      - |
+        if npx wrangler d1 list 2>&1 | grep -q "{{.D1_DB_NAME}}"; then
+          echo "✓ D1 database '{{.D1_DB_NAME}}' already exists"
+        else
+          echo "Creating D1 database '{{.D1_DB_NAME}}'..."
+          npx wrangler d1 create "{{.D1_DB_NAME}}"
+        fi
+
+  _setup-r2:
+    internal: true
+    cmds:
+      - |
+        set +e
+        bucket_list_output="$(npx wrangler r2 bucket list 2>&1)"
+        bucket_list_status=$?
+        set -e
+
+        if [ "$bucket_list_status" -ne 0 ] && echo "$bucket_list_output" | grep -q "code: 10042"; then
+          echo "⚠️  R2が未有効です。Cloudflare DashboardでR2を有効化後に再実行してください"
+          exit 0
+        fi
+
+        if [ "$bucket_list_status" -ne 0 ]; then
+          echo "$bucket_list_output"
+          exit "$bucket_list_status"
+        fi
+
+        if echo "$bucket_list_output" | grep -q "{{.R2_BUCKET_NAME}}"; then
+          echo "✓ R2 bucket '{{.R2_BUCKET_NAME}}' already exists"
+        else
+          echo "Creating R2 bucket '{{.R2_BUCKET_NAME}}'..."
+          npx wrangler r2 bucket create "{{.R2_BUCKET_NAME}}"
+        fi
+
+  _setup-wrangler-toml:
+    internal: true
+    silent: true
+    cmds:
+      - |
+        if ! grep -q "d1_databases" wrangler.toml; then
+          echo "⚠️  wrangler.toml に D1バインディングがありません"
+          echo "  D1のdatabase_idを確認して wrangler.toml に追記してください"
+          echo "  確認: npx wrangler d1 list"
+          exit 1
+        fi
+        if ! grep -q "r2_buckets" wrangler.toml; then
+          echo "⚠️  wrangler.toml に R2バインディングがありません"
+          exit 1
+        fi
+        echo "✓ wrangler.toml bindings OK"
+
+  # ===== DB =====
+
+  db:generate:
+    desc: "マイグレーション生成"
+    cmds:
+      - pnpm db:generate
+
+  _db-migrate-local:
+    internal: true
+    cmds:
+      - npx wrangler d1 migrations apply {{.D1_DB_NAME}} --local
+
+  db:migrate:
+    desc: "本番D1にマイグレーション適用"
+    cmds:
+      - task: _check-wrangler-auth
+      - npx wrangler d1 migrations apply {{.D1_DB_NAME}} --remote
+
+  # ===== 開発 =====
+
+  up:
+    desc: "開発起動（Vite + Worker）"
+    cmds:
+      - |
+        pnpm dev:worker &
+        worker_pid=$!
+        pnpm dev &
+        vite_pid=$!
+        wait "$worker_pid" "$vite_pid"
+
+  dev:
+    internal: true
+    cmds:
+      - pnpm dev
+
+  worker:
+    internal: true
+    cmds:
+      - pnpm dev:worker
+
+  # ===== 品質 =====
+
+  _build:
+    internal: true
+    cmds:
+      - pnpm build
+
+  _lint:
+    internal: true
+    cmds:
+      - pnpm lint
+
+  fix:
+    desc: "lint自動修正"
+    cmds:
+      - pnpm lint --fix
+
+  ci:
+    desc: "CIチェック（lint + build）"
+    cmds:
+      - task: _lint
+      - task: _build
+      - 'echo ""'
+      - 'echo "=========================================="'
+      - 'echo "  ✅ CI: All steps passed"'
+      - 'echo "=========================================="'
+
+  # ===== デプロイ =====
+
+  deploy:
+    desc: "デプロイ"
+    cmds:
+      - task: _check-wrangler-auth
+      - task: ci
+      - task: db:migrate
+      - pnpm deploy
