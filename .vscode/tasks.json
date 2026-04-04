@@ -1,0 +1,37 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "vite-dev",
+      "type": "shell",
+      "command": "pnpm dev",
+      "isBackground": true,
+      "problemMatcher": {
+        "pattern": {
+          "regexp": "^$"
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "vite",
+          "endsPattern": "ready in"
+        }
+      }
+    },
+    {
+      "label": "wrangler-dev",
+      "type": "shell",
+      "command": "npx wrangler pages dev dist --port 8788 --inspector-port=9230",
+      "isBackground": true,
+      "problemMatcher": {
+        "pattern": {
+          "regexp": "^$"
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "Starting local server",
+          "endsPattern": "Ready on http"
+        }
+      }
+    }
+  ]
+}

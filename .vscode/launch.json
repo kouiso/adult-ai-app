@@ -1,0 +1,57 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Vite Dev (Chrome)",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:5173",
+      "webRoot": "${workspaceFolder}/src",
+      "preLaunchTask": "vite-dev"
+    },
+    {
+      "name": "Vite Dev (Attach)",
+      "type": "chrome",
+      "request": "attach",
+      "port": 9222,
+      "webRoot": "${workspaceFolder}/src"
+    },
+    {
+      "name": "Wrangler Pages Dev",
+      "type": "chrome",
+      "request": "attach",
+      "port": 9230,
+      "webRoot": "${workspaceFolder}",
+      "preLaunchTask": "wrangler-dev"
+    },
+    {
+      "name": "Vitest (Current File)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/node_modules/.bin/vitest",
+      "args": ["run", "${relativeFile}"],
+      "autoAttachChildProcesses": true,
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "name": "Vitest (All)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/node_modules/.bin/vitest",
+      "args": ["run"],
+      "autoAttachChildProcesses": true,
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "name": "Seed Script",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/node_modules/.bin/tsx",
+      "args": ["scripts/seed.ts"],
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    }
+  ]
+}
