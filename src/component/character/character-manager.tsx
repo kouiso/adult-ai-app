@@ -1,14 +1,16 @@
 import { useState } from "react";
 
-import { ChevronDown, ChevronRight, Pencil, Plus, Trash2, Users } from "lucide-react";
+import { ChevronDown, ChevronRight, Pencil, Plus, Sparkles, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
 import { useShallow } from "zustand/react/shallow";
 
+import { CharacterWizard } from "@/component/character/character-wizard";
 import { Button } from "@/component/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/component/ui/dialog";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/component/ui/sheet";
 import { useCharacterQuery } from "@/hook/use-character-query";
 import type { Character, CharacterInput } from "@/lib/api";
+import type { GeneratedCharacter } from "@/lib/character-generator";
 import { buildSystemPrompt, parseSystemPrompt } from "@/lib/prompt-builder";
 import { useSettingsStore } from "@/store/settings-store";
 
@@ -224,7 +226,11 @@ const CharacterForm = ({ initial, onSave, onCancel, isSaving }: CharacterFormPro
   );
 };
 
-type DialogMode = { type: "create" } | { type: "edit"; character: Character } | null;
+type DialogMode =
+  | { type: "create" }
+  | { type: "create-from-wizard"; generated: GeneratedCharacter }
+  | { type: "edit"; character: Character }
+  | null;
 
 interface CharacterListItemProps {
   character: Character;
@@ -305,6 +311,7 @@ interface CharacterSheetListProps {
   onEdit: (character: Character) => void;
   onDelete: (id: string) => void;
   onCreateClick: () => void;
+  onWizardClick: () => void;
 }
 
 const CharacterSheetList = ({
@@ -316,6 +323,7 @@ const CharacterSheetList = ({
   onEdit,
   onDelete,
   onCreateClick,
+  onWizardClick,
 }: CharacterSheetListProps) => (
   <>
     <div className="mt-4 flex-1 overflow-y-auto space-y-2">
@@ -351,10 +359,14 @@ const CharacterSheetList = ({
       )}
     </div>
 
-    <div className="mt-4 border-t pt-4">
-      <Button className="w-full" onClick={onCreateClick}>
+    <div className="mt-4 space-y-2 border-t pt-4">
+      <Button className="w-full" variant="default" onClick={onWizardClick}>
+        <Sparkles className="mr-2 h-4 w-4" />
+        AIで作成
+      </Button>
+      <Button className="w-full" variant="outline" onClick={onCreateClick}>
         <Plus className="mr-2 h-4 w-4" />
-        新しいキャラクターを作成
+        手動で作成
       </Button>
     </div>
   </>
@@ -365,6 +377,7 @@ export const CharacterManager = ({ onCharacterSelect }: CharacterManagerProps) =
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [isWizardOpen, setWizardOpen] = useState(false);
 
   const {
     characters,
@@ -428,6 +441,25 @@ export const CharacterManager = ({ onCharacterSelect }: CharacterManagerProps) =
     setSheetOpen(false);
   };
 
+  const handleWizardSaveDirectly = (generated: GeneratedCharacter) => {
+    const input: CharacterInput = {
+      name: generated.name,
+      systemPrompt: buildSystemPrompt({
+        name: generated.name,
+        personality: generated.personality,
+        scenario: generated.scenario,
+        custom: "",
+      }),
+      greeting: generated.greeting,
+      tags: generated.tags,
+    };
+    void handleCreate(input);
+  };
+
+  const handleWizardEditAndSave = (generated: GeneratedCharacter) => {
+    setDialogMode({ type: "create-from-wizard", generated });
+  };
+
   return (
     <>
       <Sheet open={isSheetOpen} onOpenChange={setSheetOpen}>
@@ -450,6 +482,10 @@ export const CharacterManager = ({ onCharacterSelect }: CharacterManagerProps) =
             onEdit={(c) => setDialogMode({ type: "edit", character: c })}
             onDelete={(id) => void handleDelete(id)}
             onCreateClick={() => setDialogMode({ type: "create" })}
+            onWizardClick={() => {
+              setSheetOpen(false);
+              setWizardOpen(true);
+            }}
           />
         </SheetContent>
       </Sheet>
@@ -468,6 +504,28 @@ export const CharacterManager = ({ onCharacterSelect }: CharacterManagerProps) =
               isSaving={isSaving}
             />
           )}
+          {dialogMode?.type === "create-from-wizard" && (
+            <CharacterForm
+              initial={{
+                id: "",
+                userId: "",
+                name: dialogMode.generated.name,
+                avatar: null,
+                systemPrompt: buildSystemPrompt({
+                  name: dialogMode.generated.name,
+                  personality: dialogMode.generated.personality,
+                  scenario: dialogMode.generated.scenario,
+                  custom: "",
+                }),
+                greeting: dialogMode.generated.greeting,
+                tags: dialogMode.generated.tags,
+                createdAt: 0,
+              }}
+              onSave={handleCreate}
+              onCancel={() => setDialogMode(null)}
+              isSaving={isSaving}
+            />
+          )}
           {dialogMode?.type === "edit" && (
             <CharacterForm
               initial={dialogMode.character}
@@ -478,6 +536,13 @@ export const CharacterManager = ({ onCharacterSelect }: CharacterManagerProps) =
           )}
         </DialogContent>
       </Dialog>
+
+      <CharacterWizard
+        open={isWizardOpen}
+        onOpenChange={setWizardOpen}
+        onSaveDirectly={handleWizardSaveDirectly}
+        onEditAndSave={handleWizardEditAndSave}
+      />
     </>
   );
 };

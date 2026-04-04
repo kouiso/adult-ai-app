@@ -1,5 +1,7 @@
 import { memo, useCallback, useRef, useState } from "react";
 
+import { ImagePlus, SendHorizontal } from "lucide-react";
+
 import { Button } from "@/component/ui/button";
 import { Textarea } from "@/component/ui/textarea";
 
@@ -24,7 +26,8 @@ export const ChatInput = memo(({ onSend, onGenerateImage, isLoading }: ChatInput
   }, [input, isLoading, onSend]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    // Slack式: Ctrl+Enter(またはCmd+Enter)で送信、Enterは改行
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       handleSend();
     }
@@ -38,7 +41,7 @@ export const ChatInput = memo(({ onSend, onGenerateImage, isLoading }: ChatInput
   };
 
   return (
-    <div className="border-t bg-background p-4">
+    <div className="border-t border-border/50 bg-card/80 glass-effect p-4">
       <div className="mx-auto flex max-w-3xl items-end gap-2">
         <Textarea
           ref={textareaRef}
@@ -58,10 +61,15 @@ export const ChatInput = memo(({ onSend, onGenerateImage, isLoading }: ChatInput
             disabled={isLoading}
             title="画像生成"
           >
-            🖼️
+            <ImagePlus className="h-4 w-4" />
           </Button>
-          <Button onClick={handleSend} disabled={isLoading || !input.trim()}>
-            送信
+          <Button
+            onClick={handleSend}
+            size="icon"
+            disabled={isLoading || !input.trim()}
+            title="送信"
+          >
+            <SendHorizontal className="h-4 w-4" />
           </Button>
         </div>
       </div>

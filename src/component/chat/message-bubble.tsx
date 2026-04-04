@@ -1,7 +1,7 @@
 import { memo, useCallback, useState } from "react";
 import ReactMarkdown from "react-markdown";
 
-import { Pencil, RefreshCw, Volume2, VolumeOff } from "lucide-react";
+import { Pencil, RefreshCw, RotateCcw, Volume2, VolumeOff } from "lucide-react";
 import remarkGfm from "remark-gfm";
 
 import { Avatar, AvatarFallback } from "@/component/ui/avatar";
@@ -18,11 +18,14 @@ interface MessageBubbleProps {
   nsfwBlur?: boolean;
   canSpeak?: boolean;
   isSpeaking?: boolean;
+  error?: boolean;
   isLast?: boolean;
+  isHighlighted?: boolean;
   onSpeak?: (messageId: string, text: string) => void;
   onStopSpeaking?: () => void;
   onRegenerate?: (messageId: string) => void;
   onEdit?: (messageId: string, newContent: string) => void;
+  onRetry?: (messageId: string) => void;
 }
 
 interface MessageContentProps {
@@ -49,9 +52,9 @@ const StreamingContent = memo(({ content }: { content: string }) => {
   if (!content) {
     return (
       <div className="flex gap-1">
-        <span className="animate-bounce text-xs">●</span>
-        <span className="animate-bounce text-xs [animation-delay:0.2s]">●</span>
-        <span className="animate-bounce text-xs [animation-delay:0.4s]">●</span>
+        <span className="animate-bounce text-xs text-primary/60">●</span>
+        <span className="animate-bounce text-xs text-primary/60 [animation-delay:0.2s]">●</span>
+        <span className="animate-bounce text-xs text-primary/60 [animation-delay:0.4s]">●</span>
       </div>
     );
   }
@@ -167,8 +170,8 @@ const MessageAvatar = ({ isUser, characterName }: MessageAvatarProps) => (
   <Avatar className="h-8 w-8 shrink-0">
     <AvatarFallback
       className={cn(
-        "text-xs",
-        isUser ? "bg-primary text-primary-foreground" : "bg-secondary text-secondary-foreground",
+        "text-xs font-medium",
+        isUser ? "bg-gradient-user-bubble text-white" : "bg-accent text-accent-foreground",
       )}
     >
       {isUser ? "あなた" : characterName.slice(0, 2)}
@@ -187,7 +190,8 @@ const UserEditForm = ({ initialContent, onSave, onCancel }: UserEditFormProps) =
   const [value, setValue] = useState(initialContent);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    // ChatInputと統一: Ctrl+Enter(またはCmd+Enter)��送信
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       if (value.trim()) onSave(value.trim());
     }
@@ -225,6 +229,94 @@ const UserEditForm = ({ initialContent, onSave, onCancel }: UserEditFormProps) =
   );
 };
 
+// ── エラー表示 ───────────────────────────────────────────────────────────
+interface ErrorIndicatorProps {
+  messageId: string;
+  onRetry?: (messageId: string) => void;
+}
+
+const ErrorIndicator = ({ messageId, onRetry }: ErrorIndicatorProps) => (
+  <div className="flex items-center gap-2 text-destructive">
+    <span className="text-xs font-medium">送信エラー</span>
+    {onRetry && (
+      <button
+        type="button"
+        onClick={() => onRetry(messageId)}
+        className="flex items-center gap-1 rounded-full bg-destructive/10 px-2.5 py-1 text-xs font-medium text-destructive transition-colors hover:bg-destructive/20"
+        aria-label="再試行"
+      >
+        <RotateCcw className="h-3 w-3" />
+        再試行
+      </button>
+    )}
+  </div>
+);
+
+// ── アクションボタン群 ───────────────────────────────────────────────────
+interface MessageActionsProps {
+  id: string;
+  isUser: boolean;
+  isLoading: boolean;
+  isLast: boolean;
+  canSpeak: boolean;
+  isSpeaking: boolean;
+  content: string;
+  onSpeak?: (messageId: string, text: string) => void;
+  onStopSpeaking?: () => void;
+  onRegenerate?: (messageId: string) => void;
+  onStartEdit: () => void;
+  hasEditHandler: boolean;
+}
+
+const MessageActions = ({
+  id,
+  isUser,
+  isLoading,
+  isLast,
+  canSpeak,
+  isSpeaking,
+  content,
+  onSpeak,
+  onStopSpeaking,
+  onRegenerate,
+  onStartEdit,
+  hasEditHandler,
+}: MessageActionsProps) => (
+  <div className={cn("flex items-center gap-1", isUser ? "justify-end" : "justify-start")}>
+    {canSpeak && (
+      <SpeakButton
+        messageId={id}
+        isSpeaking={isSpeaking}
+        content={content}
+        onSpeak={onSpeak}
+        onStopSpeaking={onStopSpeaking}
+      />
+    )}
+    {isUser && !isLoading && hasEditHandler && (
+      <button
+        type="button"
+        onClick={onStartEdit}
+        className="flex items-center gap-1 rounded-full px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        aria-label="メッセージを編集"
+      >
+        <Pencil className="h-3.5 w-3.5" />
+        編集
+      </button>
+    )}
+    {!isUser && isLast && !isLoading && onRegenerate && content && (
+      <button
+        type="button"
+        onClick={() => onRegenerate(id)}
+        className="flex items-center gap-1 rounded-full px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        aria-label="再生成"
+      >
+        <RefreshCw className="h-3.5 w-3.5" />
+        再生成
+      </button>
+    )}
+  </div>
+);
+
 export const MessageBubble = memo(
   ({
     id,
@@ -233,21 +325,24 @@ export const MessageBubble = memo(
     imageUrl,
     isStreaming,
     isLoading = false,
+    error = false,
     characterName = "AI",
     nsfwBlur = false,
     canSpeak = false,
     isSpeaking = false,
     isLast = false,
+    isHighlighted = false,
     onSpeak,
     onStopSpeaking,
     onRegenerate,
     onEdit,
+    onRetry,
   }: MessageBubbleProps) => {
     const isUser = role === "user";
     const [isEditing, setIsEditing] = useState(false);
     const bubbleStyle = isUser
-      ? "bg-primary text-primary-foreground rounded-tr-sm"
-      : "bg-muted text-foreground rounded-tl-sm";
+      ? "bg-gradient-user-bubble text-white rounded-tr-sm shadow-sm"
+      : "bg-card text-foreground rounded-tl-sm border border-border/50 shadow-sm";
 
     const handleEditSave = useCallback(
       (newContent: string) => {
@@ -268,48 +363,34 @@ export const MessageBubble = memo(
               onCancel={() => setIsEditing(false)}
             />
           ) : (
-            <div className={cn("rounded-2xl px-4 py-2.5 text-sm leading-relaxed", bubbleStyle)}>
+            <div
+              className={cn(
+                "rounded-2xl px-4 py-2.5 text-sm leading-relaxed",
+                bubbleStyle,
+                isHighlighted && "ring-2 ring-yellow-400/50 bg-yellow-50/10",
+              )}
+            >
               <MessageContent content={content} isStreaming={isStreaming} />
             </div>
           )}
 
-          {/* アクションボタン群 */}
-          {!isStreaming && !isEditing && (
-            <div
-              className={cn("flex items-center gap-1", isUser ? "justify-end" : "justify-start")}
-            >
-              {canSpeak && (
-                <SpeakButton
-                  messageId={id}
-                  isSpeaking={isSpeaking}
-                  content={content}
-                  onSpeak={onSpeak}
-                  onStopSpeaking={onStopSpeaking}
-                />
-              )}
-              {isUser && !isLoading && onEdit && (
-                <button
-                  type="button"
-                  onClick={() => setIsEditing(true)}
-                  className="flex items-center gap-1 rounded-full px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                  aria-label="メッセージを編集"
-                >
-                  <Pencil className="h-3.5 w-3.5" />
-                  編集
-                </button>
-              )}
-              {!isUser && isLast && !isLoading && onRegenerate && content && (
-                <button
-                  type="button"
-                  onClick={() => onRegenerate(id)}
-                  className="flex items-center gap-1 rounded-full px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                  aria-label="再生成"
-                >
-                  <RefreshCw className="h-3.5 w-3.5" />
-                  再生成
-                </button>
-              )}
-            </div>
+          {error && !isUser && !isEditing && <ErrorIndicator messageId={id} onRetry={onRetry} />}
+
+          {!isStreaming && !isEditing && !error && (
+            <MessageActions
+              id={id}
+              isUser={isUser}
+              isLoading={isLoading}
+              isLast={isLast}
+              canSpeak={canSpeak}
+              isSpeaking={isSpeaking}
+              content={content}
+              onSpeak={onSpeak}
+              onStopSpeaking={onStopSpeaking}
+              onRegenerate={onRegenerate}
+              onStartEdit={() => setIsEditing(true)}
+              hasEditHandler={!!onEdit}
+            />
           )}
 
           {imageUrl && <ImagePreview imageUrl={imageUrl} nsfwBlur={nsfwBlur} />}

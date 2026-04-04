@@ -95,7 +95,7 @@ export const SettingsPanel = () => {
     <Sheet>
       <SheetTrigger
         aria-label="設定を開く"
-        className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors hover:bg-accent hover:text-accent-foreground h-10 w-10"
+        className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors hover:bg-white/20 h-10 w-10"
       >
         ⚙️
       </SheetTrigger>

@@ -6,6 +6,7 @@ export interface ChatMessage {
   content: string;
   imageUrl?: string;
   isStreaming?: boolean;
+  error?: boolean;
 }
 
 interface ChatState {
@@ -16,6 +17,7 @@ interface ChatState {
   updateMessage: (id: string, content: string, isStreaming?: boolean) => void;
   updateMessageImage: (id: string, imageUrl: string) => void;
   setMessages: (messages: ChatMessage[]) => void;
+  markMessageError: (id: string) => void;
   setLoading: (loading: boolean) => void;
   setConversationId: (id: string | null) => void;
   clearMessages: () => void;
@@ -28,11 +30,20 @@ export const useChatStore = create<ChatState>((set) => ({
   addMessage: (message) => set((state) => ({ messages: [...state.messages, message] })),
   updateMessage: (id, content, isStreaming = false) =>
     set((state) => ({
-      messages: state.messages.map((m) => (m.id === id ? { ...m, content, isStreaming } : m)),
+      // リトライ成功時にerrorフラグが残らないよう明示的にクリア
+      messages: state.messages.map((m) =>
+        m.id === id ? { ...m, content, isStreaming, error: false } : m,
+      ),
     })),
   updateMessageImage: (id, imageUrl) =>
     set((state) => ({
       messages: state.messages.map((m) => (m.id === id ? { ...m, imageUrl } : m)),
+    })),
+  markMessageError: (id) =>
+    set((state) => ({
+      messages: state.messages.map((m) =>
+        m.id === id ? { ...m, error: true, isStreaming: false } : m,
+      ),
     })),
   setMessages: (messages) => set({ messages }),
   setLoading: (isLoading) => set({ isLoading }),

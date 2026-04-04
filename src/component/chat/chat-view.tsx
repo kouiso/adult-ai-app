@@ -1,6 +1,6 @@
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { Menu } from "lucide-react";
+import { Menu, Search, X } from "lucide-react";
 import { toast } from "sonner";
 import { useShallow } from "zustand/react/shallow";
 
@@ -14,6 +14,7 @@ import {
   streamChat,
 } from "@/lib/api";
 import { DEFAULT_SYSTEM_PROMPT } from "@/lib/config";
+import { parseSystemPrompt } from "@/lib/prompt-builder";
 import type { ChatMessage } from "@/store/chat-store";
 import { useChatStore } from "@/store/chat-store";
 import { useSettingsStore } from "@/store/settings-store";
@@ -45,9 +46,13 @@ type ImagePollingResult =
   | { status: "failed" }
   | { status: "timeout" };
 
-const pollGeneratedImage = async (taskId: string): Promise<ImagePollingResult> => {
+const pollGeneratedImage = async (
+  taskId: string,
+  onProgress?: (attempt: number, maxAttempts: number) => void,
+): Promise<ImagePollingResult> => {
   const maxPolls = 60;
   for (let i = 0; i < maxPolls; i++) {
+    onProgress?.(i + 1, maxPolls);
     await new Promise<void>((resolve) => {
       setTimeout(resolve, POLL_INTERVAL_MS);
     });
@@ -74,6 +79,8 @@ export const ChatView = () => {
   const nsfwBlur = useSettingsStore((s) => s.nsfwBlur);
   const isOnline = useNetworkStatus();
   const [isMobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const [isSearchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const { ttsEnabled, ttsVoiceUri, ttsRate, ttsPitch } = useSettingsStore(
     useShallow((s) => ({
@@ -350,7 +357,7 @@ export const ChatView = () => {
         return;
       }
 
-      const { addMessage, updateMessage } = useChatStore.getState();
+      const { addMessage, updateMessage, markMessageError } = useChatStore.getState();
       const currentModel = useSettingsStore.getState().model;
       const conversationId = await ensureConversation();
 
@@ -404,8 +411,9 @@ export const ChatView = () => {
             .catch((error) => console.error("failed to persist assistant message", error));
         },
         (error) => {
-          updateMessage(assistantId, `Error: ${error}`, false);
+          markMessageError(assistantId);
           setLoading(false);
+          toast.error(`メッセージ送信に失敗しました: ${error}`);
         },
       );
     },
@@ -429,7 +437,7 @@ export const ChatView = () => {
         return;
       }
 
-      const { messages: currentMsgs, updateMessage } = useChatStore.getState();
+      const { messages: currentMsgs, updateMessage, markMessageError } = useChatStore.getState();
       const msgIndex = currentMsgs.findIndex((m) => m.id === messageId);
       if (msgIndex === -1) return;
 
@@ -462,8 +470,9 @@ export const ChatView = () => {
           );
         },
         (error) => {
-          updateMessage(messageId, `Error: ${error}`, false);
+          markMessageError(messageId);
           setLoading(false);
+          toast.error(`再生成に失敗しました: ${error}`);
         },
       );
     },
@@ -493,6 +502,7 @@ export const ChatView = () => {
         messages: currentMsgs,
         setMessages: setStoreMsgs,
         updateMessage,
+        markMessageError,
       } = useChatStore.getState();
       const msgIndex = currentMsgs.findIndex((m) => m.id === messageId);
       if (msgIndex === -1) return;
@@ -549,8 +559,9 @@ export const ChatView = () => {
           }).catch((error) => console.error("failed to persist regenerated message", error));
         },
         (error) => {
-          updateMessage(assistantId, `Error: ${error}`, false);
+          markMessageError(assistantId);
           setLoading(false);
+          toast.error(`編集後の送信に失敗しました: ${error}`);
         },
       );
     },
@@ -564,6 +575,85 @@ export const ChatView = () => {
       isOnline,
       setLoading,
       updateMessageContentEntry,
+    ],
+  );
+
+  // エラーになったassistantメッセージを再利用してストリーミングを再試行する
+  // handleSendを呼ぶとuserメッセージが重複するため、直接ストリームを再開する
+  const handleRetry = useCallback(
+    async (errorMessageId: string) => {
+      if (!isOnline) {
+        toast.error("オフライン中は再試行できません");
+        return;
+      }
+
+      const { messages: currentMsgs, updateMessage, markMessageError } = useChatStore.getState();
+      const errorMsgIndex = currentMsgs.findIndex((m) => m.id === errorMessageId);
+      if (errorMsgIndex === -1) return;
+
+      const conversationId = currentConversationId;
+      if (!conversationId) return;
+
+      const currentModel = useSettingsStore.getState().model;
+
+      // エラーメッセージより前のメッセージでAPIコンテキストを構築
+      const prevMsgs = currentMsgs.slice(0, errorMsgIndex);
+      const apiMessages = buildApiMessages(prevMsgs, currentSystemPrompt, currentCharacterName);
+
+      // 既存メッセージIDを再利用してストリーミングを再開（updateMessageでerrorもクリアされる）
+      updateMessage(errorMessageId, "", true);
+      setLoading(true);
+
+      let accumulated = "";
+      await streamChat(
+        apiMessages,
+        currentModel,
+        (chunk) => {
+          accumulated += chunk;
+          startTransition(() => {
+            updateMessage(errorMessageId, accumulated, true);
+          });
+        },
+        () => {
+          updateMessage(errorMessageId, accumulated, false);
+          setLoading(false);
+          // 初回送信失敗時にDB未永続化のため、createで永続化
+          void createMessageEntry({
+            conversationId,
+            id: errorMessageId,
+            role: "assistant",
+            content: accumulated,
+          })
+            .then(() => {
+              // リトライ成功時もタイトル自動生成を試みる
+              const msgs = useChatStore.getState().messages;
+              const userMsg = [...msgs]
+                .slice(
+                  0,
+                  msgs.findIndex((m) => m.id === errorMessageId),
+                )
+                .reverse()
+                .find((m) => m.role === "user");
+              if (userMsg) void tryGenerateTitle(conversationId, userMsg.content, accumulated);
+            })
+            .catch((error) => console.error("failed to persist retried message", error));
+        },
+        (error) => {
+          markMessageError(errorMessageId);
+          setLoading(false);
+          toast.error(`再試行に失敗しました: ${error}`);
+        },
+      );
+    },
+    [
+      buildApiMessages,
+      createMessageEntry,
+      currentCharacterName,
+      currentConversationId,
+      currentSystemPrompt,
+      isOnline,
+      setLoading,
+      tryGenerateTitle,
     ],
   );
 
@@ -588,6 +678,11 @@ export const ChatView = () => {
 
     if (!conversationId) return;
 
+    // キャラの見た目情報を抽出して画像プロンプトに渡す
+    const charDesc = currentConversation?.characterSystemPrompt
+      ? parseSystemPrompt(currentConversation.characterSystemPrompt).personality
+      : "";
+
     setLoading(true);
     addMessage({
       id: imageMessageId,
@@ -604,13 +699,15 @@ export const ChatView = () => {
     }).catch((error) => console.error("failed to persist image message", error));
 
     try {
-      const result = await generateImage(prompt);
+      const result = await generateImage(prompt, charDesc);
       if ("error" in result) {
         updateMessage(imageMessageId, `❌ 画像生成エラー: ${result.error}`, false);
         return;
       }
 
-      const imageResult = await pollGeneratedImage(result.task_id);
+      const imageResult = await pollGeneratedImage(result.task_id, (attempt, maxAttempts) => {
+        updateMessage(imageMessageId, `🖼️ 画像を生成中... (${attempt}/${maxAttempts})`, true);
+      });
 
       if (imageResult.status === "succeeded") {
         updateMessage(imageMessageId, "", false);
@@ -624,10 +721,12 @@ export const ChatView = () => {
 
       if (imageResult.status === "failed") {
         updateMessage(imageMessageId, "❌ 画像生成に失敗しました", false);
+        toast.error("画像生成に失敗しました");
         return;
       }
 
       updateMessage(imageMessageId, "⏱️ タイムアウト：画像生成が完了しませんでした", false);
+      toast.error("画像生成がタイムアウトしました");
     } catch (err) {
       updateMessage(imageMessageId, `❌ ネットワークエラー: ${String(err)}`, false);
     } finally {
@@ -684,6 +783,15 @@ export const ChatView = () => {
     [messages],
   );
 
+  // 検索クエリにマッチするメッセージIDのSet（ハイライト表示用）
+  const highlightedMessageIds = useMemo(() => {
+    if (!searchQuery.trim()) return new Set<string>();
+    const query = searchQuery.trim().toLowerCase();
+    return new Set(
+      visibleMessages.filter((m) => m.content.toLowerCase().includes(query)).map((m) => m.id),
+    );
+  }, [visibleMessages, searchQuery]);
+
   const lastAssistantId = useMemo(() => {
     for (let i = visibleMessages.length - 1; i >= 0; i--) {
       if (visibleMessages[i].role === "assistant") return visibleMessages[i].id;
@@ -717,6 +825,8 @@ export const ChatView = () => {
 
   const stableHandleSend = useCallback((msg: string) => void handleSend(msg), [handleSend]);
 
+  const stableHandleRetry = useCallback((id: string) => void handleRetry(id), [handleRetry]);
+
   const stableHandleGenerateImage = useCallback(
     () => void handleGenerateImage(),
     [handleGenerateImage],
@@ -725,7 +835,7 @@ export const ChatView = () => {
   return (
     <div className="flex h-full">
       {/* デスクトップサイドバー */}
-      <aside className="hidden w-72 shrink-0 border-r bg-muted/20 md:flex md:flex-col">
+      <aside className="hidden w-72 shrink-0 border-r border-border/50 bg-gradient-sidebar md:flex md:flex-col">
         {conversationListContent}
       </aside>
 
@@ -738,7 +848,7 @@ export const ChatView = () => {
 
       <div className="flex h-full min-w-0 flex-1 flex-col">
         {/* スマホ用ヘッダー（md以上では非表示） */}
-        <div className="flex items-center gap-2 border-b px-3 py-2 md:hidden">
+        <div className="flex items-center gap-2 border-b border-border/50 bg-card/80 glass-effect px-3 py-2 md:hidden">
           <button
             type="button"
             onClick={() => setMobileDrawerOpen(true)}
@@ -747,9 +857,17 @@ export const ChatView = () => {
           >
             <Menu className="h-5 w-5" />
           </button>
-          <span className="truncate text-sm font-medium text-muted-foreground">
+          <span className="truncate text-sm font-medium text-muted-foreground flex-1">
             {currentConversation?.title ?? "新しい会話"}
           </span>
+          <button
+            type="button"
+            onClick={() => setSearchOpen((prev) => !prev)}
+            className="rounded-md p-1.5 hover:bg-muted transition-colors"
+            aria-label="メッセージを検索"
+          >
+            <Search className="h-5 w-5" />
+          </button>
         </div>
 
         {!isOnline && (
@@ -757,7 +875,52 @@ export const ChatView = () => {
             オフライン中です。会話履歴は閲覧できますが、新規送信はできません。
           </div>
         )}
-        <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
+
+        {!isSearchOpen && (
+          <div className="hidden md:flex justify-end px-4 pt-2">
+            <button
+              type="button"
+              onClick={() => setSearchOpen(true)}
+              className="rounded-md p-1.5 text-muted-foreground hover:bg-muted transition-colors"
+              aria-label="メッセージを検索"
+            >
+              <Search className="h-4 w-4" />
+            </button>
+          </div>
+        )}
+        {isSearchOpen && (
+          <div className="border-b border-border/50 bg-card/80 px-4 py-2">
+            <div className="mx-auto flex max-w-3xl items-center gap-2">
+              <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="メッセージを検索..."
+                className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                autoFocus
+              />
+              {searchQuery.trim() && (
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  {highlightedMessageIds.size}件見つかりました
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchOpen(false);
+                  setSearchQuery("");
+                }}
+                className="rounded-md p-1 text-muted-foreground hover:bg-muted transition-colors"
+                aria-label="検索を閉じる"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div ref={scrollContainerRef} className="flex-1 overflow-y-auto bg-chat-area">
           <div className="mx-auto max-w-3xl py-4">
             {messages.length === 0 && (
               <div className="flex h-[60vh] items-center justify-center">
@@ -778,10 +941,14 @@ export const ChatView = () => {
                     </div>
                   </div>
                 ) : (
-                  <div className="text-center text-muted-foreground">
-                    <p className="text-2xl mb-2">💬</p>
-                    <p className="text-lg font-medium">会話を始めましょう</p>
-                    <p className="text-sm">メッセージを入力してください</p>
+                  <div className="text-center">
+                    <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
+                      <p className="text-3xl">💬</p>
+                    </div>
+                    <p className="text-lg font-semibold text-foreground">会話を始めましょう</p>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      メッセージを入力してください
+                    </p>
                   </div>
                 )}
               </div>
@@ -795,6 +962,7 @@ export const ChatView = () => {
                 imageUrl={message.imageUrl}
                 isStreaming={message.isStreaming}
                 isLoading={isLoading}
+                error={message.error}
                 characterName={currentCharacterName}
                 nsfwBlur={nsfwBlur}
                 canSpeak={
@@ -805,10 +973,12 @@ export const ChatView = () => {
                 }
                 isSpeaking={speakingMessageId === message.id && isSpeaking}
                 isLast={message.id === lastAssistantId}
+                isHighlighted={highlightedMessageIds.has(message.id)}
                 onSpeak={handleSpeak}
                 onStopSpeaking={handleStopSpeaking}
                 onRegenerate={stableHandleRegenerate}
                 onEdit={stableHandleEdit}
+                onRetry={stableHandleRetry}
               />
             ))}
           </div>

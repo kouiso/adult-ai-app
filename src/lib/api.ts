@@ -150,6 +150,7 @@ const generateImageResponseSchema = z.union([
 
 export async function generateImage(
   prompt: string,
+  characterDescription?: string,
 ): Promise<{ task_id: string } | { error: string }> {
   try {
     const response = await fetch("/api/image", {
@@ -157,6 +158,7 @@ export async function generateImage(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         prompt,
+        characterDescription: characterDescription ?? "",
         negative_prompt: "ugly, deformed, blurry, low quality, text, watermark",
         width: 512,
         height: 768,
@@ -171,20 +173,22 @@ export async function generateImage(
   }
 }
 
-const novitaTaskResultSchema = z.object({
-  task: z.object({
-    task_id: z.string(),
-    status: z.enum([
-      "TASK_STATUS_QUEUED",
-      "TASK_STATUS_PROCESSING",
-      "TASK_STATUS_SUCCEED",
-      "TASK_STATUS_FAILED",
-      "TASK_STATUS_CANCELED",
-    ]),
-    progress_percent: z.number(),
-  }),
-  images: z.array(z.object({ image_url: z.string(), image_url_ttl: z.number() })).optional(),
-});
+const novitaTaskResultSchema = z
+  .object({
+    task: z.object({
+      task_id: z.string(),
+      status: z.enum([
+        "TASK_STATUS_QUEUED",
+        "TASK_STATUS_PROCESSING",
+        "TASK_STATUS_SUCCEED",
+        "TASK_STATUS_FAILED",
+        "TASK_STATUS_CANCELED",
+      ]),
+      progress_percent: z.number(),
+    }),
+    images: z.array(z.object({ image_url: z.string() }).passthrough()).optional(),
+  })
+  .passthrough();
 
 type NovitaTaskResult = z.infer<typeof novitaTaskResultSchema>;
 

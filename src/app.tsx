@@ -15,9 +15,9 @@ export const App = () => {
 
   return (
     <div className="flex h-svh flex-col bg-background">
-      <header className="flex items-center justify-between border-b px-4 py-3">
-        <h1 className="text-lg font-semibold">AI チャット</h1>
-        <div className="flex items-center gap-1">
+      <header className="flex items-center justify-between bg-gradient-header px-4 py-3 shadow-sm">
+        <h1 className="text-lg font-semibold text-white">AI チャット</h1>
+        <div className="flex items-center gap-1 text-white/90">
           <CharacterManager />
           <SettingsPanel />
         </div>

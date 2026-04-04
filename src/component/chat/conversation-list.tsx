@@ -1,7 +1,18 @@
-import { memo, useState } from "react";
+import { memo } from "react";
 
 import { Trash2 } from "lucide-react";
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/component/ui/alert-dialog";
 import { Button } from "@/component/ui/button";
 import { ScrollArea } from "@/component/ui/scroll-area";
 import { Skeleton } from "@/component/ui/skeleton";
@@ -28,75 +39,49 @@ const formatDateTime = (timestamp: number) => {
   });
 };
 
-export const ConversationList = memo(({
-  conversations,
-  currentConversationId,
-  isLoading,
-  onSelect,
-  onCreate,
-  onDelete,
-  onDeleteAll,
-}: ConversationListProps) => {
-  const [confirmingId, setConfirmingId] = useState<string | null>(null);
-  const [confirmingDeleteAll, setConfirmingDeleteAll] = useState(false);
-
-  const handleDeleteClick = (e: React.MouseEvent, conversationId: string) => {
-    e.stopPropagation();
-    setConfirmingId(conversationId);
-  };
-
-  const handleConfirmDelete = (e: React.MouseEvent, conversationId: string) => {
-    e.stopPropagation();
-    setConfirmingId(null);
-    void onDelete(conversationId);
-  };
-
-  const handleCancelDelete = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setConfirmingId(null);
-  };
-
-  return (
+export const ConversationList = memo(
+  ({
+    conversations,
+    currentConversationId,
+    isLoading,
+    onSelect,
+    onCreate,
+    onDelete,
+    onDeleteAll,
+  }: ConversationListProps) => (
     <div className="flex h-full w-full flex-col">
       <div className="border-b px-3 py-3 space-y-2">
         <Button className="w-full" onClick={() => void onCreate()}>
           新しい会話
         </Button>
-        {conversations.length > 0 && !confirmingDeleteAll && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full text-destructive hover:bg-destructive hover:text-destructive-foreground"
-            onClick={() => setConfirmingDeleteAll(true)}
-          >
-            全会話を削除
-          </Button>
-        )}
-        {confirmingDeleteAll && (
-          <div className="rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2">
-            <p className="text-xs font-medium text-destructive mb-2">
-              全{conversations.length}件の会話を削除しますか？
-            </p>
-            <div className="flex gap-1">
-              <button
-                type="button"
-                onClick={() => {
-                  setConfirmingDeleteAll(false);
-                  void onDeleteAll();
-                }}
-                className="flex-1 rounded bg-destructive px-2 py-1 text-xs text-destructive-foreground hover:bg-destructive/90 transition-colors"
-              >
-                全削除
-              </button>
-              <button
-                type="button"
-                onClick={() => setConfirmingDeleteAll(false)}
-                className="flex-1 rounded border border-border px-2 py-1 text-xs hover:bg-muted transition-colors"
-              >
-                キャンセル
-              </button>
-            </div>
-          </div>
+        {conversations.length > 0 && (
+          <AlertDialog>
+            <AlertDialogTrigger
+              render={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full text-destructive hover:bg-destructive hover:text-destructive-foreground"
+                />
+              }
+            >
+              全会話を削除
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>全会話を削除</AlertDialogTitle>
+                <AlertDialogDescription>
+                  全{conversations.length}件の会話を削除しますか？この操作は取り消せません。
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>キャンセル</AlertDialogCancel>
+                <AlertDialogAction variant="destructive" onClick={() => void onDeleteAll()}>
+                  全削除
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         )}
       </div>
       <ScrollArea className="h-0 flex-1">
@@ -119,63 +104,62 @@ export const ConversationList = memo(({
           )}
           {conversations.map((conversation) => (
             <div key={conversation.id} className="relative group">
-              {confirmingId === conversation.id ? (
-                <div className="rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2">
-                  <p className="text-xs font-medium text-destructive mb-2">削除しますか？</p>
-                  <div className="flex gap-1">
-                    <button
-                      type="button"
-                      onClick={(e) => handleConfirmDelete(e, conversation.id)}
-                      className="flex-1 rounded bg-destructive px-2 py-1 text-xs text-destructive-foreground hover:bg-destructive/90 transition-colors"
-                    >
-                      削除
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleCancelDelete}
-                      className="flex-1 rounded border border-border px-2 py-1 text-xs hover:bg-muted transition-colors"
-                    >
-                      キャンセル
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => onSelect(conversation.id)}
-                  className={cn(
-                    "w-full rounded-md border px-3 py-2 text-left transition-colors pr-8",
-                    currentConversationId === conversation.id
-                      ? "border-primary bg-primary/10"
-                      : "border-transparent hover:bg-muted",
+              <button
+                type="button"
+                onClick={() => onSelect(conversation.id)}
+                className={cn(
+                  "w-full rounded-md border px-3 py-2 text-left transition-colors pr-8",
+                  currentConversationId === conversation.id
+                    ? "border-primary/50 bg-primary/10 shadow-sm"
+                    : "border-transparent hover:bg-accent/60",
+                )}
+              >
+                <p className="line-clamp-1 text-sm font-medium">{conversation.title}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {conversation.characterName !== "AI" && (
+                    <span className="mr-1">
+                      {conversation.characterAvatar &&
+                      !conversation.characterAvatar.startsWith("http")
+                        ? conversation.characterAvatar
+                        : "👤"}{" "}
+                      {conversation.characterName} ·{" "}
+                    </span>
                   )}
-                >
-                  <p className="line-clamp-1 text-sm font-medium">{conversation.title}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {conversation.characterName !== "AI" && (
-                      <span className="mr-1">
-                        {conversation.characterAvatar &&
-                        !conversation.characterAvatar.startsWith("http")
-                          ? conversation.characterAvatar
-                          : "👤"}{" "}
-                        {conversation.characterName} ·{" "}
-                      </span>
-                    )}
-                    {formatDateTime(conversation.updatedAt)}
-                  </p>
-                </button>
-              )}
+                  {formatDateTime(conversation.updatedAt)}
+                </p>
+              </button>
 
-              {confirmingId !== conversation.id && (
-                <button
-                  type="button"
-                  onClick={(e) => handleDeleteClick(e, conversation.id)}
-                  className="absolute right-1.5 top-1/2 -translate-y-1/2 hidden rounded p-1 text-muted-foreground hover:bg-muted hover:text-destructive group-hover:flex transition-colors"
-                  aria-label="削除"
+              <AlertDialog>
+                <AlertDialogTrigger
+                  render={
+                    <button
+                      type="button"
+                      className="absolute right-1.5 top-1/2 -translate-y-1/2 hidden rounded p-1 text-muted-foreground hover:bg-muted hover:text-destructive group-hover:flex transition-colors"
+                      aria-label="削除"
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  }
                 >
                   <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              )}
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>会話を削除</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      この会話を削除しますか？この操作は取り消せません。
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>キャンセル</AlertDialogCancel>
+                    <AlertDialogAction
+                      variant="destructive"
+                      onClick={() => void onDelete(conversation.id)}
+                    >
+                      削除
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </div>
           ))}
           {!isLoading && conversations.length === 0 && (
@@ -184,7 +168,7 @@ export const ConversationList = memo(({
         </div>
       </ScrollArea>
     </div>
-  );
-});
+  ),
+);
 
 ConversationList.displayName = "ConversationList";
