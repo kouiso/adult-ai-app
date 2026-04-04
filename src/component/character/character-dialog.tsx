@@ -15,7 +15,7 @@ import {
 } from "@/component/ui/dialog";
 import { Textarea } from "@/component/ui/textarea";
 import { createCharacter, deleteCharacter, listCharacters, type Character } from "@/lib/api";
-import { DEFAULT_SYSTEM_PROMPT } from "@/lib/config";
+import { buildSystemPrompt } from "@/lib/prompt-builder";
 import { cn } from "@/lib/utils";
 
 const CHARACTER_QUERY_KEY = ["character-list"] as const;
@@ -34,7 +34,8 @@ interface CharacterFormProps {
 const CharacterForm = ({ onCreated, onCancel }: CharacterFormProps) => {
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
-  const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT);
+  const [personality, setPersonality] = useState("");
+  const [scenario, setScenario] = useState("");
   const [greeting, setGreeting] = useState("");
 
   const mutation = useMutation({
@@ -50,17 +51,25 @@ const CharacterForm = ({ onCreated, onCancel }: CharacterFormProps) => {
 
   const handleSubmit = () => {
     const trimmedName = name.trim();
-    const trimmedPrompt = systemPrompt.trim();
-    if (!trimmedName || !trimmedPrompt) {
-      toast.error("名前とシステムプロンプトは必須です");
+    if (!trimmedName) {
+      toast.error("キャラクター名を入力してください");
       return;
     }
+    const systemPrompt = buildSystemPrompt({
+      name: trimmedName,
+      personality: personality.trim(),
+      scenario: scenario.trim(),
+      custom: "",
+    });
     mutation.mutate({
       name: trimmedName,
-      systemPrompt: trimmedPrompt,
+      systemPrompt,
       greeting: greeting.trim(),
+      tags: [],
     });
   };
+
+  const fieldClass = "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm";
 
   return (
     <div className="space-y-3">
@@ -71,18 +80,28 @@ const CharacterForm = ({ onCreated, onCancel }: CharacterFormProps) => {
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="キャラクター名"
-          className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+          className={fieldClass}
           maxLength={100}
         />
       </div>
       <div>
-        <label className="text-sm font-medium mb-1 block">システムプロンプト</label>
+        <label className="text-sm font-medium mb-1 block">性格・見た目</label>
         <Textarea
-          value={systemPrompt}
-          onChange={(e) => setSystemPrompt(e.target.value)}
-          placeholder="キャラクターの性格や設定..."
-          className="min-h-[120px] text-sm"
-          maxLength={10_000}
+          value={personality}
+          onChange={(e) => setPersonality(e.target.value)}
+          placeholder="例: 色白で小柄な大学2年生。恥ずかしがり屋だけど好奇心旺盛。"
+          className="min-h-[80px] text-sm"
+          maxLength={2000}
+        />
+      </div>
+      <div>
+        <label className="text-sm font-medium mb-1 block">シナリオ・シチュエーション</label>
+        <Textarea
+          value={scenario}
+          onChange={(e) => setScenario(e.target.value)}
+          placeholder="例: 渋谷のカフェで偶然隣に座った。"
+          className="min-h-[60px] text-sm"
+          maxLength={2000}
         />
       </div>
       <div>

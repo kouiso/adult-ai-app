@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 
+import { useQuery } from "@tanstack/react-query";
 import { Volume2 } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 
@@ -7,7 +8,9 @@ import { Separator } from "@/component/ui/separator";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/component/ui/sheet";
 import { Switch } from "@/component/ui/switch";
 import { useSpeechSynthesis } from "@/hook/use-speech-synthesis";
+import { listCharacters } from "@/lib/api";
 import { MODEL_CATALOG } from "@/lib/model";
+import { queryKey } from "@/lib/query-key";
 import { TYPE_LABELS, VOICE_TYPE_ORDER } from "@/lib/tts-constants";
 import { useSettingsStore } from "@/store/settings-store";
 
@@ -23,6 +26,7 @@ export const SettingsPanel = () => {
     ttsVoiceUri,
     ttsRate,
     ttsPitch,
+    activeCharacterId,
     setModel,
     toggleNsfwBlur,
     toggleDarkMode,
@@ -31,6 +35,7 @@ export const SettingsPanel = () => {
     setTtsVoiceUri,
     setTtsRate,
     setTtsPitch,
+    setActiveCharacterId,
   } = useSettingsStore(
     useShallow((s) => ({
       model: s.model,
@@ -41,6 +46,7 @@ export const SettingsPanel = () => {
       ttsVoiceUri: s.ttsVoiceUri,
       ttsRate: s.ttsRate,
       ttsPitch: s.ttsPitch,
+      activeCharacterId: s.activeCharacterId,
       setModel: s.setModel,
       toggleNsfwBlur: s.toggleNsfwBlur,
       toggleDarkMode: s.toggleDarkMode,
@@ -49,8 +55,14 @@ export const SettingsPanel = () => {
       setTtsVoiceUri: s.setTtsVoiceUri,
       setTtsRate: s.setTtsRate,
       setTtsPitch: s.setTtsPitch,
+      setActiveCharacterId: s.setActiveCharacterId,
     })),
   );
+
+  const { data: characters = [] } = useQuery({
+    queryKey: queryKey.characterList,
+    queryFn: listCharacters,
+  });
 
   const { categorizedVoices, isSupported, preview, isSpeaking, stop } = useSpeechSynthesis(
     ttsVoiceUri,
@@ -110,6 +122,59 @@ export const SettingsPanel = () => {
                   </div>
                 </button>
               ))}
+            </div>
+          </div>
+
+          <Separator />
+
+          <div>
+            <h3 className="text-sm font-medium mb-3">キャラクター選択</h3>
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => setActiveCharacterId(null)}
+                className={`w-full rounded-lg border p-3 text-left text-sm transition-colors ${
+                  activeCharacterId === null
+                    ? "border-primary bg-primary/5"
+                    : "border-border hover:bg-muted"
+                }`}
+              >
+                <div className="font-medium">デフォルト（Sakura）</div>
+                <div className="text-xs text-muted-foreground mt-0.5">
+                  色白の大学生・ナンパシナリオ
+                </div>
+              </button>
+              {characters.map((ch) => (
+                <button
+                  key={ch.id}
+                  type="button"
+                  onClick={() => setActiveCharacterId(ch.id)}
+                  className={`w-full rounded-lg border p-3 text-left text-sm transition-colors ${
+                    activeCharacterId === ch.id
+                      ? "border-primary bg-primary/5"
+                      : "border-border hover:bg-muted"
+                  }`}
+                >
+                  <div className="font-medium">{ch.name}</div>
+                  {ch.tags.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {ch.tags.map((tag) => (
+                        <span
+                          key={tag}
+                          className="inline-block rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground"
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </button>
+              ))}
+              {characters.length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  カスタムキャラクターはまだ作成されていません
+                </p>
+              )}
             </div>
           </div>
 
