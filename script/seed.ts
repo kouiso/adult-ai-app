@@ -1,6 +1,6 @@
 import { execSync } from "node:child_process";
 import crypto from "node:crypto";
-import { unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const DB_NAME = "adult-ai-db";
@@ -1732,6 +1732,17 @@ const conversations: ConversationSeed[] = [
 
 const escapeSql = (value: string): string => value.replaceAll("'", "''").replaceAll("\n", "\\n");
 
+// public/avatarsに生成済み画像があればavatarパスを返す
+const resolveAvatar = (id: string, explicit: string | null): string | null => {
+  if (explicit) return explicit;
+  const avatarFile = join(import.meta.dirname, "..", "public", "avatars", `${id}.jpg`);
+  try {
+    return existsSync(avatarFile) ? `/avatars/${id}.jpg` : null;
+  } catch {
+    return null;
+  }
+};
+
 const generateSql = (): string => {
   const lines: string[] = [];
 
@@ -1740,8 +1751,9 @@ const generateSql = (): string => {
   );
 
   for (const c of characters) {
+    const avatar = resolveAvatar(c.id, c.avatar);
     lines.push(
-      `INSERT OR REPLACE INTO character (id, user_id, name, avatar, system_prompt, greeting, tags, created_at) VALUES ('${c.id}', '${USER_ID}', '${escapeSql(c.name)}', ${c.avatar === null ? "NULL" : `'${escapeSql(c.avatar)}'`}, '${escapeSql(c.systemPrompt)}', '${escapeSql(c.greeting)}', '${escapeSql(JSON.stringify(c.tags))}', ${ts(10)});`,
+      `INSERT OR REPLACE INTO character (id, user_id, name, avatar, system_prompt, greeting, tags, created_at) VALUES ('${c.id}', '${USER_ID}', '${escapeSql(c.name)}', ${avatar === null ? "NULL" : `'${escapeSql(avatar)}'`}, '${escapeSql(c.systemPrompt)}', '${escapeSql(c.greeting)}', '${escapeSql(JSON.stringify(c.tags))}', ${ts(10)});`,
     );
   }
 
