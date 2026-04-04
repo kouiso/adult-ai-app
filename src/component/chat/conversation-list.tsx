@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 
 import { Trash2 } from "lucide-react";
 
@@ -15,6 +15,7 @@ interface ConversationListProps {
   onSelect: (conversationId: string) => void;
   onCreate: () => void | Promise<void>;
   onDelete: (conversationId: string) => void | Promise<void>;
+  onDeleteAll: () => void | Promise<void>;
 }
 
 const formatDateTime = (timestamp: number) => {
@@ -27,15 +28,17 @@ const formatDateTime = (timestamp: number) => {
   });
 };
 
-export const ConversationList = ({
+export const ConversationList = memo(({
   conversations,
   currentConversationId,
   isLoading,
   onSelect,
   onCreate,
   onDelete,
+  onDeleteAll,
 }: ConversationListProps) => {
   const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [confirmingDeleteAll, setConfirmingDeleteAll] = useState(false);
 
   const handleDeleteClick = (e: React.MouseEvent, conversationId: string) => {
     e.stopPropagation();
@@ -55,10 +58,46 @@ export const ConversationList = ({
 
   return (
     <div className="flex h-full w-full flex-col">
-      <div className="border-b px-3 py-3">
+      <div className="border-b px-3 py-3 space-y-2">
         <Button className="w-full" onClick={() => void onCreate()}>
           新しい会話
         </Button>
+        {conversations.length > 0 && !confirmingDeleteAll && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full text-destructive hover:bg-destructive hover:text-destructive-foreground"
+            onClick={() => setConfirmingDeleteAll(true)}
+          >
+            全会話を削除
+          </Button>
+        )}
+        {confirmingDeleteAll && (
+          <div className="rounded-md border border-destructive/50 bg-destructive/5 px-3 py-2">
+            <p className="text-xs font-medium text-destructive mb-2">
+              全{conversations.length}件の会話を削除しますか？
+            </p>
+            <div className="flex gap-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setConfirmingDeleteAll(false);
+                  void onDeleteAll();
+                }}
+                className="flex-1 rounded bg-destructive px-2 py-1 text-xs text-destructive-foreground hover:bg-destructive/90 transition-colors"
+              >
+                全削除
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmingDeleteAll(false)}
+                className="flex-1 rounded border border-border px-2 py-1 text-xs hover:bg-muted transition-colors"
+              >
+                キャンセル
+              </button>
+            </div>
+          </div>
+        )}
       </div>
       <ScrollArea className="h-0 flex-1">
         <div className="space-y-1 p-2">
@@ -146,4 +185,6 @@ export const ConversationList = ({
       </ScrollArea>
     </div>
   );
-};
+});
+
+ConversationList.displayName = "ConversationList";

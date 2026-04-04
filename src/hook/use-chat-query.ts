@@ -5,6 +5,7 @@ import { useIsFetching, useMutation, useQuery, useQueryClient } from "@tanstack/
 import {
   createConversation,
   createConversationMessage,
+  deleteAllConversations,
   deleteConversation,
   deleteMessagesAfterMessage,
   listConversationMessages,
@@ -58,6 +59,14 @@ export const useChatQuery = (currentConversationId: string | null) => {
     },
   });
 
+  const deleteAllConversationsMutation = useMutation({
+    mutationFn: deleteAllConversations,
+    onSuccess: () => {
+      queryClient.setQueryData<ConversationSummary[]>(queryKey.conversationList, []);
+      queryClient.removeQueries({ queryKey: ["conversationMessages"] });
+    },
+  });
+
   const updateConversationTitleMutation = useMutation({
     mutationFn: ({ conversationId, title }: { conversationId: string; title: string }) =>
       updateConversationTitle(conversationId, title),
@@ -83,33 +92,19 @@ export const useChatQuery = (currentConversationId: string | null) => {
 
   const createConversationMessageMutation = useMutation({
     mutationFn: createConversationMessage,
-    onSuccess: (_, input) => {
-      void queryClient.invalidateQueries({
-        queryKey: queryKey.conversationMessageList(input.conversationId),
-      });
-      void queryClient.invalidateQueries({ queryKey: queryKey.conversationList });
-    },
+    // メッセージ作成時にconversationListをinvalidateすると全会話リストのrefetchが走る
+    // メッセージリストのinvalidateも不要（Zustandストア側でリアルタイム管理している）
   });
 
   const persistMessageImageMutation = useMutation({
     mutationFn: persistMessageImage,
-    onSuccess: () => {
-      if (!currentConversationId) return;
-      void queryClient.invalidateQueries({
-        queryKey: queryKey.conversationMessageList(currentConversationId),
-      });
-    },
+    // Zustandストア側でリアルタイム管理しているためinvalidate不要
   });
 
   const updateMessageContentMutation = useMutation({
     mutationFn: ({ messageId, content }: { messageId: string; content: string }) =>
       updateMessageContent(messageId, content),
-    onSuccess: () => {
-      if (!currentConversationId) return;
-      void queryClient.invalidateQueries({
-        queryKey: queryKey.conversationMessageList(currentConversationId),
-      });
-    },
+    // Zustandストア側でリアルタイム管理しているためinvalidate不要
   });
 
   const deleteMessagesAfterMutation = useMutation({
@@ -131,6 +126,11 @@ export const useChatQuery = (currentConversationId: string | null) => {
   const deleteConversationEntry = useCallback(
     async (conversationId: string) => deleteConversationMutation.mutateAsync(conversationId),
     [deleteConversationMutation],
+  );
+
+  const deleteAllConversationsEntry = useCallback(
+    async () => deleteAllConversationsMutation.mutateAsync(),
+    [deleteAllConversationsMutation],
   );
 
   const updateConversationTitleEntry = useCallback(
@@ -200,6 +200,7 @@ export const useChatQuery = (currentConversationId: string | null) => {
     isMessageListLoading: isMessageListFetching,
     createConversationEntry,
     deleteConversationEntry,
+    deleteAllConversationsEntry,
     updateConversationTitleEntry,
     updateConversationCharacterEntry,
     createMessageEntry,
