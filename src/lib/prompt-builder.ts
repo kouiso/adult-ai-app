@@ -61,6 +61,7 @@ function sanitizeField(text: string): string {
 const SECTION_PERSONALITY = "【キャラクター】" as const;
 const SECTION_SCENARIO = "【シナリオ】" as const;
 const SECTION_CUSTOM = "【追加設定】" as const;
+const SECTION_CARD = "【キャラカード】" as const;
 
 function extractSection(prompt: string, marker: string, endMarkers: string[]): string {
   const startIdx = prompt.indexOf(marker);
@@ -140,9 +141,10 @@ export function parseSystemPrompt(prompt: string): {
   const personality = extractSection(prompt, SECTION_PERSONALITY, [
     SECTION_SCENARIO,
     SECTION_CUSTOM,
+    SECTION_CARD,
   ]);
-  const scenario = extractSection(prompt, SECTION_SCENARIO, [SECTION_CUSTOM]);
-  const custom = extractSection(prompt, SECTION_CUSTOM, []);
+  const scenario = extractSection(prompt, SECTION_SCENARIO, [SECTION_CUSTOM, SECTION_CARD]);
+  const custom = extractSection(prompt, SECTION_CUSTOM, [SECTION_CARD]);
 
   // 「名前: xxx」行はpersonalityから除去（nameフィールドで管理するため）
   const personalityCleaned = personality

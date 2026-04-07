@@ -1,7 +1,7 @@
 import { z } from "zod/v4";
 
 const REPETITION_CHECK_WINDOW = 500;
-const EXACT_REPETITION = /(.{3,30})\1{3,}/;
+const EXACT_REPETITION = /(.{5,30})\1{4,}/;
 const FREQ_THRESHOLD = 4;
 
 // フレーズ配列の中に閾値以上の頻出がないか判定
@@ -71,14 +71,25 @@ function detectRepetition(text: string): boolean {
   if (phrases.length >= 6 && hasSimilarRepetition(phrases, FREQ_THRESHOLD)) return true;
 
   // スライディングウィンドウによる部分文字列繰り返し検出
-  // 10〜40文字の部分文字列が3回以上出現したらループとみなす
   if (tail.length >= 60) {
+    // 短いパターン(15-40文字): 4回以上で検出
     for (const windowSize of [15, 25, 40]) {
       const seen = new Map<string, number>();
       for (let i = 0; i <= tail.length - windowSize; i += 5) {
         const chunk = tail.slice(i, i + windowSize);
         const count = (seen.get(chunk) ?? 0) + 1;
-        if (count >= 3) return true;
+        if (count >= 4) return true;
+        seen.set(chunk, count);
+      }
+    }
+    // 長いパターン(60-80文字): 2回以上で検出（テンプレブロックの繰り返し）
+    for (const windowSize of [60, 80]) {
+      if (tail.length < windowSize * 2) continue;
+      const seen = new Map<string, number>();
+      for (let i = 0; i <= tail.length - windowSize; i += 10) {
+        const chunk = tail.slice(i, i + windowSize);
+        const count = (seen.get(chunk) ?? 0) + 1;
+        if (count >= 2) return true;
         seen.set(chunk, count);
       }
     }
@@ -195,6 +206,128 @@ export async function streamChat(
     await processStream(response.body, onChunk, onDone);
   } catch (err) {
     onError(String(err));
+  }
+}
+
+// 品質ガード付きストリーミング
+// 応答完了後に品質チェックを行い、不合格なら自動再生成する
+import type { QualityCheckContext } from "@/lib/quality-guard";
+import { MAX_QUALITY_RETRIES, runQualityChecks } from "@/lib/quality-guard";
+
+// SSEストリームを全て読み取り、完全なテキストを返す（再生成判定用）
+async function collectStreamResponse(
+  messages: { role: "system" | "user" | "assistant"; content: string }[],
+  model: string,
+): Promise<string> {
+  const response = await fetch("/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messages, model }),
+  });
+
+  if (!response.ok || !response.body) {
+    throw new Error(await response.text());
+  }
+
+  let accumulated = "";
+  await processStream(
+    response.body,
+    (chunk) => {
+      accumulated += chunk;
+    },
+    () => {},
+  );
+  return accumulated;
+}
+
+export async function streamChatWithQualityGuard(
+  messages: { role: "system" | "user" | "assistant"; content: string }[],
+  model: string,
+  onChunk: (text: string) => void,
+  onDone: (finalText: string) => void,
+  onError: (error: string) => void,
+  qualityContext: QualityCheckContext,
+): Promise<void> {
+  let attempt = 0;
+  let lastResponse = "";
+  // リトライ用メッセージ: 失敗した応答を含めて書き直しを指示
+  let retryMessages = messages;
+
+  while (attempt <= MAX_QUALITY_RETRIES) {
+    try {
+      if (attempt === 0) {
+        // 初回: 通常のストリーミング（UIに即座に表示）
+        let accumulated = "";
+        let streamError: string | null = null;
+        await streamChat(
+          messages,
+          model,
+          (chunk) => {
+            accumulated += chunk;
+            onChunk(chunk);
+          },
+          () => {},
+          (err) => {
+            streamError = err;
+          },
+        );
+        if (streamError) throw new Error(streamError);
+        lastResponse = accumulated;
+      } else {
+        // 再生成: 失敗原因に応じた具体的な書き直し指示
+        const prevText = qualityContext.prevAssistantResponse ?? "";
+        // 前回の応答から主要フレーズを抽出して禁止リストに
+        const prevPhrases = prevText
+          .split(/[。！？\n…]/)
+          .map((s) => s.trim())
+          .filter((s) => s.length >= 4 && s.length <= 20)
+          .slice(0, 5)
+          .map((s) => `「${s}」`)
+          .join("、");
+        const banList = prevPhrases
+          ? `\n前のターンで使った以下の表現は絶対に使うな: ${prevPhrases}`
+          : "";
+        const fpHint = qualityContext.firstPerson
+          ? `\n一人称は必ず「${qualityContext.firstPerson}」を使え。「私」「僕」「俺」は禁止。`
+          : "";
+        retryMessages = [
+          ...messages,
+          { role: "assistant" as const, content: lastResponse },
+          {
+            role: "user" as const,
+            content: `この応答は品質基準を満たしていない。完全に異なる場面展開・身体感覚・感情で書き直せ。前の応答の単語を再利用するな。必ず<response>タグで囲んだXMLフォーマットで出力しろ。${fpHint}${banList}`,
+          },
+        ];
+        lastResponse = await collectStreamResponse(retryMessages, model);
+      }
+
+      const checkResult = runQualityChecks(lastResponse, qualityContext);
+      console.log(`[quality-guard] attempt=${attempt} len=${lastResponse.length} phase=${qualityContext.phase} passed=${checkResult.passed} failed=${checkResult.failedCheck ?? 'none'}`);
+
+      if (checkResult.passed) {
+        if (attempt > 0) {
+          // 再生成が成功 → UIをリセットして新しい応答を表示
+          onChunk(lastResponse);
+        }
+        onDone(lastResponse);
+        return;
+      }
+
+      // 品質チェック不合格 → 再生成を試みる
+      attempt++;
+
+      if (attempt > MAX_QUALITY_RETRIES) {
+        // 再生成上限に達した → 最後の応答をそのまま使う
+        if (attempt > 1) {
+          onChunk(lastResponse);
+        }
+        onDone(lastResponse);
+        return;
+      }
+    } catch (err) {
+      onError(String(err));
+      return;
+    }
   }
 }
 

@@ -12,7 +12,9 @@ import {
   generateImage,
   getImageTaskResult,
   streamChat,
+  streamChatWithQualityGuard,
 } from "@/lib/api";
+import { detectScenePhase } from "@/lib/scene-phase";
 import { DEFAULT_SYSTEM_PROMPT } from "@/lib/config";
 import { parseSystemPrompt } from "@/lib/prompt-builder";
 import type { ChatMessage } from "@/store/chat-store";
@@ -145,6 +147,7 @@ export const ChatView = () => {
   );
   const currentSystemPrompt = currentConversation?.characterSystemPrompt || DEFAULT_SYSTEM_PROMPT;
   const currentCharacterName = currentConversation?.characterName ?? "AI";
+  const currentCharacterAvatar = currentConversation?.characterAvatar ?? null;
 
   const ensureConversation = useCallback(async (): Promise<string> => {
     const currentId = useChatStore.getState().currentConversationId;
@@ -399,33 +402,54 @@ export const ChatView = () => {
         currentCharacterName,
       );
 
+      // 品質ガード用コンテキスト: フェーズ検出+直前のassistant応答
+      const phase = detectScenePhase(apiMessages);
+      const prevAssistant = currentMessages
+        .filter((m) => m.role === "assistant" && !m.isStreaming)
+        .pop()?.content;
+
       let accumulated = "";
-      await streamChat(
+      await streamChatWithQualityGuard(
         apiMessages,
         currentModel,
         (chunk) => {
-          accumulated += chunk;
-          // ストリーミング更新はlow priorityにしてユーザー操作（入力・スクロール）を優先
+          // 再生成時はchunkに全文が来るのでリセットして表示
+          if (chunk.length > accumulated.length + 100) {
+            accumulated = chunk;
+          } else {
+            accumulated += chunk;
+          }
           startTransition(() => {
             updateMessage(assistantId, accumulated, true);
           });
         },
-        () => {
-          updateMessage(assistantId, accumulated, false);
+        (finalText) => {
+          updateMessage(assistantId, finalText, false);
           setLoading(false);
           void createMessageEntry({
             conversationId,
             id: assistantId,
             role: "assistant",
-            content: accumulated,
+            content: finalText,
           })
-            .then(() => void tryGenerateTitle(conversationId, text, accumulated))
+            .then(() => void tryGenerateTitle(conversationId, text, finalText))
             .catch((error) => console.error("failed to persist assistant message", error));
         },
         (error) => {
           markMessageError(assistantId);
           setLoading(false);
           toast.error(`メッセージ送信に失敗しました: ${error}`);
+        },
+        {
+          phase,
+          prevAssistantResponse: prevAssistant,
+          firstPerson: extractFirstPerson(currentSystemPrompt) ?? undefined,
+          // 一般的な一人称リスト（キャラの正規一人称は除外される）
+          wrongFirstPersons: (() => {
+            const fp = extractFirstPerson(currentSystemPrompt);
+            const all = ["私", "僕", "俺", "わたし", "ぼく", "おれ", "ワタシ", "ボク", "オレ"];
+            return fp ? all.filter((p) => p !== fp) : undefined;
+          })(),
         },
       );
     },
@@ -728,6 +752,10 @@ export const ChatView = () => {
           messageId: imageMessageId,
           imageUrl: imageResult.imageUrl,
         }).catch((error) => console.error("failed to persist image", error));
+        // Zustandだけでなく、D1側のcontentもクリアしないとリロード時にローディングテキストが残る
+        void updateMessageContentEntry(imageMessageId, "").catch((error) =>
+          console.error("failed to clear image message content", error),
+        );
         return;
       }
 
@@ -744,7 +772,7 @@ export const ChatView = () => {
     } finally {
       setLoading(false);
     }
-  }, [createMessageEntry, persistMessageImageEntry, isOnline, setLoading]);
+  }, [createMessageEntry, persistMessageImageEntry, updateMessageContentEntry, isOnline, setLoading]);
 
   const stableOnSelectConversation = useCallback(
     (conversationId: string) => void handleSelectConversation(conversationId),
@@ -976,6 +1004,7 @@ export const ChatView = () => {
                 isLoading={isLoading}
                 error={message.error}
                 characterName={currentCharacterName}
+                characterAvatar={currentCharacterAvatar}
                 nsfwBlur={nsfwBlur}
                 canSpeak={
                   ttsEnabled &&

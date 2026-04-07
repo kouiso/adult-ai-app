@@ -117,12 +117,18 @@ export const ConversationList = memo(
                 <p className="line-clamp-1 text-sm font-medium">{conversation.title}</p>
                 <p className="mt-1 text-xs text-muted-foreground">
                   {conversation.characterName !== "AI" && (
-                    <span className="mr-1">
+                    <span className="mr-1 inline-flex items-center gap-1">
                       {conversation.characterAvatar &&
-                      !conversation.characterAvatar.startsWith("http") &&
-                      !conversation.characterAvatar.startsWith("/")
-                        ? conversation.characterAvatar
-                        : "👤"}{" "}
+                      (conversation.characterAvatar.startsWith("http") ||
+                        conversation.characterAvatar.startsWith("/")) ? (
+                        <img
+                          src={conversation.characterAvatar}
+                          alt={conversation.characterName ?? ""}
+                          className="inline-block h-4 w-4 rounded-full object-cover"
+                        />
+                      ) : (
+                        "👤"
+                      )}{" "}
                       {conversation.characterName} ·{" "}
                     </span>
                   )}

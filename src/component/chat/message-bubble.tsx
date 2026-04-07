@@ -1,11 +1,12 @@
-import { memo, useCallback, useState } from "react";
+import { memo, useCallback, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 
 import { Pencil, RefreshCw, RotateCcw, Volume2, VolumeOff } from "lucide-react";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 
-import { Avatar, AvatarFallback } from "@/component/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/component/ui/avatar";
+import { isXmlResponse, parseXmlResponse } from "@/lib/xml-response-parser";
 import { cn } from "@/lib/utils";
 
 interface MessageBubbleProps {
@@ -16,6 +17,7 @@ interface MessageBubbleProps {
   isStreaming?: boolean;
   isLoading?: boolean;
   characterName?: string;
+  characterAvatar?: string | null;
   nsfwBlur?: boolean;
   canSpeak?: boolean;
   isSpeaking?: boolean;
@@ -32,6 +34,7 @@ interface MessageBubbleProps {
 interface MessageContentProps {
   content: string;
   isStreaming?: boolean;
+  role?: "user" | "assistant";
 }
 
 const markdownParagraph = ({ children }: { children?: React.ReactNode }) => (
@@ -47,6 +50,73 @@ const markdownComponents = { p: markdownParagraph, em: markdownEm, strong: markd
 // レンダー毎の配列再生成を防ぎ、ReactMarkdownのプラグイン再初期化をスキップさせる
 const remarkPlugins = [remarkGfm];
 const rehypePlugins = [rehypeSanitize];
+
+// アシスタント応答を「台詞」「(ト書き)」「地の文」に分割してスタイル付与
+const StyledNarrative = memo(({ content }: { content: string }) => {
+  const segments = content.split(/(「[^」]*」|\([^)]*\))/g).filter(Boolean);
+  return (
+    <span>
+      {segments.map((seg, i) => {
+        if (seg.startsWith("(") && seg.endsWith(")")) {
+          return (
+            <span key={i} className="italic text-muted-foreground/70 text-[0.85em]">
+              {seg}
+            </span>
+          );
+        }
+        if (seg.startsWith("「") && seg.endsWith("」")) {
+          return (
+            <span key={i} className="font-medium">
+              {seg}
+            </span>
+          );
+        }
+        return <span key={i}>{seg}</span>;
+      })}
+    </span>
+  );
+});
+StyledNarrative.displayName = "StyledNarrative";
+
+// XML構造化レスポンス用レンダラー
+// <action>/<dialogue>/<inner>を視覚的に分離して表示
+const StructuredNarrative = memo(({ content }: { content: string }) => {
+  const parsed = parseXmlResponse(content);
+  if (!parsed) {
+    // XMLパース失敗時は既存レンダラーにフォールバック
+    const paragraphs = content.split(/\n+/).filter(Boolean);
+    return (
+      <>
+        {paragraphs.map((para, i) => (
+          <p key={i} className="mb-2 last:mb-0">
+            <StyledNarrative content={para} />
+          </p>
+        ))}
+      </>
+    );
+  }
+
+  return (
+    <div className="space-y-1.5">
+      {parsed.action && (
+        <p className="italic text-muted-foreground/80 leading-relaxed">
+          {parsed.action}
+        </p>
+      )}
+      {parsed.dialogue && (
+        <p className="font-medium leading-relaxed">
+          <StyledNarrative content={parsed.dialogue} />
+        </p>
+      )}
+      {parsed.inner && (
+        <p className="text-xs italic text-muted-foreground/60 leading-relaxed">
+          {parsed.inner}
+        </p>
+      )}
+    </div>
+  );
+});
+StructuredNarrative.displayName = "StructuredNarrative";
 
 // ストリーミング中はReactMarkdownのフルパースを避けて生テキスト表示にする
 // ReactMarkdown+remarkGfmはチャンク毎に数十msメインスレッドをブロックするため
@@ -65,22 +135,38 @@ const StreamingContent = memo(({ content }: { content: string }) => {
 
 StreamingContent.displayName = "StreamingContent";
 
-const MessageContent = memo(({ content, isStreaming }: MessageContentProps) => {
+const MessageContent = memo(({ content, isStreaming, role }: MessageContentProps) => {
   if (isStreaming) {
     return <StreamingContent content={content} />;
   }
-  if (content) {
+  if (!content) return null;
+
+  // アシスタントの応答: XML構造化 or 既存フォーマットで表示
+  if (role === "assistant") {
+    if (isXmlResponse(content)) {
+      return <StructuredNarrative content={content} />;
+    }
+    const paragraphs = content.split(/\n+/).filter(Boolean);
     return (
-      <ReactMarkdown
-        remarkPlugins={remarkPlugins}
-        rehypePlugins={rehypePlugins}
-        components={markdownComponents}
-      >
-        {content}
-      </ReactMarkdown>
+      <>
+        {paragraphs.map((para, i) => (
+          <p key={i} className="mb-2 last:mb-0">
+            <StyledNarrative content={para} />
+          </p>
+        ))}
+      </>
     );
   }
-  return null;
+
+  return (
+    <ReactMarkdown
+      remarkPlugins={remarkPlugins}
+      rehypePlugins={rehypePlugins}
+      components={markdownComponents}
+    >
+      {content}
+    </ReactMarkdown>
+  );
 });
 
 MessageContent.displayName = "MessageContent";
@@ -116,7 +202,11 @@ const SpeakButton = ({
 );
 
 // 画像生成APIのドメインのみ許可し、外部サイトからの意図しないリクエストを防ぐ
-const ALLOWED_IMAGE_HOSTS = new Set(["image.novita.ai", "novita.ai"]);
+const ALLOWED_IMAGE_HOSTS = new Set([
+  "image.novita.ai",
+  "novita.ai",
+  "faas-output-image.s3.ap-southeast-1.amazonaws.com",
+]);
 
 const isValidImageUrl = (url: string): boolean => {
   if (url.startsWith("/api/image/r2/")) return true;
@@ -169,23 +259,70 @@ const ImagePreview = ({ imageUrl, nsfwBlur }: ImagePreviewProps) => {
   );
 };
 
+// ── アバター画像ビューワー ──────────────────────────────────────────────
+interface AvatarViewerProps {
+  src: string;
+  alt: string;
+  onClose: () => void;
+}
+
+const AvatarViewer = ({ src, alt, onClose }: AvatarViewerProps) => {
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+      onClick={onClose}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") onClose();
+      }}
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${alt}の画像`}
+    >
+      <img
+        src={src}
+        alt={alt}
+        className="max-h-[80vh] max-w-[90vw] rounded-2xl object-contain shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={() => {}}
+      />
+    </div>
+  );
+};
+
 interface MessageAvatarProps {
   isUser: boolean;
   characterName: string;
+  avatarUrl?: string | null;
+  onAvatarClick?: () => void;
 }
 
-const MessageAvatar = ({ isUser, characterName }: MessageAvatarProps) => (
-  <Avatar className="h-8 w-8 shrink-0">
-    <AvatarFallback
-      className={cn(
-        "text-xs font-medium",
-        isUser ? "bg-gradient-user-bubble text-white" : "bg-accent text-accent-foreground",
-      )}
+const MessageAvatar = ({ isUser, characterName, avatarUrl, onAvatarClick }: MessageAvatarProps) => {
+  const clickable = !isUser && !!avatarUrl;
+  return (
+    <Avatar
+      className={cn("h-8 w-8 shrink-0", clickable && "cursor-pointer ring-offset-background transition-all hover:ring-2 hover:ring-primary/40 hover:ring-offset-1")}
+      onClick={clickable ? onAvatarClick : undefined}
     >
-      {isUser ? "あなた" : characterName.slice(0, 2)}
-    </AvatarFallback>
-  </Avatar>
-);
+      {!isUser && avatarUrl && <AvatarImage src={avatarUrl} alt={characterName} />}
+      <AvatarFallback
+        className={cn(
+          "text-xs font-medium",
+          isUser ? "bg-gradient-user-bubble text-white" : "bg-accent text-accent-foreground",
+        )}
+      >
+        {isUser ? "あなた" : characterName.slice(0, 2)}
+      </AvatarFallback>
+    </Avatar>
+  );
+};
 
 // ── ユーザーメッセージのインライン編集 ─────────────────────────────────────
 interface UserEditFormProps {
@@ -335,6 +472,7 @@ export const MessageBubble = memo(
     isLoading = false,
     error = false,
     characterName = "AI",
+    characterAvatar,
     nsfwBlur = false,
     canSpeak = false,
     isSpeaking = false,
@@ -348,6 +486,7 @@ export const MessageBubble = memo(
   }: MessageBubbleProps) => {
     const isUser = role === "user";
     const [isEditing, setIsEditing] = useState(false);
+    const [showAvatarViewer, setShowAvatarViewer] = useState(false);
     const bubbleStyle = isUser
       ? "bg-gradient-user-bubble text-white rounded-tr-sm shadow-sm"
       : "bg-card text-foreground rounded-tl-sm border border-border/50 shadow-sm";
@@ -362,7 +501,7 @@ export const MessageBubble = memo(
 
     return (
       <div className={cn("flex gap-3 px-4 py-3 group/message", isUser && "flex-row-reverse")}>
-        <MessageAvatar isUser={isUser} characterName={characterName} />
+        <MessageAvatar isUser={isUser} characterName={characterName} avatarUrl={characterAvatar} onAvatarClick={() => setShowAvatarViewer(true)} />
         <div className={cn("max-w-[75%] space-y-2", isUser && "text-right")}>
           {isEditing ? (
             <UserEditForm
@@ -378,7 +517,7 @@ export const MessageBubble = memo(
                 isHighlighted && "ring-2 ring-yellow-400/50 bg-yellow-50/10",
               )}
             >
-              <MessageContent content={content} isStreaming={isStreaming} />
+              <MessageContent content={content} isStreaming={isStreaming} role={role} />
             </div>
           )}
 
@@ -403,6 +542,14 @@ export const MessageBubble = memo(
 
           {imageUrl && <ImagePreview imageUrl={imageUrl} nsfwBlur={nsfwBlur} />}
         </div>
+
+        {showAvatarViewer && characterAvatar && (
+          <AvatarViewer
+            src={characterAvatar}
+            alt={characterName}
+            onClose={() => setShowAvatarViewer(false)}
+          />
+        )}
       </div>
     );
   },

@@ -2,7 +2,7 @@ import { z } from "zod/v4";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
-const DEFAULT_MODEL = "sao10k/l3.3-euryale-70b" as const;
+const DEFAULT_MODEL = "anthracite-org/magnum-v4-72b" as const;
 const LEGACY_MODEL_NEMO = "mistralai/mistral-nemo" as const;
 const LEGACY_MODEL_HERMES = "nousresearch/hermes-3-llama-3.1-405b:free" as const;
 const LEGACY_MODEL_VENICE =

@@ -10,10 +10,10 @@ import {
   deleteMessagesAfterMessage,
   listConversationMessages,
   listConversations,
+  updateMessageImage as persistMessageImage,
   updateConversationCharacter,
   updateConversationTitle,
   updateMessageContent,
-  updateMessageImage as persistMessageImage,
   type ConversationSummary,
 } from "@/lib/api";
 import { queryKey } from "@/lib/query-key";
@@ -188,7 +188,8 @@ export const useChatQuery = (currentConversationId: string | null) => {
         id: row.id,
         role: row.role,
         content: row.content,
-        imageUrl: row.imageUrl,
+        // nullはundefinedに変換（ChatMessage型はstring|undefinedのみ許容するため）
+        imageUrl: row.imageUrl ?? undefined,
       }));
     },
     [queryClient],
