@@ -9,9 +9,11 @@ import { Button } from "@/component/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/component/ui/dialog";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/component/ui/sheet";
 import { useCharacterQuery } from "@/hook/use-character-query";
+import { useChatQuery } from "@/hook/use-chat-query";
 import type { Character, CharacterInput } from "@/lib/api";
 import type { GeneratedCharacter } from "@/lib/character-generator";
 import { buildSystemPrompt, parseSystemPrompt } from "@/lib/prompt-builder";
+import { useChatStore } from "@/store/chat-store";
 import { useSettingsStore } from "@/store/settings-store";
 
 const FIELD_CLASS =
@@ -406,6 +408,8 @@ export const CharacterManager = ({ onCharacterSelect }: CharacterManagerProps) =
       setActiveCharacterId: s.setActiveCharacterId,
     })),
   );
+  const currentConversationId = useChatStore((s) => s.currentConversationId);
+  const { updateConversationCharacterEntry } = useChatQuery(currentConversationId);
 
   const handleCreate = async (input: CharacterInput) => {
     setIsSaving(true);
@@ -449,10 +453,20 @@ export const CharacterManager = ({ onCharacterSelect }: CharacterManagerProps) =
     }
   };
 
-  const handleSelect = (id: string | null) => {
+  // キャラクター選択時は次回以降の新規会話のデフォルトを更新するだけでなく、
+  // 現在開いている会話の characterId も同期更新する。
+  // これをしないと「キャラ未バインドの会話にsystemPrompt空文字が流れ、モデルが暴走する」バグが起きる
+  const handleSelect = async (id: string | null) => {
     setActiveCharacterId(id);
     onCharacterSelect?.(id);
     setSheetOpen(false);
+    if (currentConversationId && id) {
+      try {
+        await updateConversationCharacterEntry(currentConversationId, id);
+      } catch {
+        toast.error("会話へのキャラクター反映に失敗しました");
+      }
+    }
   };
 
   const handleWizardSaveDirectly = (generated: GeneratedCharacter) => {
@@ -492,7 +506,7 @@ export const CharacterManager = ({ onCharacterSelect }: CharacterManagerProps) =
             isLoading={isLoading}
             activeCharacterId={activeCharacterId}
             deletingId={deletingId}
-            onSelect={handleSelect}
+            onSelect={(id) => void handleSelect(id)}
             onEdit={(c) => setDialogMode({ type: "edit", character: c })}
             onDelete={(id) => void handleDelete(id)}
             onCreateClick={() => setDialogMode({ type: "create" })}

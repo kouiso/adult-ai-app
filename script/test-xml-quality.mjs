@@ -236,6 +236,7 @@ async function main() {
 
   console.log(`\n${"=".repeat(60)}`);
   console.log(`Scenario ${scenarioKey}: ${scenario.char} (${maxTurns} turns)`);
+  console.log(`MODEL: ${process.env.MODEL ?? "sao10k/l3.3-euryale-70b"}`);
   console.log(`${"=".repeat(60)}\n`);
 
   // キャラクターのsystemPromptを取得
@@ -285,7 +286,7 @@ async function main() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           messages: retryMessages,
-          model: "sao10k/l3.3-euryale-70b",
+          model: process.env.MODEL ?? "sao10k/l3.3-euryale-70b",
         }),
       });
 

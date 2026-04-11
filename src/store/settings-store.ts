@@ -2,12 +2,15 @@ import { z } from "zod/v4";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
-const DEFAULT_MODEL = "anthracite-org/magnum-v4-72b" as const;
+// Magnum v4 72B は XML構造化出力で完全崩壊(0/8)したため Euryale v3 に変更
+// Euryale v3 70B は3シナリオ×8ターンを2セット連続で100%PASSを実測
+const DEFAULT_MODEL = "sao10k/l3.3-euryale-70b" as const;
 const LEGACY_MODEL_NEMO = "mistralai/mistral-nemo" as const;
 const LEGACY_MODEL_HERMES = "nousresearch/hermes-3-llama-3.1-405b:free" as const;
 const LEGACY_MODEL_VENICE =
   "cognitivecomputations/dolphin-mistral-24b-venice-edition:free" as const;
 const LEGACY_MODEL_EURYALE_V2 = "sao10k/l3.1-euryale-70b" as const;
+const LEGACY_MODEL_MAGNUM_V4 = "anthracite-org/magnum-v4-72b" as const;
 
 const persistedSettingsSchema = z.object({
   model: z.string().default(DEFAULT_MODEL),
@@ -68,7 +71,7 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: "ai-chat-settings",
-      version: 8,
+      version: 9,
       migrate: (persistedState: unknown, version: number): PersistedSettings => {
         const result = persistedSettingsSchema.safeParse(persistedState);
         const parsed = result.success
@@ -88,8 +91,9 @@ export const useSettingsStore = create<SettingsState>()(
           (version < 2 && parsed.model === LEGACY_MODEL_NEMO) ||
           (version < 5 && parsed.model === LEGACY_MODEL_HERMES) ||
           (version < 6 && parsed.model === LEGACY_MODEL_VENICE) ||
-          // v3 Euryale登場でv2をデフォルトから更新
-          (version < 8 && parsed.model === LEGACY_MODEL_EURYALE_V2)
+          (version < 8 && parsed.model === LEGACY_MODEL_EURYALE_V2) ||
+          // Magnum v4 は XML構造化出力で完全崩壊する実測があったため Euryale v3 に強制移行
+          (version < 9 && parsed.model === LEGACY_MODEL_MAGNUM_V4)
         ) {
           return { ...parsed, model: DEFAULT_MODEL };
         }

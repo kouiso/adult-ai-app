@@ -317,11 +317,11 @@ export async function streamChatWithQualityGuard(
       attempt++;
 
       if (attempt > MAX_QUALITY_RETRIES) {
-        // 再生成上限に達した → 最後の応答をそのまま使う
-        if (attempt > 1) {
-          onChunk(lastResponse);
-        }
-        onDone(lastResponse);
+        // 再生成上限に達しても壊れた応答は保存しない。
+        // 理由: 英語混入や一人称違反を含む応答を履歴に残すと、次ターンのコンテキスト
+        // を汚染して連鎖崩壊を招く。ユーザーに再生成を促すエラーで止める。
+        const failedCheck = checkResult.failedCheck ?? "unknown";
+        onError(`quality-guard failed after ${MAX_QUALITY_RETRIES + 1} attempts (${failedCheck}). Press regenerate to try again.`);
         return;
       }
     } catch (err) {
