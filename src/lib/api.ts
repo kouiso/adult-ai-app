@@ -285,17 +285,17 @@ export async function streamChatWithQualityGuard(
           .map((s) => `「${s}」`)
           .join("、");
         const banList = prevPhrases
-          ? `\n前のターンで使った以下の表現は絶対に使うな: ${prevPhrases}`
+          ? `\nNEVER reuse these expressions from the previous turn: ${prevPhrases}`
           : "";
         const fpHint = qualityContext.firstPerson
-          ? `\n一人称は必ず「${qualityContext.firstPerson}」を使え。「私」「僕」「俺」は禁止。`
+          ? `\nYou MUST use「${qualityContext.firstPerson}」as first-person pronoun.「私」「僕」「俺」are BANNED.`
           : "";
         retryMessages = [
           ...messages,
           { role: "assistant" as const, content: lastResponse },
           {
             role: "user" as const,
-            content: `この応答は品質基準を満たしていない。完全に異なる場面展開・身体感覚・感情で書き直せ。前の応答の単語を再利用するな。必ず<response>タグで囲んだXMLフォーマットで出力しろ。${fpHint}${banList}`,
+            content: `This response failed quality checks. Rewrite with completely different scene development, body sensations, and emotions. Do NOT reuse any words from the previous response. You MUST output in <response> XML format.${fpHint}${banList}`,
           },
         ];
         lastResponse = await collectStreamResponse(retryMessages, model);

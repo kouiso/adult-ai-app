@@ -17,6 +17,7 @@ import {
 import { detectScenePhase } from "@/lib/scene-phase";
 import { DEFAULT_SYSTEM_PROMPT } from "@/lib/config";
 import { parseSystemPrompt } from "@/lib/prompt-builder";
+import { parseXmlResponse } from "@/lib/xml-response-parser";
 import type { ChatMessage } from "@/store/chat-store";
 import { useChatStore } from "@/store/chat-store";
 import { useSettingsStore } from "@/store/settings-store";
@@ -404,9 +405,15 @@ export const ChatView = () => {
 
       // 品質ガード用コンテキスト: フェーズ検出+直前のassistant応答
       const phase = detectScenePhase(apiMessages);
-      const prevAssistant = currentMessages
-        .filter((m) => m.role === "assistant" && !m.isStreaming)
-        .pop()?.content;
+      const assistantMessages = currentMessages
+        .filter((m) => m.role === "assistant" && !m.isStreaming);
+      const prevAssistant = assistantMessages.at(-1)?.content;
+
+      // 直近5ターンの<inner>テキストを抽出（感情弧の多様性チェック用）
+      const prevInnerTexts = assistantMessages
+        .slice(-5)
+        .map((m) => parseXmlResponse(m.content)?.inner ?? "")
+        .filter((inner) => inner.length >= 5);
 
       let accumulated = "";
       await streamChatWithQualityGuard(
@@ -450,6 +457,7 @@ export const ChatView = () => {
             const all = ["私", "僕", "俺", "わたし", "ぼく", "おれ", "ワタシ", "ボク", "オレ"];
             return fp ? all.filter((p) => p !== fp) : undefined;
           })(),
+          prevInnerTexts,
         },
       );
     },

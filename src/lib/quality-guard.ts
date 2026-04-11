@@ -11,6 +11,8 @@ export interface QualityCheckContext {
   firstPerson?: string;
   // 使用禁止の一人称リスト
   wrongFirstPersons?: string[];
+  // 過去ターンの<inner>テキスト（感情弧の多様性チェック用、直近3-5ターン分）
+  prevInnerTexts?: string[];
 }
 
 export interface QualityCheckResult {
@@ -114,6 +116,57 @@ function checkNoUserLeak(plainText: string): boolean {
   return !plainText.includes("ユーザー");
 }
 
+// チェック10: フレーズ単位のターン間重複検出（語彙固着防止）
+// bigramSimilarityが閾値以下でも、特定フレーズが前ターンとほぼ同一な場合を検出
+function checkCrossTurnPhraseUniqueness(
+  response: string,
+  prevResponse?: string,
+): boolean {
+  if (!prevResponse) return true;
+  // 句読点で分割してフレーズ抽出
+  const extractPhrases = (text: string) =>
+    text
+      .split(/[。！？\n…」]/)
+      .map((s) => s.replace(/[「]/g, "").trim())
+      .filter((s) => s.length >= 8 && s.length <= 40);
+
+  const currentPhrases = extractPhrases(response);
+  const prevPhrases = extractPhrases(prevResponse);
+
+  if (currentPhrases.length === 0 || prevPhrases.length === 0) return true;
+
+  // 前ターンの各フレーズとbigram類似度0.7以上のペアが2つ以上あればfail
+  let matchCount = 0;
+  for (const curr of currentPhrases) {
+    for (const prev of prevPhrases) {
+      if (bigramSimilarity(curr, prev) >= 0.7) {
+        matchCount++;
+        if (matchCount >= 2) return false;
+        break;
+      }
+    }
+  }
+  return true;
+}
+
+// チェック11: <inner>ターン間多様性チェック（感情弧平坦化防止）
+// 直近ターンの<inner>テキストと類似度が高すぎる場合にfail
+function checkInnerDiversity(
+  currentInner: string,
+  prevInnerTexts?: string[],
+): boolean {
+  if (!prevInnerTexts || prevInnerTexts.length === 0) return true;
+  if (currentInner.length < 5) return true;
+
+  // 直近2ターンの<inner>と比較して、いずれかとbigram類似度0.5以上ならfail
+  const recentInners = prevInnerTexts.slice(-2);
+  for (const prev of recentInners) {
+    if (prev.length < 5) continue;
+    if (bigramSimilarity(currentInner, prev) >= 0.5) return false;
+  }
+  return true;
+}
+
 // チェック7: <action>内の三人称使用検出（主語崩壊防止）
 const THIRD_PERSON_PATTERNS = [
   "彼女は", "彼女の", "彼女が", "彼女を",
@@ -166,6 +219,10 @@ export function runQualityChecks(
     if (!checkInnerExists(parsed.inner, context.phase)) {
       return { passed: false, failedCheck: "inner-missing" };
     }
+    // <inner>ターン間多様性チェック（感情弧平坦化防止）
+    if (!checkInnerDiversity(parsed.inner, context.prevInnerTexts)) {
+      return { passed: false, failedCheck: "inner-repetitive" };
+    }
   }
 
   // ユーザー漏れチェック（没入感破壊ワード検出）
@@ -179,6 +236,11 @@ export function runQualityChecks(
 
   if (!checkCrossTurnSimilarity(plainText, context.prevAssistantResponse)) {
     return { passed: false, failedCheck: "cross-turn-similarity" };
+  }
+
+  // フレーズ単位のターン間重複チェック（語彙固着防止）
+  if (!checkCrossTurnPhraseUniqueness(plainText, context.prevAssistantResponse)) {
+    return { passed: false, failedCheck: "cross-turn-phrase-duplicate" };
   }
 
   if (!checkWithinTurnRepetition(plainText)) {
