@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 // .dev.varsからNOVITA_API_KEYを取得
@@ -82,8 +82,12 @@ const CHARACTER_PROMPTS: Record<string, string> = {
     "1girl, catgirl, age 19, cat ears, short orange hair, playful expression, oversized sweater, tail visible, cozy room background, warm lighting",
   "char-sayoko":
     "1girl, mature woman, age 50, elegant grey-streaked black hair in updo, calm composed expression, traditional kimono, calligraphy room, soft lighting",
-  "char-iris07":
+  "char-iris":
     "1girl, android, age unknown, short silver hair, LED blue eyes, minimal expression, white bodysuit with circuit patterns, sci-fi lab background, blue lighting",
+  "char-valkyrie":
+    "1girl, female knight, age 26, long blonde braided hair, stern silver eyes, muscular build, silver armor partially removed, red cape, medieval castle background, torch lighting",
+  "char-yuurei":
+    "1girl, ghost girl, age unknown, long straight black hair covering face, hollow pale eyes, tattered white dress, semi-transparent body, dark apartment room, eerie blueish light",
   "char-nagisa":
     "1girl, girlfriend, age 22, medium brown hair, gentle loving expression, casual sundress, park bench background, golden hour lighting",
   "char-aoi":
