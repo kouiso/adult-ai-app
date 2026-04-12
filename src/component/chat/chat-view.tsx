@@ -31,7 +31,7 @@ import { ChatInput } from "./chat-input";
 import { ConversationList } from "./conversation-list";
 import { MessageBubble } from "./message-bubble";
 
-const IMAGE_PROMPT_MAX_LENGTH = 500;
+const IMAGE_PROMPT_MAX_LENGTH = 900;
 // exponential backoff: 1s → 2s → 4s → 8s → cap 10s
 const POLL_MAX_DELAY_MS = 10_000;
 
@@ -665,16 +665,43 @@ export const ChatView = () => {
     const lastAssistant = [...msgs].reverse().find((m) => m.role === "assistant" && m.content);
     if (!lastAssistant) return;
 
-    // ユーザーの視覚的アクション（「白衣を脱がせる」等）も画像プロンプトに含める
-    const lastUser = [...msgs].reverse().find((m) => m.role === "user" && m.content);
+    // 直近3ターン分の会話履歴を画像プロンプトに含めることで、
+    // 服装の脱衣進行・体位の変遷・場所の一貫性をL1翻訳モデルに伝える
+    const HISTORY_TURNS = 3;
+    const recentPairs: { user?: string; assistant?: string }[] = [];
+    const reversedMsgs = [...msgs].reverse();
+    let userCount = 0;
+    for (const m of reversedMsgs) {
+      if (m.role === "user" && m.content) {
+        userCount++;
+        if (userCount > HISTORY_TURNS) break;
+        recentPairs.unshift({ user: m.content.slice(0, 200) });
+      } else if (m.role === "assistant" && m.content && recentPairs.length > 0 && !recentPairs[0].assistant) {
+        recentPairs[0].assistant = m.content.slice(0, 200);
+      }
+    }
+    // recentPairsが空の場合（assistantのみ等）はフォールバック
+    if (recentPairs.length === 0) {
+      const lastUser = reversedMsgs.find((m) => m.role === "user" && m.content);
+      recentPairs.push({
+        user: lastUser?.content.slice(0, 200),
+        assistant: lastAssistant.content.slice(0, 200),
+      });
+    }
+
     const phase = detectScenePhase(msgs);
 
-    const sceneDescription = [
-      lastUser ? `[ユーザーの行動] ${lastUser.content.slice(0, 300)}` : "",
-      `[キャラの反応] ${lastAssistant.content.slice(0, 300)}`,
-    ]
-      .filter(Boolean)
-      .join("\n");
+    // 古いターンから順に並べ、最新ターンを強調マーク
+    const historyLines = recentPairs.map((pair, i) => {
+      const isLatest = i === recentPairs.length - 1;
+      const prefix = isLatest ? "[最新]" : `[${i + 1}ターン前]`;
+      const parts: string[] = [];
+      if (pair.user) parts.push(`${prefix} ユーザー: ${pair.user}`);
+      if (pair.assistant) parts.push(`${prefix} キャラ: ${pair.assistant}`);
+      return parts.join("\n");
+    });
+
+    const sceneDescription = historyLines.filter(Boolean).join("\n");
 
     const prompt = sceneDescription.slice(0, IMAGE_PROMPT_MAX_LENGTH);
     const imageMessageId = crypto.randomUUID();

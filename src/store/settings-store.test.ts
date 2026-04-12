@@ -6,7 +6,7 @@ describe("useSettingsStore", () => {
   beforeEach(() => {
     useSettingsStore.setState({
       model: "sao10k/l3.1-euryale-70b",
-      nsfwBlur: true,
+      nsfwBlur: false,
       darkMode: true,
       autoGenerateImages: false,
       ttsEnabled: false,
@@ -22,11 +22,11 @@ describe("useSettingsStore", () => {
   });
 
   it("toggleNsfwBlur: NSFWぼかしがトグルされる", () => {
-    expect(useSettingsStore.getState().nsfwBlur).toBe(true);
-    useSettingsStore.getState().toggleNsfwBlur();
     expect(useSettingsStore.getState().nsfwBlur).toBe(false);
     useSettingsStore.getState().toggleNsfwBlur();
     expect(useSettingsStore.getState().nsfwBlur).toBe(true);
+    useSettingsStore.getState().toggleNsfwBlur();
+    expect(useSettingsStore.getState().nsfwBlur).toBe(false);
   });
 
   it("toggleDarkMode: ダークモードがトグルされる", () => {

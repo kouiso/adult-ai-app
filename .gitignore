@@ -34,3 +34,12 @@ dist-ssr
 
 # Playwright MCP artifacts (開発時の自動スクショ・ログ)
 .playwright-mcp/
+
+# Debug screenshots and test artifacts
+screenshot-*.png
+step*.png
+turn*.png
+scenario-*.png
+public/iter-attempt-*.png
+public/visual-check-*.png
+e2e-results/

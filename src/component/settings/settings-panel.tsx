@@ -226,8 +226,8 @@ export const SettingsPanel = () => {
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium">NSFWぼかし</p>
-                <p className="text-xs text-muted-foreground">画像をクリックするまでぼかす</p>
+                <p className="text-sm font-medium">プライバシーぼかし</p>
+                <p className="text-xs text-muted-foreground">画像をタップするまでぼかす（覗き見防止）</p>
               </div>
               <Switch checked={nsfwBlur} onCheckedChange={handleToggleNsfwBlur} />
             </div>

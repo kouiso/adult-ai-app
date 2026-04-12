@@ -16,7 +16,7 @@ const LEGACY_MODEL_DEEPSEEK = "deepseek/deepseek-chat" as const;
 
 const persistedSettingsSchema = z.object({
   model: z.string().default(DEFAULT_MODEL),
-  nsfwBlur: z.boolean().default(true),
+  nsfwBlur: z.boolean().default(false),
   darkMode: z.boolean().default(true),
   autoGenerateImages: z.boolean().default(false),
   ttsEnabled: z.boolean().default(false),
@@ -53,7 +53,7 @@ export const useSettingsStore = create<SettingsState>()(
   persist(
     (set) => ({
       model: DEFAULT_MODEL,
-      nsfwBlur: true,
+      nsfwBlur: false,
       darkMode: true,
       autoGenerateImages: false,
       ttsEnabled: false,
@@ -73,14 +73,14 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: "ai-chat-settings",
-      version: 20,
+      version: 21,
       migrate: (persistedState: unknown, version: number): PersistedSettings => {
         const result = persistedSettingsSchema.safeParse(persistedState);
         const parsed = result.success
           ? result.data
           : ({
               model: DEFAULT_MODEL,
-              nsfwBlur: true,
+              nsfwBlur: false,
               darkMode: true,
               autoGenerateImages: false,
               ttsEnabled: false,
@@ -89,6 +89,10 @@ export const useSettingsStore = create<SettingsState>()(
               ttsPitch: 1,
               activeCharacterId: null,
             } satisfies PersistedSettings);
+        // v21: アダルトアプリなのでぼかしデフォルトOFFに変更。既存ユーザーも移行
+        if (version < 21 && parsed.nsfwBlur === true) {
+          parsed.nsfwBlur = false;
+        }
         // attempt 6 model-switch-v2: Magnum v4 が長文で崩壊するため EVA-Qwen2.5-72B に移行
         if (
           (version < 2 && parsed.model === LEGACY_MODEL_NEMO) ||

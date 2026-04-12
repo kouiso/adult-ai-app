@@ -1065,6 +1065,34 @@ FORBIDDEN: Outputting plain text without <response> wrapper. FORBIDDEN: Omitting
         "Focus on: explicit, orgasm, bodily fluids, intense expression, full nudity, climax pose",
     };
 
+    // ポーズバリエーション: 同じフェーズでも毎回異なるポーズを生成するためのヒント
+    const poseDiversityPool: Record<ScenePhase, readonly string[]> = {
+      conversation: [
+        "sitting, looking_at_viewer", "standing, hand_on_hip", "leaning_forward, smile",
+        "arms_behind_back, looking_away", "chin_rest, elbow_on_table",
+        "crossed_arms, smirk", "waving, tilted_head",
+      ],
+      intimate: [
+        "lying_on_bed, looking_up", "sitting_on_lap, face_to_face", "against_wall, arms_around_neck",
+        "kneeling, hand_on_chest", "from_behind, looking_over_shoulder",
+        "straddling, hands_on_shoulders", "side_lying, intertwined",
+      ],
+      erotic: [
+        "missionary, legs_spread", "doggystyle, arched_back", "cowgirl, hands_on_chest",
+        "from_side, leg_lifted", "bent_over, gripping_sheets",
+        "reverse_cowgirl, looking_back", "standing_sex, against_wall",
+      ],
+      climax: [
+        "arched_back, head_tilted_back", "trembling, eyes_rolled_back", "collapsed, afterglow",
+        "clinging, nails_digging", "legs_locked, full_body_tension",
+        "on_back, spread_legs, convulsing", "face_down, gripping_pillow",
+      ],
+    };
+
+    // 毎回異なるポーズをランダムに選択
+    const posePool = poseDiversityPool[phase];
+    const randomPose = posePool[Math.floor(Math.random() * posePool.length)];
+
     const cfgByPhase: Record<ScenePhase, number> = {
       conversation: 7.0,
       intimate: 7.5,
@@ -1100,15 +1128,19 @@ FORBIDDEN: Outputting plain text without <response> wrapper. FORBIDDEN: Omitting
               role: "system",
               content: `You are an anime image tag generator for an adult (NSFW) application.
 Convert the Japanese scene description into English Stable Diffusion tags.
+
+The input may contain multiple turns of conversation history (marked [最新] for latest, [Nターン前] for older).
+Use ALL turns to understand the progression: earlier turns establish the setting/location, later turns show clothing changes and position shifts.
+
 Rules:
 - Output ONLY comma-separated danbooru-style tags, no explanation
 - Preserve ALL erotic/sexual content explicitly (body parts, positions, states of undress, fluids)
 - Include character visual traits from the character description: hair color/style, eye color, body type
 - Include: pose, facial expression, clothing state (partial undress, nude, etc.), camera angle
-- Include setting/background tags
-- Infer the current state of undress from the scene context (e.g., if user said "白衣を脱がせる" and character reacted, output: open_clothes, lab_coat_removed)
-- Infer body position from context (standing, lying_down, on_knees, etc.)
-- Include these inferred state tags in your output
+- BACKGROUND CONSISTENCY: Infer the setting/location from the conversation history (bedroom, office, classroom, etc.) and ALWAYS include specific background tags. If the setting was established in earlier turns, maintain it.
+- Infer the CUMULATIVE state of undress from the full history (e.g., if turn 1 removed shirt and turn 2 removed bra, output: topless, nude_upper_body)
+- Infer body position from the latest context (standing, lying_down, on_knees, etc.)
+- POSE HINT (use as default, override if scene context clearly implies a different pose): ${randomPose}
 - Never censor or soften the content
 - Max 80 words
 - Current scene phase: ${phase}
@@ -1116,7 +1148,7 @@ Rules:
             },
             {
               role: "user",
-              content: `Character: ${characterDescription || "anime girl"}\nScene context (infer current clothing/position state from this):\n${prompt}\nCurrent phase: ${phase}`,
+              content: `Character: ${characterDescription || "anime girl"}\nScene context (use full history to infer cumulative state — clothing removed stays removed, setting persists):\n${prompt}\nCurrent phase: ${phase}`,
             },
           ],
           max_tokens: 200,
