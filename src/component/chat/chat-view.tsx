@@ -14,9 +14,10 @@ import {
   streamChat,
   streamChatWithQualityGuard,
 } from "@/lib/api";
-import { detectScenePhase } from "@/lib/scene-phase";
+import { buildMessagesForApi, extractFirstPerson } from "@/lib/chat-message-adapter";
 import { DEFAULT_SYSTEM_PROMPT } from "@/lib/config";
 import { parseSystemPrompt } from "@/lib/prompt-builder";
+import { detectScenePhase } from "@/lib/scene-phase";
 import { parseXmlResponse } from "@/lib/xml-response-parser";
 import type { ChatMessage } from "@/store/chat-store";
 import { useChatStore } from "@/store/chat-store";
@@ -28,27 +29,6 @@ import { Skeleton } from "../ui/skeleton";
 import { ChatInput } from "./chat-input";
 import { ConversationList } from "./conversation-list";
 import { MessageBubble } from "./message-bubble";
-
-// systemPromptからキャラの一人称を抽出（「一人称は「X」」パターン）
-function extractFirstPerson(systemPrompt: string): string | null {
-  const match = systemPrompt.match(/一人称は「([^」]+)」/);
-  return match ? match[1] : null;
-}
-
-// systemリマインダーとして注入し、キャラドリフトを防ぐ
-function buildPersonaReminder(characterName: string, firstPerson: string | null): string {
-  const fpRule = firstPerson
-    ? ` Your first-person pronoun is「${firstPerson}」— NEVER use 俺/僕/私 unless「${firstPerson}」IS one of those.`
-    : "";
-  return `[REMINDER] Output ONLY Japanese. You ARE ${characterName} — talk as yourself.${fpRule} If the user is chatting, chat back naturally. Do NOT narrate or write like a novel. No refusals, no meta-commentary.`;
-}
-
-// 言語リマインダー（最後のuserメッセージ直前にsystemメッセージとして注入）
-// userメッセージ内容を改変するのではなく、独立したsystemメッセージとして配置する
-const LANG_REMINDER =
-  "(出力はすべて日本語のみ。英語や他言語を出力に含めないこと。推論過程も見せないこと)";
-
-type ApiMessage = { role: "system" | "user" | "assistant"; content: string };
 
 const IMAGE_PROMPT_MAX_LENGTH = 500;
 // exponential backoff: 1s → 2s → 4s → 8s → cap 10s
@@ -329,40 +309,8 @@ export const ChatView = () => {
   );
 
   const buildApiMessages = useCallback(
-    (msgs: ChatMessage[], systemPrompt: string, characterName: string) => {
-      // systemロールとストリーミング中のメッセージを除外し、型を絞り込む
-      const filtered = msgs.filter(
-        (m): m is ChatMessage & { role: "user" | "assistant" } =>
-          (m.role === "user" || m.role === "assistant") && !m.isStreaming,
-      );
-
-      // userターン3回ごとにsystemリマインダーを注入してキャラドリフトを防ぐ
-      // userターンの直前に挿入するとrole順序（assistant→system→user）が維持される
-      const USER_TURNS_PER_REMINDER = 3;
-      const withReminders: ApiMessage[] = [];
-      const firstPerson = extractFirstPerson(systemPrompt);
-      const reminder = buildPersonaReminder(characterName, firstPerson);
-      let userTurnCount = 0;
-      filtered.forEach((m) => {
-        // userターンの直前にリマインダーを挿入（role交互パターンを壊さない）
-        if (m.role === "user") {
-          userTurnCount++;
-          if (userTurnCount > 1 && (userTurnCount - 1) % USER_TURNS_PER_REMINDER === 0) {
-            withReminders.push({ role: "system", content: reminder });
-          }
-        }
-        withReminders.push({ role: m.role, content: m.content });
-      });
-
-      // 言語リマインダーを最後のuserメッセージ直前にsystemとして注入
-      // userメッセージの後ではなく直前に配置し、user→assistantの流れを維持する
-      const langIdx = withReminders.findLastIndex((m) => m.role === "user");
-      if (langIdx >= 0) {
-        withReminders.splice(langIdx, 0, { role: "system", content: LANG_REMINDER });
-      }
-
-      return [{ role: "system" as const, content: systemPrompt }, ...withReminders];
-    },
+    (msgs: ChatMessage[], systemPrompt: string, characterName: string) =>
+      buildMessagesForApi(msgs, systemPrompt, characterName),
     [],
   );
 

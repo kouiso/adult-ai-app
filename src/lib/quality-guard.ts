@@ -20,34 +20,10 @@ export interface QualityCheckResult {
   failedCheck?: string;
 }
 
-// 2文字bigram集合のmin-based類似度（スコアリング基準と統一）
-function bigramSimilarity(a: string, b: string): number {
-  if (a.length < 4 || b.length < 4) return 0;
-  const bigrams = (s: string) => {
-    const set = new Set<string>();
-    for (let i = 0; i < s.length - 1; i++) set.add(s.slice(i, i + 2));
-    return set;
-  };
-  const setA = bigrams(a);
-  const setB = bigrams(b);
-  let intersection = 0;
-  for (const bg of setA) if (setB.has(bg)) intersection++;
-  return intersection / Math.min(setA.size, setB.size);
-}
-
 // チェック1: シーン応答の最低文字数
 function checkSceneMinLength(response: string, phase: ScenePhase): boolean {
   if (phase === "conversation") return true;
   return response.length >= 80;
-}
-
-// チェック2: ターン間の類似度（テンプレブロック検出）
-function checkCrossTurnSimilarity(
-  response: string,
-  prevResponse?: string,
-): boolean {
-  if (!prevResponse) return true;
-  return bigramSimilarity(response, prevResponse) < 0.55;
 }
 
 // チェック3: 英語混入チェック
@@ -101,8 +77,9 @@ function checkWithinTurnRepetition(response: string): boolean {
 }
 
 // チェック5: 最大文字数（デコードループによる異常長文を検出）
+// max_tokens 1024 に合わせて上限も緩和。官能シーンのクライマックスは自然に500字超える
 function checkMaxLength(response: string): boolean {
-  return response.length <= 500;
+  return response.length <= 1200;
 }
 
 // チェック6: XMLフォーマット検証（全フェーズでXML出力が必須）
@@ -116,66 +93,11 @@ function checkNoUserLeak(plainText: string): boolean {
   return !plainText.includes("ユーザー");
 }
 
-// チェック10: フレーズ単位のターン間重複検出（語彙固着防止）
-// bigramSimilarityが閾値以下でも、特定フレーズが前ターンとほぼ同一な場合を検出
-function checkCrossTurnPhraseUniqueness(
-  response: string,
-  prevResponse?: string,
-): boolean {
-  if (!prevResponse) return true;
-  // 句読点で分割してフレーズ抽出
-  const extractPhrases = (text: string) =>
-    text
-      .split(/[。！？\n…」]/)
-      .map((s) => s.replace(/[「]/g, "").trim())
-      .filter((s) => s.length >= 8 && s.length <= 40);
-
-  const currentPhrases = extractPhrases(response);
-  const prevPhrases = extractPhrases(prevResponse);
-
-  if (currentPhrases.length === 0 || prevPhrases.length === 0) return true;
-
-  // 前ターンの各フレーズとbigram類似度0.7以上のペアが2つ以上あればfail
-  let matchCount = 0;
-  for (const curr of currentPhrases) {
-    for (const prev of prevPhrases) {
-      if (bigramSimilarity(curr, prev) >= 0.7) {
-        matchCount++;
-        if (matchCount >= 2) return false;
-        break;
-      }
-    }
-  }
-  return true;
-}
-
-// チェック11: <inner>ターン間多様性チェック（感情弧平坦化防止）
-// 直近ターンの<inner>テキストと類似度が高すぎる場合にfail
-function checkInnerDiversity(
-  currentInner: string,
-  prevInnerTexts?: string[],
-): boolean {
-  if (!prevInnerTexts || prevInnerTexts.length === 0) return true;
-  if (currentInner.length < 5) return true;
-
-  // 直近2ターンの<inner>と比較して、いずれかとbigram類似度0.5以上ならfail
-  const recentInners = prevInnerTexts.slice(-2);
-  for (const prev of recentInners) {
-    if (prev.length < 5) continue;
-    if (bigramSimilarity(currentInner, prev) >= 0.5) return false;
-  }
-  return true;
-}
-
-// チェック7: <action>内の三人称使用検出（主語崩壊防止）
-const THIRD_PERSON_PATTERNS = [
-  "彼女は", "彼女の", "彼女が", "彼女を",
-  "彼は", "彼の", "彼が", "彼を",
-] as const;
-
-function checkNoThirdPerson(actionText: string): boolean {
-  return !THIRD_PERSON_PATTERNS.some((p) => actionText.includes(p));
-}
+// チェック7は撤廃。理由:
+// - Qwen系モデルはaction内で三人称ナレーション体（「彼女の髪」「彼の指が」）を使うのが自然
+// - これは「キャラが自分を三人称で呼ぶ」のではなく「小説のナレーター視点」
+// - 全モデルで一貫してブロッカーになっており、リトライ6回→送信エラーの最大原因
+// - 一人称強制はプロンプト側で指示済み。ガードで叩く必要なし
 
 // チェック8: <inner>セクションが存在するか（シーンフェーズでは必須）
 function checkInnerExists(innerText: string, phase: ScenePhase): boolean {
@@ -213,16 +135,11 @@ export function runQualityChecks(
 
   // XML固有チェック（パース成功時のみ）
   if (parsed) {
-    if (parsed.action && !checkNoThirdPerson(parsed.action)) {
-      return { passed: false, failedCheck: "third-person-in-action" };
-    }
+    // third-person チェックは撤廃済み（ナレーション体として自然な表現まで誤ブロックするため）
     if (!checkInnerExists(parsed.inner, context.phase)) {
       return { passed: false, failedCheck: "inner-missing" };
     }
-    // <inner>ターン間多様性チェック（感情弧平坦化防止）
-    if (!checkInnerDiversity(parsed.inner, context.prevInnerTexts)) {
-      return { passed: false, failedCheck: "inner-repetitive" };
-    }
+    // inner多様性チェックは削除 — サンプラに委任（理由はクロスターン削除と同じ）
   }
 
   // ユーザー漏れチェック（没入感破壊ワード検出）
@@ -234,14 +151,10 @@ export function runQualityChecks(
     return { passed: false, failedCheck: "scene-min-length" };
   }
 
-  if (!checkCrossTurnSimilarity(plainText, context.prevAssistantResponse)) {
-    return { passed: false, failedCheck: "cross-turn-similarity" };
-  }
-
-  // フレーズ単位のターン間重複チェック（語彙固着防止）
-  if (!checkCrossTurnPhraseUniqueness(plainText, context.prevAssistantResponse)) {
-    return { passed: false, failedCheck: "cross-turn-phrase-duplicate" };
-  }
+  // クロスターン類似度・フレーズ重複チェックは削除
+  // 理由: 官能シーンは語彙が自然に収束する領域（「胸」「喘ぎ」等）で、
+  // ターン間重複rejectがリトライ地獄→同一台詞コピーの根本原因だった
+  // 反復制御はサンプラ (repetition_penalty 1.05) に委任する
 
   if (!checkWithinTurnRepetition(plainText)) {
     return { passed: false, failedCheck: "within-turn-repetition" };

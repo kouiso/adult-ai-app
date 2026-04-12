@@ -199,9 +199,9 @@ export const SettingsPanel = () => {
                   }`}
                 >
                   <div className="font-medium">{ch.name}</div>
-                  {ch.tags.length > 0 && (
+                  {(ch.tags ?? []).length > 0 && (
                     <div className="flex flex-wrap gap-1 mt-1">
-                      {ch.tags.map((tag) => (
+                      {(ch.tags ?? []).map((tag) => (
                         <span
                           key={tag}
                           className="inline-block rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground"

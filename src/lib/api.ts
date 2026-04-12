@@ -211,8 +211,10 @@ export async function streamChat(
 
 // 品質ガード付きストリーミング
 // 応答完了後に品質チェックを行い、不合格なら自動再生成する
+import { buildRetryMessages } from "@/lib/chat-message-adapter";
 import type { QualityCheckContext } from "@/lib/quality-guard";
 import { MAX_QUALITY_RETRIES, runQualityChecks } from "@/lib/quality-guard";
+import { isXmlResponse, wrapConversationPlainAsXml } from "@/lib/xml-response-parser";
 
 // SSEストリームを全て読み取り、完全なテキストを返す（再生成判定用）
 async function collectStreamResponse(
@@ -274,31 +276,22 @@ export async function streamChatWithQualityGuard(
         if (streamError) throw new Error(streamError);
         lastResponse = accumulated;
       } else {
-        // 再生成: 失敗原因に応じた具体的な書き直し指示
-        const prevText = qualityContext.prevAssistantResponse ?? "";
-        // 前回の応答から主要フレーズを抽出して禁止リストに
-        const prevPhrases = prevText
-          .split(/[。！？\n…]/)
-          .map((s) => s.trim())
-          .filter((s) => s.length >= 4 && s.length <= 20)
-          .slice(0, 5)
-          .map((s) => `「${s}」`)
-          .join("、");
-        const banList = prevPhrases
-          ? `\nNEVER reuse these expressions from the previous turn: ${prevPhrases}`
-          : "";
-        const fpHint = qualityContext.firstPerson
-          ? `\nYou MUST use「${qualityContext.firstPerson}」as first-person pronoun.「私」「僕」「俺」are BANNED.`
-          : "";
-        retryMessages = [
-          ...messages,
-          { role: "assistant" as const, content: lastResponse },
-          {
-            role: "user" as const,
-            content: `This response failed quality checks. Rewrite with completely different scene development, body sensations, and emotions. Do NOT reuse any words from the previous response. You MUST output in <response> XML format.${fpHint}${banList}`,
-          },
-        ];
+        // 再生成: アダプター経由で統一されたリトライメッセージを構築
+        retryMessages = buildRetryMessages(messages, lastResponse, qualityContext);
         lastResponse = await collectStreamResponse(retryMessages, model);
+      }
+
+      // 会話フェーズでモデルがXMLラッパーを省略した場合の救済
+      // リトライ前にプレーン応答を<response><dialogue>で自動ラップする
+      // 理由: 平文対話はdialogue相当の有効コンテンツ。XMLラッパー欠落のみを
+      // 理由に6回リトライして送信エラーにするのはUX破壊
+      if (
+        qualityContext.phase === "conversation" &&
+        !isXmlResponse(lastResponse) &&
+        lastResponse.trim().length >= 4
+      ) {
+        lastResponse = wrapConversationPlainAsXml(lastResponse);
+        onChunk(lastResponse);
       }
 
       const checkResult = runQualityChecks(lastResponse, qualityContext);

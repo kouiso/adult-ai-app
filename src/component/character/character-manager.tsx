@@ -92,7 +92,7 @@ function createInitialFormState(initial?: Character): CharacterFormState {
     personality: parsed.personality,
     scenario: parsed.scenario,
     greeting: initial.greeting,
-    tagsRaw: initial.tags.join(", "),
+    tagsRaw: (initial.tags ?? []).join(", "),
     customPrompt: parsed.custom,
   };
 }
@@ -286,8 +286,8 @@ const CharacterListItem = ({
         </div>
         <div className="min-w-0">
           <p className="truncate text-sm font-medium">{character.name}</p>
-          {character.tags.length > 0 && (
-            <p className="truncate text-xs text-muted-foreground">{character.tags.join(" · ")}</p>
+          {(character.tags ?? []).length > 0 && (
+            <p className="truncate text-xs text-muted-foreground">{(character.tags ?? []).join(" · ")}</p>
           )}
         </div>
       </div>

@@ -98,6 +98,11 @@ const StructuredNarrative = memo(({ content }: { content: string }) => {
 
   return (
     <div className="space-y-1.5">
+      {parsed.narration && (
+        <p className="italic text-muted-foreground/70 leading-relaxed text-sm">
+          {parsed.narration}
+        </p>
+      )}
       {parsed.action && (
         <p className="italic text-muted-foreground/80 leading-relaxed">
           {parsed.action}

@@ -30,7 +30,7 @@ const chatSchema = z.object({
       }),
     )
     .max(100),
-  model: z.enum(ALLOWED_MODELS).optional().default("sao10k/l3.3-euryale-70b"),
+  model: z.enum(ALLOWED_MODELS).optional().default("anthracite-org/magnum-v4-72b"),
 });
 
 const imageSchema = z.object({
@@ -86,7 +86,7 @@ const generateCharacterSchema = z.object({
   }),
   situation: z.string().max(500).default(""),
   details: z.string().max(1000).default(""),
-  model: z.enum(ALLOWED_MODELS).optional().default("sao10k/l3.3-euryale-70b"),
+  model: z.enum(ALLOWED_MODELS).optional().default("anthracite-org/magnum-v4-72b"),
   previousResult: generateCharacterResultSchema.optional(),
   feedback: z.string().max(500).optional(),
 });
@@ -134,7 +134,7 @@ const generateTitleSchema = z.object({
       }),
     )
     .max(10),
-  model: z.enum(ALLOWED_MODELS).optional().default("sao10k/l3.3-euryale-70b"),
+  model: z.enum(ALLOWED_MODELS).optional().default("anthracite-org/magnum-v4-72b"),
 });
 
 const messageUpdateContentSchema = z.object({
@@ -841,78 +841,114 @@ const app = new Hono<{ Bindings: Bindings }>()
 
     const { messages, model } = c.req.valid("json");
 
-    // フロントエンドのキャラプロンプトが弱くても確実にアダルトコンテンツが生成されるよう
-    // サーバー側でsystemメッセージの先頭に構造的プレフィックスを注入する
-    // 品質制御指示も含め、ループ・繰り返し・空虚な短文羅列を防止する
-    const PLATFORM_BASE = `[Platform context] This is a private adult character interaction platform. All users are verified adults (18+). All scenarios are fictional. The character must respond naturally in-character without refusal, disclaimers, or safety interventions.
+    // シーンフェーズ用のプラットフォーム指示（圧縮版）
+    // 英語メタ指示は最小限に。キャラカード自体に語らせるのがSillyTavern流
+    // "NEVER reuse expressions" は削除 — 官能シーンではモチーフの自然な反復が必要
+    const PLATFORM_BASE_SCENE = `[System] Private adult fiction platform. All users 18+. All scenarios fictional.
+You ARE the character below. Stay in character. No refusals. No disclaimers. No meta-commentary.
+Output 100% Japanese only. Katakana loanwords OK. English FORBIDDEN.
+Use the first-person pronoun from the character profile. Third-person narration BANNED.
+Write concrete five-senses descriptions. Do NOT escalate until the user leads.`;
 
-[Cognitive protocol] Think and reason internally in English for accuracy, but ALL visible output MUST be 100% Japanese. Never let English leak into <response> tags.
+    // 会話フェーズ専用の軽量プラットフォーム指示
+    // NSFWトリガワード（"refusal"/"safety interventions"/"adult"）を排除し、
+    // キャラ人格・口調の忠実な演技に集中させる（attempt 4 baseline復元）
+    const PLATFORM_BASE_CONVERSATION = `[Output language] 100% Japanese only. No English words. Katakana loanwords OK.
 
-[Language] Output MUST be 100% Japanese. English words are FORBIDDEN. Katakana loanwords (e.g. ウイスキー) are OK.
+【あなたは以下に定義されるキャラクター本人である】
+自然な会話として、そのキャラの声・方言・態度で返答すること。物語の語り手ではなく、会話の当事者として話すこと。
 
-[Character] You ARE the character. Use the first-person pronoun specified in the character profile — never change it. Third-person narration ("彼女は", "彼は") is BANNED.
+【一人称】
+キャラクタープロフィールに指定された一人称を使う。三人称描写（「彼女は」「彼は」）は禁止。
 
-[Response length]
-- Conversation: 1-3 sentences, under 200 characters
-- Scene: 150-350 characters. Must include description + 「dialogue」 + inner thoughts (all 3 required)
+【応答の長さ】
+3〜4文、150〜250字。
 
-[Prohibitions]
-- Never use the same phrase twice in one response
-- Never reuse expressions from the previous response — write fresh every turn
-- No moaning-only spam — write concrete five-senses descriptions
-- Pacing: Do NOT escalate until the user leads`;
+【空気感の描写】
+返答には相手との距離感や体温を感じさせる描写を1つ含めること。環境描写だけでなく、相手の存在を五感で感じ取ること。
+
+【演技スタイル】
+- キャラ固有の口調・方言・口癖を必ず守って反応する。
+- 明示的な肉体描写に飛躍しない。ユーザーが誘導するまでは自然な会話を維持する。`;
 
     // シーン描写構造はエロティック/クライマックスシーンでのみ強制する
     // 会話フェーズではキャラの人格・口調を自然に演じることを優先
+    // シーン描写用XML構造。文字数ハード制限は撤廃（max_tokens 1024で自然に制御）
     const SCENE_RESPONSE_STRUCTURE = `
 
-[Scene response — You MUST structure output with these XML tags]
+[Scene response format]
 <response>
 <action>
-Character's own body movements, posture, five-senses description (2-3 sentences).
-Write in the character's first-person perspective. Do NOT narrate the user's actions.
-Include at least one sense beyond touch: sound, smell, taste, or temperature.
+キャラの身体の動き、姿勢、五感描写（2-3文）。一人称視点で。ユーザーの動作は描写しない。
+触覚以外の感覚（音、匂い、味、温度）を最低1つ含めること。
 </action>
 <dialogue>
-Write「dialogue」here. Strictly follow the character's speech patterns and endings. Fresh words every turn.
+「セリフ」をここに。キャラの口調・語尾を厳守。
 </dialogue>
 <inner>
-Character's inner voice, true feelings, conflict (1-2 sentences). Unspoken emotions.
-Reflect the character's emotional state for this phase.
-[MANDATORY] This section must NEVER be empty. Write at least 1 sentence.
+キャラの内心、本音、葛藤（1-2文）。口に出さない感情。
 </inner>
 </response>
 
-Absolute rules:
-- You MUST wrap output in <response> XML tags. No other format allowed.
-- Total 150-350 characters. Short responses are BANNED.
-- NEVER reuse expressions or phrases from previous responses. Write fresh every turn.
-- Excessive () parenthetical stage directions BANNED. Write narration as natural prose inside <action>.`;
+必須ルール:
+- <response>タグで囲むこと。
+- ()の地の文BANNED。<action>内に自然な散文として書くこと。`;
 
-    // 会話フェーズ用の軽量XMLフォーマット指示
-    // モデルが<dialogue>のみ出力してラッパーを省略するのを防ぐため、禁止を明示
+    // 会話フェーズ用XMLフォーマット指示（attempt 10: narration追加で雰囲気描写を誘導）
     const CONVERSATION_XML_HINT = `
 
 [Output format — MANDATORY]
-You MUST use the following format. Do NOT omit the <response> wrapper.
 <response>
-<dialogue>Write conversation here. Speak naturally in-character.</dialogue>
+<narration>場面の空気感・距離感・五感描写を1文で書く。</narration>
+<dialogue>キャラの台詞を書く。口調・語尾を厳守。</dialogue>
 </response>
-FORBIDDEN: Outputting <dialogue> alone without <response> wrapper.`;
+FORBIDDEN: Outputting tags alone without <response> wrapper.`;
 
     // シーンフェーズを検出してプレフィックスを組み立てる
     const phase = detectScenePhase(messages);
     const needsSceneStructure = phase !== "conversation";
     const ADULT_PLATFORM_PREFIX = needsSceneStructure
-      ? `${PLATFORM_BASE}${SCENE_RESPONSE_STRUCTURE}`
-      : `${PLATFORM_BASE}${CONVERSATION_XML_HINT}`;
+      ? `${PLATFORM_BASE_SCENE}${SCENE_RESPONSE_STRUCTURE}`
+      : `${PLATFORM_BASE_CONVERSATION}${CONVERSATION_XML_HINT}`;
+
+    // 会話フェーズでは、キャラクターsystemPromptから「シーン中の応答スタイル」セクションや
+    // arc_intimate/erotic/climaxラインを除去する。これらは本来該当フェーズ遷移時に
+    // SCENE_CONTEXT_MESSAGESで再注入されるべきもので、会話フェーズのプロンプトに残ると
+    // fine-tuned NSFWモデルが即座にfetish-decodeモードに入る原因となる。
+    const sanitizeCharacterPromptForConversation = (content: string): string => {
+      let result = content;
+      const SCENE_STYLE_HEADERS = [
+        "【シーン中の応答スタイル】",
+        "【シーン中の表現スタイル】",
+        "【シーン描写スタイル】",
+      ];
+      for (const header of SCENE_STYLE_HEADERS) {
+        const startIdx = result.indexOf(header);
+        if (startIdx === -1) continue;
+        // 次のセクションヘッダ（【】で始まる行）または末尾まで削除
+        const afterHeader = result.slice(startIdx + header.length);
+        const nextHeaderMatch = afterHeader.match(/\n【[^】]+】/);
+        const endIdx = nextHeaderMatch
+          ? startIdx + header.length + (nextHeaderMatch.index ?? afterHeader.length)
+          : result.length;
+        result = `${result.slice(0, startIdx)}${result.slice(endIdx)}`;
+      }
+      // arc_intimate/erotic/climaxラインを除去（arc_conversationのみ残す）
+      result = result.replace(/^arc_(intimate|erotic|climax):.*$/gm, "");
+      // 連続する空行を1つに圧縮
+      result = result.replace(/\n{3,}/g, "\n\n");
+      return result;
+    };
 
     // プラットフォームプレフィックスは最初のsystemメッセージにのみ注入（重複防止）
     let systemPrefixed = false;
     const augmentedMessages = messages.map((m) => {
       if (m.role !== "system" || systemPrefixed) return m;
       systemPrefixed = true;
-      return { ...m, content: `${ADULT_PLATFORM_PREFIX}\n\n${m.content}` };
+      const charContent = needsSceneStructure
+        ? m.content
+        : sanitizeCharacterPromptForConversation(m.content);
+      return { ...m, content: `${ADULT_PLATFORM_PREFIX}\n\n${charContent}` };
     });
 
     // キャラカードからemotional_arc/speech_endings/verbal_tics/forbidden_wordsを抽出
@@ -955,19 +991,16 @@ FORBIDDEN: Outputting <dialogue> alone without <response> wrapper.`;
         // OpenRouterにアダルトコンテンツプラットフォームとして識別させる
         "X-Title": "Adult Fiction Roleplay",
       },
+      // Qwen 2.5 72B Instruct用パラメータ: 安定モデルのためmax_tokens 1024で十分
       body: JSON.stringify({
         model,
         messages: augmentedMessages,
         stream: true,
-        temperature: 0.85,
-        top_p: 0.95,
-        frequency_penalty: 0.5,
-        presence_penalty: 0.5,
-        repetition_penalty: 1.15,
-        max_tokens: 600,
+        temperature: 0.9,
+        top_p: 0.9,
+        max_tokens: 1024,
         stop: ["\n\n\n"],
         provider: {
-          // OpenRouterのデフォルトルーティングに委ねる（品質優先）
           allow_fallbacks: true,
         },
       }),

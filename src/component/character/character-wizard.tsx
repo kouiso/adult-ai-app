@@ -255,11 +255,11 @@ const WizardStep3 = ({
           <p className="text-xs font-medium text-muted-foreground">挨拶</p>
           <p className="text-sm italic leading-relaxed">「{result.greeting}」</p>
         </div>
-        {result.tags.length > 0 && (
+        {(result.tags ?? []).length > 0 && (
           <div>
             <p className="text-xs font-medium text-muted-foreground">タグ</p>
             <div className="flex flex-wrap gap-1 mt-1">
-              {result.tags.map((tag, i) => (
+              {(result.tags ?? []).map((tag, i) => (
                 <span
                   key={`${tag}-${i}`}
                   className="inline-block rounded-full bg-muted px-2 py-0.5 text-xs"

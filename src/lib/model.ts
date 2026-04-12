@@ -33,8 +33,14 @@ export const MODEL_CATALOG = [
   },
   // ── プレミアム ───────────────────────────────────────────────────────────
   {
+    id: "deepseek/deepseek-chat",
+    name: "DeepSeek V3 ⭐ 推奨",
+    tier: "プレミアム",
+    desc: "RPランキング1位・164k文脈・安定・$0.26/M",
+  },
+  {
     id: "sao10k/l3.3-euryale-70b",
-    name: "Euryale v3 70B ⭐ 推奨",
+    name: "Euryale v3 70B",
     tier: "プレミアム",
     desc: "最新Euryale・RP/アダルト最高品質",
   },
@@ -55,6 +61,18 @@ export const MODEL_CATALOG = [
     name: "Magnum v4 72B",
     tier: "プレミアム",
     desc: "官能描写特化・高文章品質",
+  },
+  {
+    id: "eva-unit-01/eva-qwen2.5-72b",
+    name: "EVA Qwen2.5 72B ⭐ 推奨",
+    tier: "プレミアム",
+    desc: "Qwen2.5ベース・日本語ネイティブ・ERP特化",
+  },
+  {
+    id: "qwen/qwen-2.5-72b-instruct",
+    name: "Qwen 2.5 72B Instruct ⭐ 推奨",
+    tier: "プレミアム",
+    desc: "日本語ネイティブ・指示追従性最高・安定出力",
   },
   {
     id: "nousresearch/hermes-4-70b",
