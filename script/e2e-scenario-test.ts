@@ -98,12 +98,13 @@ function hasEnglishWords(text: string): boolean {
   return /[a-zA-Z]{4,}/.test(cleaned);
 }
 
-// XML構造チェック
-// ブラウザではStructuredNarrativeが生XMLをパースしてレンダリングするため、
-// innerText/innerHTMLからは生XMLタグを検出できない。
-// このチェックはレンダリング前のraw content(Dexie保存値)を対象にする場合のみ有効
-function hasXmlStructure(text: string): boolean {
-  return /<response>/.test(text) || /<dialogue>/.test(text) || /<action>/.test(text);
+// XML構造チェック（ブラウザレンダリング後のDOM構造で判定）
+// StructuredNarrativeコンポーネントがXMLをパースすると、
+// space-y-1.5クラスのdiv内にaction(italic)/dialogue(font-medium)/inner(text-xs)が配置される
+// 生XMLタグはレンダリング時に除去されるため、DOM構造の存在で間接的に検出する
+function hasXmlStructure(html: string): boolean {
+  // StructuredNarrativeの出力構造: <div class="space-y-1.5">...</div>
+  return html.includes("space-y-1.5") || html.includes("font-medium");
 }
 
 // 一人称チェック

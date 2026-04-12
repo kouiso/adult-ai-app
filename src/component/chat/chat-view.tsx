@@ -721,8 +721,8 @@ export const ChatView = () => {
       content: "🖼️ 画像を生成中...",
       isStreaming: true,
     });
-    // DB永続化はバックグラウンドで実行（画像生成開始をブロックしない）
-    void createMessageEntry({
+    // D1にメッセージを先に永続化する（後続のPATCH /messages/:id/imageがレコード不在で空振りするのを防ぐ）
+    await createMessageEntry({
       conversationId,
       id: imageMessageId,
       role: "assistant",
