@@ -11,6 +11,7 @@ import {
   generateConversationTitle,
   generateImage,
   getImageTaskResult,
+  persistImageToR2,
   streamChat,
   streamChatWithQualityGuard,
 } from "@/lib/api";
@@ -712,6 +713,22 @@ export const ChatView = () => {
         void updateMessageContentEntry(imageMessageId, "").catch((error) =>
           console.error("failed to clear image message content", error),
         );
+        // エフェメラルなS3 URLをR2に永続化し、永続URLに差し替える
+        void persistImageToR2(imageResult.imageUrl, imageMessageId)
+          .then((r2Result) => {
+            if ("imageKey" in r2Result) {
+              const r2Url = `/api/image/r2/${r2Result.imageKey}`;
+              updateMessageImage(imageMessageId, r2Url);
+              void persistMessageImageEntry({
+                messageId: imageMessageId,
+                imageUrl: r2Url,
+                imageKey: r2Result.imageKey,
+              }).catch((error) => console.error("failed to persist R2 image key", error));
+            } else {
+              console.error("R2 persist error:", r2Result.error);
+            }
+          })
+          .catch((error) => console.error("failed to persist image to R2", error));
         return;
       }
 

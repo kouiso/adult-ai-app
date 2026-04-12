@@ -577,6 +577,27 @@ export async function updateMessageImage(input: {
   }
 }
 
+const persistImageToR2ResponseSchema = z.union([
+  z.object({ imageKey: z.string() }),
+  z.object({ error: z.string() }),
+]);
+
+// エフェメラルなS3 URLをR2に永続化し、imageKeyを返す
+export async function persistImageToR2(
+  imageUrl: string,
+  messageId: string,
+): Promise<{ imageKey: string } | { error: string }> {
+  const response = await fetch("/api/image/persist", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ imageUrl, messageId }),
+  });
+  if (!response.ok) {
+    return { error: `R2 persist failed: ${response.status}` };
+  }
+  return persistImageToR2ResponseSchema.parse(await response.json());
+}
+
 export async function updateMessageContent(messageId: string, content: string): Promise<void> {
   const response = await fetch(`/api/messages/${encodeURIComponent(messageId)}/content`, {
     method: "PATCH",
