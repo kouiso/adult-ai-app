@@ -281,14 +281,16 @@ export async function streamChatWithQualityGuard(
         lastResponse = await collectStreamResponse(retryMessages, model);
       }
 
-      // 会話フェーズでモデルがXMLラッパーを省略した場合の救済
-      // リトライ前にプレーン応答を<response><dialogue>で自動ラップする
-      // 理由: 平文対話はdialogue相当の有効コンテンツ。XMLラッパー欠落のみを
-      // 理由に6回リトライして送信エラーにするのはUX破壊
+      // 会話フェーズでモデルがXMLラッパーを省略した場合の救済（最終リトライのみ）
+      // 初回〜中間リトライではXML欠落を品質ガードで検出し再生成を促す。
+      // 最終リトライでもなお平文の場合のみ<response><dialogue>で救済ラップする。
+      // 理由: T1でモデルがXMLを無視する問題の根本対策はリトライ指示による矯正。
+      // 全attemptで即座にラップすると<narration>/<inner>が永久に欠落する。
       if (
         qualityContext.phase === "conversation" &&
         !isXmlResponse(lastResponse) &&
-        lastResponse.trim().length >= 4
+        lastResponse.trim().length >= 4 &&
+        attempt >= MAX_QUALITY_RETRIES
       ) {
         lastResponse = wrapConversationPlainAsXml(lastResponse);
         onChunk(lastResponse);
@@ -332,6 +334,7 @@ const generateImageResponseSchema = z.union([
 export async function generateImage(
   prompt: string,
   characterDescription?: string,
+  phase?: "conversation" | "intimate" | "erotic" | "climax",
 ): Promise<{ task_id: string } | { error: string }> {
   try {
     const response = await fetch("/api/image", {
@@ -343,6 +346,7 @@ export async function generateImage(
         negative_prompt: "ugly, deformed, blurry, low quality, text, watermark",
         width: 512,
         height: 768,
+        phase: phase ?? "conversation",
       }),
     });
     if (!response.ok) {

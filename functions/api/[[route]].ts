@@ -39,6 +39,10 @@ const imageSchema = z.object({
   negative_prompt: z.string().max(500).optional().default("ugly, deformed, blurry, low quality"),
   width: z.number().int().min(64).max(2_048).optional().default(512),
   height: z.number().int().min(64).max(2_048).optional().default(768),
+  phase: z
+    .enum(["conversation", "intimate", "erotic", "climax"])
+    .optional()
+    .default("conversation"),
 });
 
 const novitaInitResponseSchema = z.object({ task_id: z.string() });
@@ -907,16 +911,24 @@ Write concrete five-senses descriptions. Do NOT escalate until the user leads.`;
 - <response>タグで囲むこと。
 - ()の地の文BANNED。<action>内に自然な散文として書くこと。`;
 
-    // 会話フェーズ用XMLフォーマット指示（attempt 10: narration追加で雰囲気描写を誘導）
+    // 会話フェーズ用XMLフォーマット指示（attempt 11: few-shot例追加でT1からXML出力を保証）
     const CONVERSATION_XML_HINT = `
 
-[Output format — MANDATORY]
+[Output format — MANDATORY. EVERY response must use this EXACT XML structure, including the VERY FIRST response.]
 <response>
 <narration>場面の空気感・距離感・五感描写を1文で書く。</narration>
 <dialogue>キャラの台詞を書く。口調・語尾を厳守。</dialogue>
 <inner>キャラの内心（言葉にしない身体感覚・衝動・欲望）を1〜2文で書く。表に出さない本音。</inner>
 </response>
-FORBIDDEN: Outputting tags alone without <response> wrapper.`;
+
+Example (do NOT copy content, only copy structure):
+<response>
+<narration>窓から差し込む夕陽が、テーブルの上のコーヒーカップに琥珀色の光を落としている。</narration>
+<dialogue>「あ、来てくれたんや。……待ってたで」</dialogue>
+<inner>心臓がうるさい。目が合った瞬間、呼吸を忘れかけた。</inner>
+</response>
+
+FORBIDDEN: Outputting plain text without <response> wrapper. FORBIDDEN: Omitting any of the three tags.`;
 
     // シーンフェーズを検出してプレフィックスを組み立てる
     const phase = detectScenePhase(messages);
@@ -1038,7 +1050,38 @@ FORBIDDEN: Outputting tags alone without <response> wrapper.`;
     const userEmail = getUserEmail(c);
     if (!userEmail) return c.json({ error: "unauthorized" }, 401);
 
-    const { prompt, characterDescription, negative_prompt, width, height } = c.req.valid("json");
+    const { prompt, characterDescription, negative_prompt, width, height, phase } =
+      c.req.valid("json");
+
+    // フェーズ別の翻訳指示・CFG・ネガティブプロンプト制御
+    const phaseTranslationHints: Record<ScenePhase, string> = {
+      conversation:
+        "Focus on: clothed, casual pose, safe for work framing, atmosphere, facial expression",
+      intimate:
+        "Focus on: partial undress allowed, close-up framing, soft lighting, touching, blushing",
+      erotic:
+        "Focus on: explicit nudity, sexual position, detailed anatomy, aroused expression, bodily contact",
+      climax:
+        "Focus on: explicit, orgasm, bodily fluids, intense expression, full nudity, climax pose",
+    };
+
+    const cfgByPhase: Record<ScenePhase, number> = {
+      conversation: 7.0,
+      intimate: 7.5,
+      erotic: 8.5,
+      climax: 9.0,
+    };
+
+    // conversation/intimateではNSFWをネガティブに追加して抑制
+    const phaseNegativeExtra: Record<ScenePhase, string> = {
+      conversation: "nsfw, nudity, naked, sexual",
+      intimate: "nsfw, full nudity, penetration",
+      erotic: "",
+      climax: "",
+    };
+
+    const guidanceScale = cfgByPhase[phase];
+    const extraNegative = phaseNegativeExtra[phase];
 
     // 日本語のシーン描写+キャラ情報から英語の画像生成プロンプトを生成
     // コスト最小化のため軽量freeモデルで変換
@@ -1055,12 +1098,25 @@ FORBIDDEN: Outputting tags alone without <response> wrapper.`;
           messages: [
             {
               role: "system",
-              content:
-                "You are an anime image tag generator for an adult (NSFW) application.\nConvert the Japanese scene description into English Stable Diffusion tags.\nRules:\n- Output ONLY comma-separated danbooru-style tags, no explanation\n- Preserve ALL erotic/sexual content explicitly (body parts, positions, states of undress, fluids)\n- Include character visual traits from the character description: hair color/style, eye color, body type\n- Include: pose, facial expression, clothing state (partial undress, nude, etc.), camera angle\n- Include setting/background tags\n- Never censor or soften the content\n- Max 80 words",
+              content: `You are an anime image tag generator for an adult (NSFW) application.
+Convert the Japanese scene description into English Stable Diffusion tags.
+Rules:
+- Output ONLY comma-separated danbooru-style tags, no explanation
+- Preserve ALL erotic/sexual content explicitly (body parts, positions, states of undress, fluids)
+- Include character visual traits from the character description: hair color/style, eye color, body type
+- Include: pose, facial expression, clothing state (partial undress, nude, etc.), camera angle
+- Include setting/background tags
+- Infer the current state of undress from the scene context (e.g., if user said "白衣を脱がせる" and character reacted, output: open_clothes, lab_coat_removed)
+- Infer body position from context (standing, lying_down, on_knees, etc.)
+- Include these inferred state tags in your output
+- Never censor or soften the content
+- Max 80 words
+- Current scene phase: ${phase}
+- ${phaseTranslationHints[phase]}`,
             },
             {
               role: "user",
-              content: `Character: ${characterDescription || "anime girl"}\nScene: ${prompt}`,
+              content: `Character: ${characterDescription || "anime girl"}\nScene context (infer current clothing/position state from this):\n${prompt}\nCurrent phase: ${phase}`,
             },
           ],
           max_tokens: 200,
@@ -1078,6 +1134,9 @@ FORBIDDEN: Outputting tags alone without <response> wrapper.`;
       imagePrompt = prompt;
     }
 
+    // ネガティブプロンプトにフェーズ固有の制約を追加
+    const fullNegativePrompt = [negative_prompt, extraNegative].filter(Boolean).join(", ");
+
     const response = await fetch("https://api.novita.ai/v3/async/txt2img", {
       method: "POST",
       headers: {
@@ -1089,12 +1148,12 @@ FORBIDDEN: Outputting tags alone without <response> wrapper.`;
         request: {
           model_name: "meinahentai_v4_70340.safetensors",
           prompt: `masterpiece, best quality, anime style, ${imagePrompt}`,
-          negative_prompt: `${negative_prompt}, realistic, photorealistic, 3d, western, text, watermark, bad anatomy, bad hands, extra fingers, fewer fingers, missing fingers, worst quality, low quality, normal quality, cropped`,
+          negative_prompt: `${fullNegativePrompt}, realistic, photorealistic, 3d, western, text, watermark, bad anatomy, bad hands, extra fingers, fewer fingers, missing fingers, worst quality, low quality, normal quality, cropped`,
           width,
           height,
           sampler_name: "DPM++ 2M Karras",
           steps: 28,
-          guidance_scale: 8.5,
+          guidance_scale: guidanceScale,
           image_num: 1,
           seed: -1,
         },
@@ -1374,9 +1433,18 @@ FORBIDDEN: Outputting tags alone without <response> wrapper.`;
         "image/jpg": "jpg",
         "image/png": "png",
       };
-      const matched = Object.entries(ALLOWED_IMAGE_TYPES).find(([type]) =>
+      let matched = Object.entries(ALLOWED_IMAGE_TYPES).find(([type]) =>
         rawContentType.startsWith(type),
       );
+      // S3がapplication/octet-streamを返す場合、URLの拡張子から推定する
+      if (!matched && rawContentType.startsWith("application/octet-stream")) {
+        const urlPath = parsedUrl.pathname.toLowerCase();
+        if (urlPath.endsWith(".jpeg") || urlPath.endsWith(".jpg")) {
+          matched = ["image/jpeg", "jpg"];
+        } else if (urlPath.endsWith(".png")) {
+          matched = ["image/png", "png"];
+        }
+      }
       if (!matched) {
         return c.json({ error: "unsupported content type" }, 400);
       }

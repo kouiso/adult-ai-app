@@ -211,6 +211,7 @@ const ALLOWED_IMAGE_HOSTS = new Set([
   "image.novita.ai",
   "novita.ai",
   "faas-output-image.s3.ap-southeast-1.amazonaws.com",
+  "novita-output.s3.amazonaws.com",
 ]);
 
 const isValidImageUrl = (url: string): boolean => {

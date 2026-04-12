@@ -665,7 +665,18 @@ export const ChatView = () => {
     const lastAssistant = [...msgs].reverse().find((m) => m.role === "assistant" && m.content);
     if (!lastAssistant) return;
 
-    const prompt = lastAssistant.content.slice(0, IMAGE_PROMPT_MAX_LENGTH);
+    // ユーザーの視覚的アクション（「白衣を脱がせる」等）も画像プロンプトに含める
+    const lastUser = [...msgs].reverse().find((m) => m.role === "user" && m.content);
+    const phase = detectScenePhase(msgs);
+
+    const sceneDescription = [
+      lastUser ? `[ユーザーの行動] ${lastUser.content.slice(0, 300)}` : "",
+      `[キャラの反応] ${lastAssistant.content.slice(0, 300)}`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    const prompt = sceneDescription.slice(0, IMAGE_PROMPT_MAX_LENGTH);
     const imageMessageId = crypto.randomUUID();
     const conversationId = useChatStore.getState().currentConversationId;
 
@@ -692,7 +703,7 @@ export const ChatView = () => {
     }).catch((error) => console.error("failed to persist image message", error));
 
     try {
-      const result = await generateImage(prompt, charDesc);
+      const result = await generateImage(prompt, charDesc, phase);
       if ("error" in result) {
         updateMessage(imageMessageId, `❌ 画像生成エラー: ${result.error}`, false);
         return;
