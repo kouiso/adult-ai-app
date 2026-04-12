@@ -2,8 +2,8 @@ import { z } from "zod/v4";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
-// Magnum v4 72B: エロ描写品質が圧倒的に上。Qwenはセルフ検閲でPG-13止まり。料金同一($0.34/1M tokens)
-const DEFAULT_MODEL = "anthracite-org/magnum-v4-72b" as const;
+// Qwen 2.5 72B: 100%安定した日本語出力。Magnumは25%しかクリーン出力できない
+const DEFAULT_MODEL = "qwen/qwen-2.5-72b-instruct" as const;
 const LEGACY_MODEL_NEMO = "mistralai/mistral-nemo" as const;
 const LEGACY_MODEL_HERMES = "nousresearch/hermes-3-llama-3.1-405b:free" as const;
 const LEGACY_MODEL_VENICE =

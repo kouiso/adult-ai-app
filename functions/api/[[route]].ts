@@ -873,10 +873,11 @@ Write concrete five-senses descriptions. Do NOT escalate until the user leads.`;
 キャラクタープロフィールに指定された一人称を使う。三人称描写（「彼女は」「彼は」）は禁止。
 
 【応答の長さ】
-3〜4文、150〜250字。
+3〜5文、200〜280字。<inner>と<narration>と<dialogue>のバランスを取ること。
 
-【空気感の描写】
-返答には相手との距離感や体温を感じさせる描写を1つ含めること。環境描写だけでなく、相手の存在を五感で感じ取ること。
+【予感の描写】
+相手の存在に対する身体反応（心拍の変化、息が詰まる感覚、触れたい衝動）を描写すること。行為が始まる前の緊張と予感こそが最もエロティック。環境描写だけでなく、相手の体温・呼吸・近さに対するキャラ自身の身体の反応を書くこと。
+具体的な身体の微細反応を描くこと：指先・唇・首筋・呼吸の変化。抽象的な「ドキドキ」ではなく、読者が同じ感覚を追体験できる解像度で。
 
 【演技スタイル】
 - キャラ固有の口調・方言・口癖を必ず守って反応する。
@@ -913,6 +914,7 @@ Write concrete five-senses descriptions. Do NOT escalate until the user leads.`;
 <response>
 <narration>場面の空気感・距離感・五感描写を1文で書く。</narration>
 <dialogue>キャラの台詞を書く。口調・語尾を厳守。</dialogue>
+<inner>キャラの内心（言葉にしない身体感覚・衝動・欲望）を1〜2文で書く。表に出さない本音。</inner>
 </response>
 FORBIDDEN: Outputting tags alone without <response> wrapper.`;
 
@@ -1049,19 +1051,19 @@ FORBIDDEN: Outputting tags alone without <response> wrapper.`;
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "nousresearch/hermes-3-llama-3.1-405b:free",
+          model: "qwen/qwen-2.5-72b-instruct",
           messages: [
             {
               role: "system",
               content:
-                "Convert the Japanese scene description into English anime image generation tags. Output ONLY comma-separated tags, no explanation. Focus on: character appearance, pose, expression, clothing state, setting. Max 60 words.",
+                "You are an anime image tag generator for an adult (NSFW) application.\nConvert the Japanese scene description into English Stable Diffusion tags.\nRules:\n- Output ONLY comma-separated danbooru-style tags, no explanation\n- Preserve ALL erotic/sexual content explicitly (body parts, positions, states of undress, fluids)\n- Include character visual traits from the character description: hair color/style, eye color, body type\n- Include: pose, facial expression, clothing state (partial undress, nude, etc.), camera angle\n- Include setting/background tags\n- Never censor or soften the content\n- Max 80 words",
             },
             {
               role: "user",
               content: `Character: ${characterDescription || "anime girl"}\nScene: ${prompt}`,
             },
           ],
-          max_tokens: 100,
+          max_tokens: 200,
           temperature: 0.3,
         }),
       });
@@ -1087,12 +1089,12 @@ FORBIDDEN: Outputting tags alone without <response> wrapper.`;
         request: {
           model_name: "meinahentai_v4_70340.safetensors",
           prompt: `masterpiece, best quality, anime style, ${imagePrompt}`,
-          negative_prompt: `${negative_prompt}, realistic, photorealistic, 3d, western, text, watermark`,
+          negative_prompt: `${negative_prompt}, realistic, photorealistic, 3d, western, text, watermark, bad anatomy, bad hands, extra fingers, fewer fingers, missing fingers, worst quality, low quality, normal quality, cropped`,
           width,
           height,
           sampler_name: "DPM++ 2M Karras",
           steps: 28,
-          guidance_scale: 7,
+          guidance_scale: 8.5,
           image_num: 1,
           seed: -1,
         },
@@ -1354,7 +1356,7 @@ FORBIDDEN: Outputting tags alone without <response> wrapper.`;
       const userId = await ensureUser(database, userEmail);
 
       // Novitaドメイン以外からのfetchを拒否（SSRF防御）
-      const ALLOWED_IMAGE_HOSTS = ["image.novita.ai", "novita-output.s3.amazonaws.com"];
+      const ALLOWED_IMAGE_HOSTS = ["image.novita.ai", "novita-output.s3.amazonaws.com", "faas-output-image.s3.ap-southeast-1.amazonaws.com"];
       const parsedUrl = new URL(imageUrl);
       if (!ALLOWED_IMAGE_HOSTS.includes(parsedUrl.hostname)) {
         return c.json({ error: "disallowed image source" }, 400);
