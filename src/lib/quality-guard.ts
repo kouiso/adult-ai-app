@@ -47,32 +47,39 @@ function jaccardSimilarity(a: string, b: string): number {
   return intersection / (setA.size + setB.size - intersection);
 }
 
+// 文分割によるJaccard類似度チェック（短文の包含関係で誤検出しないようunion-based）
+function hasSimilarSentences(sentences: string[]): boolean {
+  for (let i = 0; i < sentences.length; i++) {
+    for (let j = i + 1; j < sentences.length; j++) {
+      if (jaccardSimilarity(sentences[i], sentences[j]) > 0.6) return true;
+    }
+  }
+  return false;
+}
+
+// 5文字以上の部分文字列が3回以上出現するか判定
+function hasSubstringRepetition(text: string): boolean {
+  const phrases = new Map<string, number>();
+  const cleaned = text.replace(/[\s…。「」！？]/g, "");
+  for (let len = 5; len <= 10; len++) {
+    for (let i = 0; i <= cleaned.length - len; i++) {
+      const sub = cleaned.slice(i, i + len);
+      const count = (phrases.get(sub) ?? 0) + 1;
+      if (count >= 3) return true;
+      phrases.set(sub, count);
+    }
+  }
+  return false;
+}
+
 // チェック4: ターン内繰り返し検出（デコードループ防止）
 function checkWithinTurnRepetition(response: string): boolean {
-  // 方法1: 文分割によるJaccard類似度チェック（短文の包含関係で誤検出しないようunion-based）
   const sentences = response
     .split(/[\n。」！？]/)
     .map((s) => s.replace(/「/g, "").trim())
     .filter((s) => s.length > 5);
-  if (sentences.length >= 3) {
-    for (let i = 0; i < sentences.length; i++) {
-      for (let j = i + 1; j < sentences.length; j++) {
-        if (jaccardSimilarity(sentences[i], sentences[j]) > 0.6) return false;
-      }
-    }
-  }
-
-  // 方法2: 5文字以上の部分文字列が3回以上出現したら不合格
-  const phrases = new Map<string, number>();
-  const cleaned = response.replace(/[\s…。「」！？]/g, "");
-  for (let len = 5; len <= 10; len++) {
-    for (let i = 0; i <= cleaned.length - len; i++) {
-      const sub = cleaned.slice(i, i + len);
-      phrases.set(sub, (phrases.get(sub) ?? 0) + 1);
-      if ((phrases.get(sub) ?? 0) >= 3) return false;
-    }
-  }
-
+  if (sentences.length >= 3 && hasSimilarSentences(sentences)) return false;
+  if (hasSubstringRepetition(response)) return false;
   return true;
 }
 
@@ -105,62 +112,50 @@ function checkInnerExists(innerText: string, phase: ScenePhase): boolean {
   return innerText.length >= 5;
 }
 
+// 一人称チェック（最優先 — 他のチェックより先に判定）
+function checkWrongFirstPerson(
+  plainText: string,
+  wrongFirstPersons: string[] | undefined,
+): boolean {
+  if (!wrongFirstPersons || wrongFirstPersons.length === 0) return true;
+  return !wrongFirstPersons.some((fp) => plainText.includes(fp));
+}
+
+// XML固有チェック（パース成功時のみ）
+function checkXmlSpecific(response: string, phase: ScenePhase): QualityCheckResult | null {
+  const parsed = parseXmlResponse(response);
+  if (!parsed) return null;
+  if (!checkInnerExists(parsed.inner, phase)) {
+    return { passed: false, failedCheck: "inner-missing" };
+  }
+  return null;
+}
+
 export function runQualityChecks(
   response: string,
   context: QualityCheckContext,
 ): QualityCheckResult {
-  // XMLパースを試行し、成功時は各セクション独立チェック
   const parsed = parseXmlResponse(response);
-  // 品質チェック用のプレーンテキスト（XMLタグを除去）
   const plainText = parsed ? stripXmlTags(response) : response;
 
-  // 一人称チェックを最優先（他のチェックより先に判定）
-  if (context.wrongFirstPersons && context.wrongFirstPersons.length > 0) {
-    const hasWrong = context.wrongFirstPersons.some((fp) => plainText.includes(fp));
-    if (hasWrong) {
-      return { passed: false, failedCheck: "wrong-first-person" };
-    }
+  // 優先度順のチェックチェーン
+  const checks: [boolean, string][] = [
+    [checkWrongFirstPerson(plainText, context.wrongFirstPersons), "wrong-first-person"],
+    [checkNoEnglish(plainText), "no-english"],
+    [checkXmlFormat(response), "xml-format-missing"],
+    [checkNoUserLeak(plainText), "user-leak"],
+    [checkSceneMinLength(plainText, context.phase), "scene-min-length"],
+    [checkWithinTurnRepetition(plainText), "within-turn-repetition"],
+    [checkMaxLength(plainText), "max-length-exceeded"],
+  ];
+
+  for (const [passed, failedCheck] of checks) {
+    if (!passed) return { passed: false, failedCheck };
   }
 
-  if (!checkNoEnglish(plainText)) {
-    return { passed: false, failedCheck: "no-english" };
-  }
-
-  // XMLフォーマットチェック（全フェーズ必須）
-  if (!checkXmlFormat(response)) {
-    return { passed: false, failedCheck: "xml-format-missing" };
-  }
-
-  // XML固有チェック（パース成功時のみ）
-  if (parsed) {
-    // third-person チェックは撤廃済み（ナレーション体として自然な表現まで誤ブロックするため）
-    if (!checkInnerExists(parsed.inner, context.phase)) {
-      return { passed: false, failedCheck: "inner-missing" };
-    }
-    // inner多様性チェックは削除 — サンプラに委任（理由はクロスターン削除と同じ）
-  }
-
-  // ユーザー漏れチェック（没入感破壊ワード検出）
-  if (!checkNoUserLeak(plainText)) {
-    return { passed: false, failedCheck: "user-leak" };
-  }
-
-  if (!checkSceneMinLength(plainText, context.phase)) {
-    return { passed: false, failedCheck: "scene-min-length" };
-  }
-
-  // クロスターン類似度・フレーズ重複チェックは削除
-  // 理由: 官能シーンは語彙が自然に収束する領域（「胸」「喘ぎ」等）で、
-  // ターン間重複rejectがリトライ地獄→同一台詞コピーの根本原因だった
-  // 反復制御はサンプラ (repetition_penalty 1.05) に委任する
-
-  if (!checkWithinTurnRepetition(plainText)) {
-    return { passed: false, failedCheck: "within-turn-repetition" };
-  }
-
-  if (!checkMaxLength(plainText)) {
-    return { passed: false, failedCheck: "max-length-exceeded" };
-  }
+  // XML固有チェック（パース成功時のみ、inner存在確認）
+  const xmlResult = checkXmlSpecific(response, context.phase);
+  if (xmlResult) return xmlResult;
 
   return { passed: true };
 }

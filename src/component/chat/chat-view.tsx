@@ -40,6 +40,127 @@ type ImagePollingResult =
   | { status: "failed" }
   | { status: "timeout" };
 
+type MessagePair = { user?: string; assistant?: string };
+
+const hasContent = (m: ChatMessage): boolean => m.content.length > 0;
+
+const buildFallbackPair = (reversedMsgs: ChatMessage[]): MessagePair[] => {
+  const lastUser = reversedMsgs.find((m) => m.role === "user" && hasContent(m));
+  const lastAssistant = reversedMsgs.find((m) => m.role === "assistant" && hasContent(m));
+  return [
+    {
+      user: lastUser?.content.slice(0, 200),
+      assistant: lastAssistant?.content.slice(0, 200),
+    },
+  ];
+};
+
+const collectRecentMessagePairs = (msgs: ChatMessage[], maxTurns: number): MessagePair[] => {
+  const pairs: MessagePair[] = [];
+  const reversedMsgs = [...msgs].reverse();
+  let userCount = 0;
+
+  for (const m of reversedMsgs) {
+    if (m.role === "user" && hasContent(m)) {
+      userCount++;
+      if (userCount > maxTurns) break;
+      pairs.unshift({ user: m.content.slice(0, 200) });
+      continue;
+    }
+    const canAttachAssistant =
+      m.role === "assistant" && hasContent(m) && pairs.length > 0 && !pairs[0].assistant;
+    if (canAttachAssistant) {
+      pairs[0].assistant = m.content.slice(0, 200);
+    }
+  }
+
+  return pairs.length > 0 ? pairs : buildFallbackPair(reversedMsgs);
+};
+
+const formatMessagePairsForPrompt = (pairs: MessagePair[]): string => {
+  const historyLines = pairs.map((pair, i) => {
+    const isLatest = i === pairs.length - 1;
+    const prefix = isLatest ? "[最新]" : `[${i + 1}ターン前]`;
+    const parts: string[] = [];
+    if (pair.user) parts.push(`${prefix} ユーザー: ${pair.user}`);
+    if (pair.assistant) parts.push(`${prefix} キャラ: ${pair.assistant}`);
+    return parts.join("\n");
+  });
+  return historyLines.filter(Boolean).join("\n");
+};
+
+/** 直近N ターンの会話履歴から画像生成用のシーン記述テキストを組み立てる */
+const buildImagePromptFromHistory = (msgs: ChatMessage[]): string => {
+  const pairs = collectRecentMessagePairs(msgs, 3);
+  return formatMessagePairsForPrompt(pairs);
+};
+
+type ImageResultHandlerDeps = {
+  imageMessageId: string;
+  updateMessage: (id: string, content: string, isStreaming: boolean) => void;
+  updateMessageImage: (id: string, imageUrl: string) => void;
+  persistMessageImageEntry: (params: {
+    messageId: string;
+    imageUrl: string;
+    imageKey?: string;
+  }) => Promise<unknown>;
+  updateMessageContentEntry: (id: string, content: string) => Promise<unknown>;
+};
+
+/** ポーリング結果に応じてメッセージを更新する。処理完了なら true を返す */
+const processImageResult = (
+  imageResult: ImagePollingResult,
+  deps: ImageResultHandlerDeps,
+): boolean => {
+  const {
+    imageMessageId,
+    updateMessage,
+    updateMessageImage,
+    persistMessageImageEntry,
+    updateMessageContentEntry,
+  } = deps;
+
+  if (imageResult.status === "succeeded") {
+    updateMessage(imageMessageId, "", false);
+    updateMessageImage(imageMessageId, imageResult.imageUrl);
+    void persistMessageImageEntry({
+      messageId: imageMessageId,
+      imageUrl: imageResult.imageUrl,
+    }).catch((error) => console.error("failed to persist image", error));
+    // Zustandだけでなく、D1側のcontentもクリアしないとリロード時にローディングテキストが残る
+    void updateMessageContentEntry(imageMessageId, "").catch((error) =>
+      console.error("failed to clear image message content", error),
+    );
+    // エフェメラルなS3 URLをR2に永続化し、永続URLに差し替える
+    void persistImageToR2(imageResult.imageUrl, imageMessageId)
+      .then((r2Result) => {
+        if ("imageKey" in r2Result) {
+          const r2Url = `/api/image/r2/${r2Result.imageKey}`;
+          updateMessageImage(imageMessageId, r2Url);
+          void persistMessageImageEntry({
+            messageId: imageMessageId,
+            imageUrl: r2Url,
+            imageKey: r2Result.imageKey,
+          }).catch((error) => console.error("failed to persist R2 image key", error));
+        } else {
+          console.error("R2 persist error:", r2Result.error);
+        }
+      })
+      .catch((error) => console.error("failed to persist image to R2", error));
+    return true;
+  }
+
+  if (imageResult.status === "failed") {
+    updateMessage(imageMessageId, "❌ 画像生成に失敗しました", false);
+    toast.error("画像生成に失敗しました");
+    return true;
+  }
+
+  updateMessage(imageMessageId, "⏱️ タイムアウト：画像生成が完了しませんでした", false);
+  toast.error("画像生成がタイムアウトしました");
+  return true;
+};
+
 const pollGeneratedImage = async (
   taskId: string,
   onProgress?: (attempt: number, maxAttempts: number) => void,
@@ -62,6 +183,106 @@ const pollGeneratedImage = async (
   }
 
   return { status: "timeout" };
+};
+
+const canMessageSpeak = (
+  ttsEnabled: boolean,
+  message: { isStreaming?: boolean; content: string; role: string },
+): boolean =>
+  ttsEnabled && !message.isStreaming && !!message.content && message.role === "assistant";
+
+const EmptyState = ({ isMessageListLoading }: { isMessageListLoading: boolean }) => {
+  if (isMessageListLoading) {
+    return (
+      <div className="w-full max-w-2xl space-y-4 px-4">
+        <div className="ml-auto w-[70%] space-y-2 rounded-lg border p-3">
+          <Skeleton className="h-4 w-[85%]" />
+          <Skeleton className="h-4 w-[70%]" />
+        </div>
+        <div className="w-[78%] space-y-2 rounded-lg border p-3">
+          <Skeleton className="h-4 w-[90%]" />
+          <Skeleton className="h-4 w-[65%]" />
+          <Skeleton className="h-4 w-[50%]" />
+        </div>
+        <div className="ml-auto w-[64%] space-y-2 rounded-lg border p-3">
+          <Skeleton className="h-4 w-[80%]" />
+          <Skeleton className="h-4 w-[55%]" />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="text-center">
+      <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
+        <p className="text-3xl">💬</p>
+      </div>
+      <p className="text-lg font-semibold text-foreground">会話を始めましょう</p>
+      <p className="mt-1 text-sm text-muted-foreground">メッセージを入力してください</p>
+    </div>
+  );
+};
+
+type SearchBarProps = {
+  isSearchOpen: boolean;
+  searchQuery: string;
+  matchCount: number;
+  onOpenSearch: () => void;
+  onCloseSearch: () => void;
+  onQueryChange: (query: string) => void;
+};
+
+const SearchBar = ({
+  isSearchOpen,
+  searchQuery,
+  matchCount,
+  onOpenSearch,
+  onCloseSearch,
+  onQueryChange,
+}: SearchBarProps) => {
+  if (!isSearchOpen) {
+    return (
+      <div className="hidden md:flex justify-end px-4 pt-2">
+        <button
+          type="button"
+          onClick={onOpenSearch}
+          className="rounded-md p-1.5 text-muted-foreground hover:bg-muted transition-colors"
+          aria-label="メッセージを検索"
+        >
+          <Search className="h-4 w-4" />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="border-b border-border/50 bg-card/80 px-4 py-2">
+      <div className="mx-auto flex max-w-3xl items-center gap-2">
+        <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => onQueryChange(e.target.value)}
+          placeholder="メッセージを検索..."
+          className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+          autoFocus
+        />
+        {searchQuery.trim() && (
+          <span className="shrink-0 text-xs text-muted-foreground">
+            {matchCount}件見つかりました
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={onCloseSearch}
+          className="rounded-md p-1 text-muted-foreground hover:bg-muted transition-colors"
+          aria-label="検索を閉じる"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  );
 };
 
 export const ChatView = () => {
@@ -127,9 +348,16 @@ export const ChatView = () => {
     () => conversations.find((c) => c.id === currentConversationId),
     [conversations, currentConversationId],
   );
-  const currentSystemPrompt = currentConversation?.characterSystemPrompt || DEFAULT_SYSTEM_PROMPT;
-  const currentCharacterName = currentConversation?.characterName ?? "AI";
-  const currentCharacterAvatar = currentConversation?.characterAvatar ?? null;
+  const { currentSystemPrompt, currentCharacterName, currentCharacterAvatar, currentTitle } =
+    useMemo(
+      () => ({
+        currentSystemPrompt: currentConversation?.characterSystemPrompt || DEFAULT_SYSTEM_PROMPT,
+        currentCharacterName: currentConversation?.characterName ?? "AI",
+        currentCharacterAvatar: currentConversation?.characterAvatar ?? null,
+        currentTitle: currentConversation?.title ?? "新しい会話",
+      }),
+      [currentConversation],
+    );
 
   const ensureConversation = useCallback(async (): Promise<string> => {
     const currentId = useChatStore.getState().currentConversationId;
@@ -663,52 +891,11 @@ export const ChatView = () => {
       updateMessage,
       updateMessageImage,
     } = useChatStore.getState();
-    const lastAssistant = [...msgs].reverse().find((m) => m.role === "assistant" && m.content);
-    if (!lastAssistant) return;
+    const hasAssistantMessage = msgs.some((m) => m.role === "assistant" && m.content);
+    if (!hasAssistantMessage) return;
 
-    // 直近3ターン分の会話履歴を画像プロンプトに含めることで、
-    // 服装の脱衣進行・体位の変遷・場所の一貫性をL1翻訳モデルに伝える
-    const HISTORY_TURNS = 3;
-    const recentPairs: { user?: string; assistant?: string }[] = [];
-    const reversedMsgs = [...msgs].reverse();
-    let userCount = 0;
-    for (const m of reversedMsgs) {
-      if (m.role === "user" && m.content) {
-        userCount++;
-        if (userCount > HISTORY_TURNS) break;
-        recentPairs.unshift({ user: m.content.slice(0, 200) });
-      } else if (
-        m.role === "assistant" &&
-        m.content &&
-        recentPairs.length > 0 &&
-        !recentPairs[0].assistant
-      ) {
-        recentPairs[0].assistant = m.content.slice(0, 200);
-      }
-    }
-    // recentPairsが空の場合（assistantのみ等）はフォールバック
-    if (recentPairs.length === 0) {
-      const lastUser = reversedMsgs.find((m) => m.role === "user" && m.content);
-      recentPairs.push({
-        user: lastUser?.content.slice(0, 200),
-        assistant: lastAssistant.content.slice(0, 200),
-      });
-    }
-
+    const sceneDescription = buildImagePromptFromHistory(msgs);
     const phase = detectScenePhase(msgs);
-
-    // 古いターンから順に並べ、最新ターンを強調マーク
-    const historyLines = recentPairs.map((pair, i) => {
-      const isLatest = i === recentPairs.length - 1;
-      const prefix = isLatest ? "[最新]" : `[${i + 1}ターン前]`;
-      const parts: string[] = [];
-      if (pair.user) parts.push(`${prefix} ユーザー: ${pair.user}`);
-      if (pair.assistant) parts.push(`${prefix} キャラ: ${pair.assistant}`);
-      return parts.join("\n");
-    });
-
-    const sceneDescription = historyLines.filter(Boolean).join("\n");
-
     const prompt = sceneDescription.slice(0, IMAGE_PROMPT_MAX_LENGTH);
     const imageMessageId = crypto.randomUUID();
     const conversationId = useChatStore.getState().currentConversationId;
@@ -746,44 +933,13 @@ export const ChatView = () => {
         updateMessage(imageMessageId, `🖼️ 画像を生成中... (${attempt}/${maxAttempts})`, true);
       });
 
-      if (imageResult.status === "succeeded") {
-        updateMessage(imageMessageId, "", false);
-        updateMessageImage(imageMessageId, imageResult.imageUrl);
-        void persistMessageImageEntry({
-          messageId: imageMessageId,
-          imageUrl: imageResult.imageUrl,
-        }).catch((error) => console.error("failed to persist image", error));
-        // Zustandだけでなく、D1側のcontentもクリアしないとリロード時にローディングテキストが残る
-        void updateMessageContentEntry(imageMessageId, "").catch((error) =>
-          console.error("failed to clear image message content", error),
-        );
-        // エフェメラルなS3 URLをR2に永続化し、永続URLに差し替える
-        void persistImageToR2(imageResult.imageUrl, imageMessageId)
-          .then((r2Result) => {
-            if ("imageKey" in r2Result) {
-              const r2Url = `/api/image/r2/${r2Result.imageKey}`;
-              updateMessageImage(imageMessageId, r2Url);
-              void persistMessageImageEntry({
-                messageId: imageMessageId,
-                imageUrl: r2Url,
-                imageKey: r2Result.imageKey,
-              }).catch((error) => console.error("failed to persist R2 image key", error));
-            } else {
-              console.error("R2 persist error:", r2Result.error);
-            }
-          })
-          .catch((error) => console.error("failed to persist image to R2", error));
-        return;
-      }
-
-      if (imageResult.status === "failed") {
-        updateMessage(imageMessageId, "❌ 画像生成に失敗しました", false);
-        toast.error("画像生成に失敗しました");
-        return;
-      }
-
-      updateMessage(imageMessageId, "⏱️ タイムアウト：画像生成が完了しませんでした", false);
-      toast.error("画像生成がタイムアウトしました");
+      processImageResult(imageResult, {
+        imageMessageId,
+        updateMessage,
+        updateMessageImage,
+        persistMessageImageEntry,
+        updateMessageContentEntry,
+      });
     } catch (err) {
       updateMessage(imageMessageId, `❌ ネットワークエラー: ${String(err)}`, false);
     } finally {
@@ -895,6 +1051,8 @@ export const ChatView = () => {
     [handleGenerateImage],
   );
 
+  const isInputDisabled = isLoading || !isOnline;
+
   return (
     <div className="flex h-full">
       {/* デスクトップサイドバー */}
@@ -921,7 +1079,7 @@ export const ChatView = () => {
             <Menu className="h-5 w-5" />
           </button>
           <span className="truncate text-sm font-medium text-muted-foreground flex-1">
-            {currentConversation?.title ?? "新しい会話"}
+            {currentTitle}
           </span>
           <button
             type="button"
@@ -939,81 +1097,23 @@ export const ChatView = () => {
           </div>
         )}
 
-        {!isSearchOpen && (
-          <div className="hidden md:flex justify-end px-4 pt-2">
-            <button
-              type="button"
-              onClick={() => setSearchOpen(true)}
-              className="rounded-md p-1.5 text-muted-foreground hover:bg-muted transition-colors"
-              aria-label="メッセージを検索"
-            >
-              <Search className="h-4 w-4" />
-            </button>
-          </div>
-        )}
-        {isSearchOpen && (
-          <div className="border-b border-border/50 bg-card/80 px-4 py-2">
-            <div className="mx-auto flex max-w-3xl items-center gap-2">
-              <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="メッセージを検索..."
-                className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-                autoFocus
-              />
-              {searchQuery.trim() && (
-                <span className="shrink-0 text-xs text-muted-foreground">
-                  {highlightedMessageIds.size}件見つかりました
-                </span>
-              )}
-              <button
-                type="button"
-                onClick={() => {
-                  setSearchOpen(false);
-                  setSearchQuery("");
-                }}
-                className="rounded-md p-1 text-muted-foreground hover:bg-muted transition-colors"
-                aria-label="検索を閉じる"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-        )}
+        <SearchBar
+          isSearchOpen={isSearchOpen}
+          searchQuery={searchQuery}
+          matchCount={highlightedMessageIds.size}
+          onOpenSearch={() => setSearchOpen(true)}
+          onCloseSearch={() => {
+            setSearchOpen(false);
+            setSearchQuery("");
+          }}
+          onQueryChange={setSearchQuery}
+        />
 
         <div ref={scrollContainerRef} className="flex-1 overflow-y-auto bg-chat-area">
           <div className="mx-auto max-w-3xl py-4">
             {messages.length === 0 && (
               <div className="flex h-[60vh] items-center justify-center">
-                {isMessageListLoading ? (
-                  <div className="w-full max-w-2xl space-y-4 px-4">
-                    <div className="ml-auto w-[70%] space-y-2 rounded-lg border p-3">
-                      <Skeleton className="h-4 w-[85%]" />
-                      <Skeleton className="h-4 w-[70%]" />
-                    </div>
-                    <div className="w-[78%] space-y-2 rounded-lg border p-3">
-                      <Skeleton className="h-4 w-[90%]" />
-                      <Skeleton className="h-4 w-[65%]" />
-                      <Skeleton className="h-4 w-[50%]" />
-                    </div>
-                    <div className="ml-auto w-[64%] space-y-2 rounded-lg border p-3">
-                      <Skeleton className="h-4 w-[80%]" />
-                      <Skeleton className="h-4 w-[55%]" />
-                    </div>
-                  </div>
-                ) : (
-                  <div className="text-center">
-                    <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
-                      <p className="text-3xl">💬</p>
-                    </div>
-                    <p className="text-lg font-semibold text-foreground">会話を始めましょう</p>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      メッセージを入力してください
-                    </p>
-                  </div>
-                )}
+                <EmptyState isMessageListLoading={isMessageListLoading} />
               </div>
             )}
             {visibleMessages.map((message) => (
@@ -1029,12 +1129,7 @@ export const ChatView = () => {
                 characterName={currentCharacterName}
                 characterAvatar={currentCharacterAvatar}
                 nsfwBlur={nsfwBlur}
-                canSpeak={
-                  ttsEnabled &&
-                  !message.isStreaming &&
-                  !!message.content &&
-                  message.role === "assistant"
-                }
+                canSpeak={canMessageSpeak(ttsEnabled, message)}
                 isSpeaking={speakingMessageId === message.id && isSpeaking}
                 isLast={message.id === lastAssistantId}
                 isHighlighted={highlightedMessageIds.has(message.id)}
@@ -1050,7 +1145,7 @@ export const ChatView = () => {
         <ChatInput
           onSend={stableHandleSend}
           onGenerateImage={stableHandleGenerateImage}
-          isLoading={isLoading || !isOnline}
+          isLoading={isInputDisabled}
         />
       </div>
     </div>

@@ -52,48 +52,51 @@ function hasSimilarRepetition(phrases: string[], threshold: number): boolean {
   return false;
 }
 
+// スライディングウィンドウで部分文字列の繰り返しを検出
+function hasSlidingWindowRepetition(
+  tail: string,
+  windowSizes: number[],
+  step: number,
+  threshold: number,
+): boolean {
+  for (const windowSize of windowSizes) {
+    if (tail.length < windowSize * 2) continue;
+    const seen = new Map<string, number>();
+    for (let i = 0; i <= tail.length - windowSize; i += step) {
+      const chunk = tail.slice(i, i + windowSize);
+      const count = (seen.get(chunk) ?? 0) + 1;
+      if (count >= threshold) return true;
+      seen.set(chunk, count);
+    }
+  }
+  return false;
+}
+
+// フレーズベースの繰り返し検出（セリフ・句読点区切り・N-gram類似度）
+function hasPhraseRepetition(tail: string): boolean {
+  const quotes = tail.match(/「[^」]{2,30}」/g);
+  if (quotes && quotes.length >= 6 && hasFrequentItem(quotes, FREQ_THRESHOLD)) return true;
+
+  // スペース区切りの短フレーズ繰り返し（「もう死にそう おかしくなりそう」等）も検出
+  const phrases = tail.split(/[\s…。！？]+/).filter((p) => p.length >= 3 && p.length <= 30);
+  if (phrases.length >= 6 && hasFrequentItem(phrases, FREQ_THRESHOLD)) return true;
+  if (phrases.length >= 6 && hasSimilarRepetition(phrases, FREQ_THRESHOLD)) return true;
+
+  return false;
+}
+
 function detectRepetition(text: string): boolean {
   if (text.length < 50) return false;
   const tail = text.slice(-REPETITION_CHECK_WINDOW);
 
   if (EXACT_REPETITION.test(tail)) return true;
+  if (hasPhraseRepetition(tail)) return true;
 
-  // 「」で囲まれたセリフの頻出検出
-  const quotes = tail.match(/「[^」]{2,30}」/g);
-  if (quotes && quotes.length >= 6 && hasFrequentItem(quotes, FREQ_THRESHOLD)) return true;
-
-  // 句読点・スペース区切りフレーズの頻出検出
-  // スペース区切りの短フレーズ繰り返し（「もう死にそう おかしくなりそう」等）も検出する
-  const phrases = tail.split(/[\s…。！？]+/).filter((p) => p.length >= 3 && p.length <= 30);
-  if (phrases.length >= 6 && hasFrequentItem(phrases, FREQ_THRESHOLD)) return true;
-
-  // N-gram類似度による近似繰り返し検出
-  if (phrases.length >= 6 && hasSimilarRepetition(phrases, FREQ_THRESHOLD)) return true;
-
-  // スライディングウィンドウによる部分文字列繰り返し検出
-  if (tail.length >= 60) {
-    // 短いパターン(15-40文字): 4回以上で検出
-    for (const windowSize of [15, 25, 40]) {
-      const seen = new Map<string, number>();
-      for (let i = 0; i <= tail.length - windowSize; i += 5) {
-        const chunk = tail.slice(i, i + windowSize);
-        const count = (seen.get(chunk) ?? 0) + 1;
-        if (count >= 4) return true;
-        seen.set(chunk, count);
-      }
-    }
-    // 長いパターン(60-80文字): 2回以上で検出（テンプレブロックの繰り返し）
-    for (const windowSize of [60, 80]) {
-      if (tail.length < windowSize * 2) continue;
-      const seen = new Map<string, number>();
-      for (let i = 0; i <= tail.length - windowSize; i += 10) {
-        const chunk = tail.slice(i, i + windowSize);
-        const count = (seen.get(chunk) ?? 0) + 1;
-        if (count >= 2) return true;
-        seen.set(chunk, count);
-      }
-    }
-  }
+  if (tail.length < 60) return false;
+  // 短いパターン(15-40文字): 4回以上で検出
+  if (hasSlidingWindowRepetition(tail, [15, 25, 40], 5, 4)) return true;
+  // 長いパターン(60-80文字): 2回以上で検出（テンプレブロックの繰り返し）
+  if (hasSlidingWindowRepetition(tail, [60, 80], 10, 2)) return true;
 
   return false;
 }
@@ -242,6 +245,93 @@ async function collectStreamResponse(
   return accumulated;
 }
 
+// 初回ストリーミング: UIに即座に表示しつつテキストを蓄積
+async function streamFirstAttempt(
+  messages: { role: "system" | "user" | "assistant"; content: string }[],
+  model: string,
+  onChunk: (text: string) => void,
+): Promise<string> {
+  let accumulated = "";
+  let streamError: string | null = null;
+  await streamChat(
+    messages,
+    model,
+    (chunk) => {
+      accumulated += chunk;
+      onChunk(chunk);
+    },
+    () => {},
+    (err) => {
+      streamError = err;
+    },
+  );
+  if (streamError) throw new Error(streamError);
+  return accumulated;
+}
+
+// 会話フェーズでモデルがXMLラッパーを省略した場合の救済（最終リトライのみ）
+// 初回〜中間リトライではXML欠落を品質ガードで検出し再生成を促す。
+// 最終リトライでもなお平文の場合のみ<response><dialogue>で救済ラップする。
+// 理由: T1でモデルがXMLを無視する問題の根本対策はリトライ指示による矯正。
+// 全attemptで即座にラップすると<narration>/<inner>が永久に欠落する。
+function applyConversationXmlFallback(response: string, phase: string, attempt: number): string {
+  if (
+    phase === "conversation" &&
+    !isXmlResponse(response) &&
+    response.trim().length >= 4 &&
+    attempt >= MAX_QUALITY_RETRIES
+  ) {
+    return wrapConversationPlainAsXml(response);
+  }
+  return response;
+}
+
+type QualityAttemptResult =
+  | { status: "pass"; response: string; isRetry: boolean }
+  | { status: "retry"; response: string }
+  | { status: "exhausted"; failedCheck: string }
+  | { status: "error"; message: string };
+
+async function executeQualityAttempt(
+  messages: { role: "system" | "user" | "assistant"; content: string }[],
+  model: string,
+  onChunk: (text: string) => void,
+  qualityContext: QualityCheckContext,
+  attempt: number,
+  prevResponse: string,
+): Promise<QualityAttemptResult> {
+  try {
+    const response =
+      attempt === 0
+        ? await streamFirstAttempt(messages, model, onChunk)
+        : await collectStreamResponse(
+            buildRetryMessages(messages, prevResponse, qualityContext),
+            model,
+          );
+
+    const fallbackApplied = applyConversationXmlFallback(response, qualityContext.phase, attempt);
+    if (fallbackApplied !== response) onChunk(fallbackApplied);
+
+    const checkResult = runQualityChecks(fallbackApplied, qualityContext);
+    console.log(
+      `[quality-guard] attempt=${attempt} len=${fallbackApplied.length} phase=${qualityContext.phase} passed=${checkResult.passed} failed=${checkResult.failedCheck ?? "none"}`,
+    );
+
+    if (checkResult.passed) {
+      return { status: "pass", response: fallbackApplied, isRetry: attempt > 0 };
+    }
+    if (attempt >= MAX_QUALITY_RETRIES) {
+      return {
+        status: "exhausted",
+        failedCheck: checkResult.failedCheck ?? "unknown",
+      };
+    }
+    return { status: "retry", response: fallbackApplied };
+  } catch (err) {
+    return { status: "error", message: String(err) };
+  }
+}
+
 export async function streamChatWithQualityGuard(
   messages: { role: "system" | "user" | "assistant"; content: string }[],
   model: string,
@@ -250,82 +340,34 @@ export async function streamChatWithQualityGuard(
   onError: (error: string) => void,
   qualityContext: QualityCheckContext,
 ): Promise<void> {
-  let attempt = 0;
   let lastResponse = "";
-  // リトライ用メッセージ: 失敗した応答を含めて書き直しを指示
-  let retryMessages = messages;
 
-  while (attempt <= MAX_QUALITY_RETRIES) {
-    try {
-      if (attempt === 0) {
-        // 初回: 通常のストリーミング（UIに即座に表示）
-        let accumulated = "";
-        let streamError: string | null = null;
-        await streamChat(
-          messages,
-          model,
-          (chunk) => {
-            accumulated += chunk;
-            onChunk(chunk);
-          },
-          () => {},
-          (err) => {
-            streamError = err;
-          },
-        );
-        if (streamError) throw new Error(streamError);
-        lastResponse = accumulated;
-      } else {
-        // 再生成: アダプター経由で統一されたリトライメッセージを構築
-        retryMessages = buildRetryMessages(messages, lastResponse, qualityContext);
-        lastResponse = await collectStreamResponse(retryMessages, model);
-      }
+  for (let attempt = 0; attempt <= MAX_QUALITY_RETRIES; attempt++) {
+    const result = await executeQualityAttempt(
+      messages,
+      model,
+      onChunk,
+      qualityContext,
+      attempt,
+      lastResponse,
+    );
 
-      // 会話フェーズでモデルがXMLラッパーを省略した場合の救済（最終リトライのみ）
-      // 初回〜中間リトライではXML欠落を品質ガードで検出し再生成を促す。
-      // 最終リトライでもなお平文の場合のみ<response><dialogue>で救済ラップする。
-      // 理由: T1でモデルがXMLを無視する問題の根本対策はリトライ指示による矯正。
-      // 全attemptで即座にラップすると<narration>/<inner>が永久に欠落する。
-      if (
-        qualityContext.phase === "conversation" &&
-        !isXmlResponse(lastResponse) &&
-        lastResponse.trim().length >= 4 &&
-        attempt >= MAX_QUALITY_RETRIES
-      ) {
-        lastResponse = wrapConversationPlainAsXml(lastResponse);
-        onChunk(lastResponse);
-      }
-
-      const checkResult = runQualityChecks(lastResponse, qualityContext);
-      console.log(
-        `[quality-guard] attempt=${attempt} len=${lastResponse.length} phase=${qualityContext.phase} passed=${checkResult.passed} failed=${checkResult.failedCheck ?? "none"}`,
-      );
-
-      if (checkResult.passed) {
-        if (attempt > 0) {
-          // 再生成が成功 → UIをリセットして新しい応答を表示
-          onChunk(lastResponse);
-        }
-        onDone(lastResponse);
+    switch (result.status) {
+      case "pass":
+        if (result.isRetry) onChunk(result.response);
+        onDone(result.response);
         return;
-      }
-
-      // 品質チェック不合格 → 再生成を試みる
-      attempt++;
-
-      if (attempt > MAX_QUALITY_RETRIES) {
-        // 再生成上限に達しても壊れた応答は保存しない。
-        // 理由: 英語混入や一人称違反を含む応答を履歴に残すと、次ターンのコンテキスト
-        // を汚染して連鎖崩壊を招く。ユーザーに再生成を促すエラーで止める。
-        const failedCheck = checkResult.failedCheck ?? "unknown";
+      case "retry":
+        lastResponse = result.response;
+        break;
+      case "exhausted":
         onError(
-          `quality-guard failed after ${MAX_QUALITY_RETRIES + 1} attempts (${failedCheck}). Press regenerate to try again.`,
+          `quality-guard failed after ${MAX_QUALITY_RETRIES + 1} attempts (${result.failedCheck}). Press regenerate to try again.`,
         );
         return;
-      }
-    } catch (err) {
-      onError(String(err));
-      return;
+      case "error":
+        onError(result.message);
+        return;
     }
   }
 }

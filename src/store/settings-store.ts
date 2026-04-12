@@ -4,15 +4,26 @@ import { createJSONStorage, persist } from "zustand/middleware";
 
 // Qwen 2.5 72B: 100%安定した日本語出力。Magnumは25%しかクリーン出力できない
 const DEFAULT_MODEL = "qwen/qwen-2.5-72b-instruct" as const;
-const LEGACY_MODEL_NEMO = "mistralai/mistral-nemo" as const;
-const LEGACY_MODEL_HERMES = "nousresearch/hermes-3-llama-3.1-405b:free" as const;
-const LEGACY_MODEL_VENICE =
-  "cognitivecomputations/dolphin-mistral-24b-venice-edition:free" as const;
-const LEGACY_MODEL_EURYALE_V2 = "sao10k/l3.1-euryale-70b" as const;
-const LEGACY_MODEL_EURYALE_V3 = "sao10k/l3.3-euryale-70b" as const;
-const LEGACY_MODEL_EVA_QWEN = "eva-unit-01/eva-qwen2.5-72b" as const;
-const LEGACY_MODEL_MAGNUM = "anthracite-org/magnum-v4-72b" as const;
-const LEGACY_MODEL_DEEPSEEK = "deepseek/deepseek-chat" as const;
+
+// バージョンごとの廃止モデル → DEFAULT_MODELへの移行テーブル
+const LEGACY_MODEL_MIGRATIONS: [number, string][] = [
+  [2, "mistralai/mistral-nemo"],
+  [5, "nousresearch/hermes-3-llama-3.1-405b:free"],
+  [6, "cognitivecomputations/dolphin-mistral-24b-venice-edition:free"],
+  [8, "sao10k/l3.1-euryale-70b"],
+  [10, "sao10k/l3.3-euryale-70b"],
+  [12, "eva-unit-01/eva-qwen2.5-72b"],
+  [14, "anthracite-org/magnum-v4-72b"],
+  [16, "sao10k/l3.3-euryale-70b"],
+  [18, "anthracite-org/magnum-v4-72b"],
+  [20, "deepseek/deepseek-chat"],
+];
+
+function shouldMigrateModel(version: number, currentModel: string): boolean {
+  return LEGACY_MODEL_MIGRATIONS.some(
+    ([minVersion, legacyModel]) => version < minVersion && currentModel === legacyModel,
+  );
+}
 
 const persistedSettingsSchema = z.object({
   model: z.string().default(DEFAULT_MODEL),
@@ -93,19 +104,7 @@ export const useSettingsStore = create<SettingsState>()(
         if (version < 21 && parsed.nsfwBlur === true) {
           parsed.nsfwBlur = false;
         }
-        // attempt 6 model-switch-v2: Magnum v4 が長文で崩壊するため EVA-Qwen2.5-72B に移行
-        if (
-          (version < 2 && parsed.model === LEGACY_MODEL_NEMO) ||
-          (version < 5 && parsed.model === LEGACY_MODEL_HERMES) ||
-          (version < 6 && parsed.model === LEGACY_MODEL_VENICE) ||
-          (version < 8 && parsed.model === LEGACY_MODEL_EURYALE_V2) ||
-          (version < 10 && parsed.model === LEGACY_MODEL_EURYALE_V3) ||
-          (version < 12 && parsed.model === LEGACY_MODEL_EVA_QWEN) ||
-          (version < 14 && parsed.model === LEGACY_MODEL_MAGNUM) ||
-          (version < 16 && parsed.model === LEGACY_MODEL_EURYALE_V3) ||
-          (version < 18 && parsed.model === LEGACY_MODEL_MAGNUM) ||
-          (version < 20 && parsed.model === LEGACY_MODEL_DEEPSEEK)
-        ) {
+        if (shouldMigrateModel(version, parsed.model)) {
           return { ...parsed, model: DEFAULT_MODEL };
         }
         return parsed;

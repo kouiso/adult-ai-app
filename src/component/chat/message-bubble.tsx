@@ -280,26 +280,21 @@ const AvatarViewer = ({ src, alt, onClose }: AvatarViewerProps) => {
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
-      onClick={onClose}
-      onKeyDown={(e) => {
-        if (e.key === "Escape") onClose();
-      }}
       role="dialog"
-      tabIndex={-1}
       aria-modal="true"
       aria-label={`${alt}の画像`}
     >
       <button
         type="button"
-        className="max-h-[80vh] max-w-[90vw] cursor-default appearance-none border-none bg-transparent p-0"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <img
-          src={src}
-          alt={alt}
-          className="max-h-[80vh] max-w-[90vw] rounded-2xl object-contain shadow-2xl"
-        />
-      </button>
+        className="fixed inset-0 cursor-default appearance-none border-none bg-transparent"
+        onClick={onClose}
+        aria-label="閉じる"
+      />
+      <img
+        src={src}
+        alt={alt}
+        className="relative max-h-[80vh] max-w-[90vw] rounded-2xl object-contain shadow-2xl"
+      />
     </div>
   );
 };
@@ -424,6 +419,59 @@ interface MessageActionsProps {
   hasEditHandler: boolean;
 }
 
+interface EditButtonProps {
+  isUser: boolean;
+  isLoading: boolean;
+  hasEditHandler: boolean;
+  onStartEdit: () => void;
+}
+
+const EditButton = ({ isUser, isLoading, hasEditHandler, onStartEdit }: EditButtonProps) => {
+  if (!isUser || isLoading || !hasEditHandler) return null;
+  return (
+    <button
+      type="button"
+      onClick={onStartEdit}
+      className="flex items-center gap-1 rounded-full px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      aria-label="メッセージを編集"
+    >
+      <Pencil className="h-3.5 w-3.5" />
+      編集
+    </button>
+  );
+};
+
+interface RegenerateButtonProps {
+  id: string;
+  isUser: boolean;
+  isLast: boolean;
+  isLoading: boolean;
+  content: string;
+  onRegenerate?: (messageId: string) => void;
+}
+
+const RegenerateButton = ({
+  id,
+  isUser,
+  isLast,
+  isLoading,
+  content,
+  onRegenerate,
+}: RegenerateButtonProps) => {
+  if (isUser || !isLast || isLoading || !onRegenerate || !content) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => onRegenerate(id)}
+      className="flex items-center gap-1 rounded-full px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      aria-label="再生成"
+    >
+      <RefreshCw className="h-3.5 w-3.5" />
+      再生成
+    </button>
+  );
+};
+
 const MessageActions = ({
   id,
   isUser,
@@ -448,127 +496,231 @@ const MessageActions = ({
         onStopSpeaking={onStopSpeaking}
       />
     )}
-    {isUser && !isLoading && hasEditHandler && (
-      <button
-        type="button"
-        onClick={onStartEdit}
-        className="flex items-center gap-1 rounded-full px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-        aria-label="メッセージを編集"
-      >
-        <Pencil className="h-3.5 w-3.5" />
-        編集
-      </button>
-    )}
-    {!isUser && isLast && !isLoading && onRegenerate && content && (
-      <button
-        type="button"
-        onClick={() => onRegenerate(id)}
-        className="flex items-center gap-1 rounded-full px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-        aria-label="再生成"
-      >
-        <RefreshCw className="h-3.5 w-3.5" />
-        再生成
-      </button>
-    )}
+    <EditButton
+      isUser={isUser}
+      isLoading={isLoading}
+      hasEditHandler={hasEditHandler}
+      onStartEdit={onStartEdit}
+    />
+    <RegenerateButton
+      id={id}
+      isUser={isUser}
+      isLast={isLast}
+      isLoading={isLoading}
+      content={content}
+      onRegenerate={onRegenerate}
+    />
   </div>
 );
 
-export const MessageBubble = memo(
-  ({
+interface BubbleBodyProps {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  isStreaming?: boolean;
+  isHighlighted: boolean;
+  isEditing: boolean;
+  bubbleStyle: string;
+  onSave: (content: string) => void;
+  onCancelEdit: () => void;
+}
+
+const BubbleBody = ({
+  content,
+  role,
+  isStreaming,
+  isHighlighted,
+  isEditing,
+  bubbleStyle,
+  onSave,
+  onCancelEdit,
+}: BubbleBodyProps) => {
+  if (isEditing) {
+    return <UserEditForm initialContent={content} onSave={onSave} onCancel={onCancelEdit} />;
+  }
+  return (
+    <div
+      className={cn(
+        "rounded-2xl px-4 py-2.5 text-sm leading-relaxed",
+        bubbleStyle,
+        isHighlighted && "ring-2 ring-yellow-400/50 bg-yellow-50/10",
+      )}
+    >
+      <MessageContent content={content} isStreaming={isStreaming} role={role} />
+    </div>
+  );
+};
+
+interface BubbleFooterProps {
+  id: string;
+  isUser: boolean;
+  isStreaming?: boolean;
+  isLoading: boolean;
+  isEditing: boolean;
+  isLast: boolean;
+  error: boolean;
+  canSpeak: boolean;
+  isSpeaking: boolean;
+  content: string;
+  imageUrl?: string;
+  nsfwBlur: boolean;
+  onSpeak?: (messageId: string, text: string) => void;
+  onStopSpeaking?: () => void;
+  onRegenerate?: (messageId: string) => void;
+  onRetry?: (messageId: string) => void;
+  onStartEdit: () => void;
+  hasEditHandler: boolean;
+}
+
+const BubbleFooter = ({
+  id,
+  isUser,
+  isStreaming,
+  isLoading,
+  isEditing,
+  isLast,
+  error,
+  canSpeak,
+  isSpeaking,
+  content,
+  imageUrl,
+  nsfwBlur,
+  onSpeak,
+  onStopSpeaking,
+  onRegenerate,
+  onRetry,
+  onStartEdit,
+  hasEditHandler,
+}: BubbleFooterProps) => (
+  <>
+    {error && !isUser && !isEditing && <ErrorIndicator messageId={id} onRetry={onRetry} />}
+
+    {!isStreaming && !isEditing && !error && (
+      <MessageActions
+        id={id}
+        isUser={isUser}
+        isLoading={isLoading}
+        isLast={isLast}
+        canSpeak={canSpeak}
+        isSpeaking={isSpeaking}
+        content={content}
+        onSpeak={onSpeak}
+        onStopSpeaking={onStopSpeaking}
+        onRegenerate={onRegenerate}
+        onStartEdit={onStartEdit}
+        hasEditHandler={hasEditHandler}
+      />
+    )}
+
+    {imageUrl && <ImagePreview imageUrl={imageUrl} nsfwBlur={nsfwBlur} />}
+  </>
+);
+
+const userBubbleStyle = "bg-gradient-user-bubble text-white rounded-tr-sm shadow-sm";
+const assistantBubbleStyle =
+  "bg-card text-foreground rounded-tl-sm border border-border/50 shadow-sm";
+
+// デフォルト値をスプレッドで適用し、関数内のcyclomatic complexityを削減
+const applyBubbleDefaults = (props: MessageBubbleProps) => ({
+  isLoading: false,
+  error: false,
+  characterName: "AI",
+  nsfwBlur: false,
+  canSpeak: false,
+  isSpeaking: false,
+  isLast: false,
+  isHighlighted: false,
+  ...props,
+});
+
+export const MessageBubble = memo((rawProps: MessageBubbleProps) => {
+  const {
     id,
     role,
     content,
     imageUrl,
     isStreaming,
-    isLoading = false,
-    error = false,
-    characterName = "AI",
+    isLoading,
+    error,
+    characterName,
     characterAvatar,
-    nsfwBlur = false,
-    canSpeak = false,
-    isSpeaking = false,
-    isLast = false,
-    isHighlighted = false,
+    nsfwBlur,
+    canSpeak,
+    isSpeaking,
+    isLast,
+    isHighlighted,
     onSpeak,
     onStopSpeaking,
     onRegenerate,
     onEdit,
     onRetry,
-  }: MessageBubbleProps) => {
-    const isUser = role === "user";
-    const [isEditing, setIsEditing] = useState(false);
-    const [showAvatarViewer, setShowAvatarViewer] = useState(false);
-    const bubbleStyle = isUser
-      ? "bg-gradient-user-bubble text-white rounded-tr-sm shadow-sm"
-      : "bg-card text-foreground rounded-tl-sm border border-border/50 shadow-sm";
+  } = applyBubbleDefaults(rawProps);
 
-    const handleEditSave = useCallback(
-      (newContent: string) => {
-        setIsEditing(false);
-        onEdit?.(id, newContent);
-      },
-      [id, onEdit],
-    );
+  const isUser = role === "user";
+  const [isEditing, setIsEditing] = useState(false);
+  const [showAvatarViewer, setShowAvatarViewer] = useState(false);
+  const bubbleStyle = isUser ? userBubbleStyle : assistantBubbleStyle;
 
-    return (
-      <div className={cn("flex gap-3 px-4 py-3 group/message", isUser && "flex-row-reverse")}>
-        <MessageAvatar
-          isUser={isUser}
-          characterName={characterName}
-          avatarUrl={characterAvatar}
-          onAvatarClick={() => setShowAvatarViewer(true)}
+  const handleEditSave = useCallback(
+    (newContent: string) => {
+      setIsEditing(false);
+      onEdit?.(id, newContent);
+    },
+    [id, onEdit],
+  );
+
+  return (
+    <div className={cn("flex gap-3 px-4 py-3 group/message", isUser && "flex-row-reverse")}>
+      <MessageAvatar
+        isUser={isUser}
+        characterName={characterName}
+        avatarUrl={characterAvatar}
+        onAvatarClick={() => setShowAvatarViewer(true)}
+      />
+      <div className={cn("max-w-[75%] space-y-2", isUser && "text-right")}>
+        <BubbleBody
+          id={id}
+          role={role}
+          content={content}
+          isStreaming={isStreaming}
+          isHighlighted={isHighlighted}
+          isEditing={isEditing}
+          bubbleStyle={bubbleStyle}
+          onSave={handleEditSave}
+          onCancelEdit={() => setIsEditing(false)}
         />
-        <div className={cn("max-w-[75%] space-y-2", isUser && "text-right")}>
-          {isEditing ? (
-            <UserEditForm
-              initialContent={content}
-              onSave={handleEditSave}
-              onCancel={() => setIsEditing(false)}
-            />
-          ) : (
-            <div
-              className={cn(
-                "rounded-2xl px-4 py-2.5 text-sm leading-relaxed",
-                bubbleStyle,
-                isHighlighted && "ring-2 ring-yellow-400/50 bg-yellow-50/10",
-              )}
-            >
-              <MessageContent content={content} isStreaming={isStreaming} role={role} />
-            </div>
-          )}
 
-          {error && !isUser && !isEditing && <ErrorIndicator messageId={id} onRetry={onRetry} />}
-
-          {!isStreaming && !isEditing && !error && (
-            <MessageActions
-              id={id}
-              isUser={isUser}
-              isLoading={isLoading}
-              isLast={isLast}
-              canSpeak={canSpeak}
-              isSpeaking={isSpeaking}
-              content={content}
-              onSpeak={onSpeak}
-              onStopSpeaking={onStopSpeaking}
-              onRegenerate={onRegenerate}
-              onStartEdit={() => setIsEditing(true)}
-              hasEditHandler={!!onEdit}
-            />
-          )}
-
-          {imageUrl && <ImagePreview imageUrl={imageUrl} nsfwBlur={nsfwBlur} />}
-        </div>
-
-        {showAvatarViewer && characterAvatar && (
-          <AvatarViewer
-            src={characterAvatar}
-            alt={characterName}
-            onClose={() => setShowAvatarViewer(false)}
-          />
-        )}
+        <BubbleFooter
+          id={id}
+          isUser={isUser}
+          isStreaming={isStreaming}
+          isLoading={isLoading}
+          isEditing={isEditing}
+          isLast={isLast}
+          error={error}
+          canSpeak={canSpeak}
+          isSpeaking={isSpeaking}
+          content={content}
+          imageUrl={imageUrl}
+          nsfwBlur={nsfwBlur}
+          onSpeak={onSpeak}
+          onStopSpeaking={onStopSpeaking}
+          onRegenerate={onRegenerate}
+          onRetry={onRetry}
+          onStartEdit={() => setIsEditing(true)}
+          hasEditHandler={!!onEdit}
+        />
       </div>
-    );
-  },
-);
+
+      {showAvatarViewer && characterAvatar && (
+        <AvatarViewer
+          src={characterAvatar}
+          alt={characterName}
+          onClose={() => setShowAvatarViewer(false)}
+        />
+      )}
+    </div>
+  );
+});
 
 MessageBubble.displayName = "MessageBubble";
