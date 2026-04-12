@@ -70,9 +70,7 @@ const PHASE_DETECTION_ORDER: {
   },
 ];
 
-export function detectScenePhase(
-  messages: { role: string; content: string }[],
-): ScenePhase {
+export function detectScenePhase(messages: { role: string; content: string }[]): ScenePhase {
   // ユーザーメッセージのみでフェーズを判定
   // assistantの応答を含めるとモデルの暴走が次ターンのフェーズを不当に昇格させる
   const scanTarget = messages

@@ -64,7 +64,7 @@ function detectRepetition(text: string): boolean {
 
   // 句読点・スペース区切りフレーズの頻出検出
   // スペース区切りの短フレーズ繰り返し（「もう死にそう おかしくなりそう」等）も検出する
-  const phrases = tail.split(/[\n…。！？\s　]+/).filter((p) => p.length >= 3 && p.length <= 30);
+  const phrases = tail.split(/[\s…。！？]+/).filter((p) => p.length >= 3 && p.length <= 30);
   if (phrases.length >= 6 && hasFrequentItem(phrases, FREQ_THRESHOLD)) return true;
 
   // N-gram類似度による近似繰り返し検出
@@ -297,7 +297,9 @@ export async function streamChatWithQualityGuard(
       }
 
       const checkResult = runQualityChecks(lastResponse, qualityContext);
-      console.log(`[quality-guard] attempt=${attempt} len=${lastResponse.length} phase=${qualityContext.phase} passed=${checkResult.passed} failed=${checkResult.failedCheck ?? 'none'}`);
+      console.log(
+        `[quality-guard] attempt=${attempt} len=${lastResponse.length} phase=${qualityContext.phase} passed=${checkResult.passed} failed=${checkResult.failedCheck ?? "none"}`,
+      );
 
       if (checkResult.passed) {
         if (attempt > 0) {
@@ -316,7 +318,9 @@ export async function streamChatWithQualityGuard(
         // 理由: 英語混入や一人称違反を含む応答を履歴に残すと、次ターンのコンテキスト
         // を汚染して連鎖崩壊を招く。ユーザーに再生成を促すエラーで止める。
         const failedCheck = checkResult.failedCheck ?? "unknown";
-        onError(`quality-guard failed after ${MAX_QUALITY_RETRIES + 1} attempts (${failedCheck}). Press regenerate to try again.`);
+        onError(
+          `quality-guard failed after ${MAX_QUALITY_RETRIES + 1} attempts (${failedCheck}). Press regenerate to try again.`,
+        );
         return;
       }
     } catch (err) {

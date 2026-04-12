@@ -354,8 +354,9 @@ export const ChatView = () => {
 
       // 品質ガード用コンテキスト: フェーズ検出+直前のassistant応答
       const phase = detectScenePhase(apiMessages);
-      const assistantMessages = currentMessages
-        .filter((m) => m.role === "assistant" && !m.isStreaming);
+      const assistantMessages = currentMessages.filter(
+        (m) => m.role === "assistant" && !m.isStreaming,
+      );
       const prevAssistant = assistantMessages.at(-1)?.content;
 
       // 直近5ターンの<inner>テキストを抽出（感情弧の多様性チェック用）
@@ -676,7 +677,12 @@ export const ChatView = () => {
         userCount++;
         if (userCount > HISTORY_TURNS) break;
         recentPairs.unshift({ user: m.content.slice(0, 200) });
-      } else if (m.role === "assistant" && m.content && recentPairs.length > 0 && !recentPairs[0].assistant) {
+      } else if (
+        m.role === "assistant" &&
+        m.content &&
+        recentPairs.length > 0 &&
+        !recentPairs[0].assistant
+      ) {
         recentPairs[0].assistant = m.content.slice(0, 200);
       }
     }
@@ -783,7 +789,13 @@ export const ChatView = () => {
     } finally {
       setLoading(false);
     }
-  }, [createMessageEntry, persistMessageImageEntry, updateMessageContentEntry, isOnline, setLoading]);
+  }, [
+    createMessageEntry,
+    persistMessageImageEntry,
+    updateMessageContentEntry,
+    isOnline,
+    setLoading,
+  ]);
 
   const stableOnSelectConversation = useCallback(
     (conversationId: string) => void handleSelectConversation(conversationId),

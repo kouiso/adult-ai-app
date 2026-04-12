@@ -29,7 +29,7 @@ function checkSceneMinLength(response: string, phase: ScenePhase): boolean {
 // チェック3: 英語混入チェック
 function checkNoEnglish(response: string): boolean {
   // カタカナ語（ウイスキー等）は許可するため、ラテン文字3文字以上を検出
-  return !/[a-zA-Z]{3,}/.test(response);
+  return !/[A-Za-z]{3,}/.test(response);
 }
 
 // Jaccard類似度（union-based、within-turn用）
@@ -51,8 +51,8 @@ function jaccardSimilarity(a: string, b: string): number {
 function checkWithinTurnRepetition(response: string): boolean {
   // 方法1: 文分割によるJaccard類似度チェック（短文の包含関係で誤検出しないようunion-based）
   const sentences = response
-    .split(/[。！？\n」]/)
-    .map((s) => s.replace(/[「]/g, "").trim())
+    .split(/[\n。」！？]/)
+    .map((s) => s.replace(/「/g, "").trim())
     .filter((s) => s.length > 5);
   if (sentences.length >= 3) {
     for (let i = 0; i < sentences.length; i++) {
@@ -64,7 +64,7 @@ function checkWithinTurnRepetition(response: string): boolean {
 
   // 方法2: 5文字以上の部分文字列が3回以上出現したら不合格
   const phrases = new Map<string, number>();
-  const cleaned = response.replace(/[…。！？「」\s]/g, "");
+  const cleaned = response.replace(/[\s…。「」！？]/g, "");
   for (let len = 5; len <= 10; len++) {
     for (let i = 0; i <= cleaned.length - len; i++) {
       const sub = cleaned.slice(i, i + len);
@@ -116,9 +116,7 @@ export function runQualityChecks(
 
   // 一人称チェックを最優先（他のチェックより先に判定）
   if (context.wrongFirstPersons && context.wrongFirstPersons.length > 0) {
-    const hasWrong = context.wrongFirstPersons.some((fp) =>
-      plainText.includes(fp),
-    );
+    const hasWrong = context.wrongFirstPersons.some((fp) => plainText.includes(fp));
     if (hasWrong) {
       return { passed: false, failedCheck: "wrong-first-person" };
     }

@@ -10,6 +10,11 @@ export interface StructuredResponse {
   raw: string;
 }
 
+// <response>タグを含むかどうかの軽量判定
+export function isXmlResponse(text: string): boolean {
+  return text.includes("<response>") && text.includes("</response>");
+}
+
 // XMLタグの中身を抽出（最初のマッチのみ）
 function extractTag(text: string, tag: string): string {
   const re = new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`);
@@ -32,11 +37,6 @@ export function parseXmlResponse(text: string): StructuredResponse | null {
   return { action, dialogue, inner, narration, raw: text };
 }
 
-// <response>タグを含むかどうかの軽量判定
-export function isXmlResponse(text: string): boolean {
-  return text.includes("<response>") && text.includes("</response>");
-}
-
 // XMLタグを除去してプレーンテキストに変換（品質チェック・TTS用）
 export function stripXmlTags(text: string): string {
   return text
@@ -55,7 +55,7 @@ export function wrapConversationPlainAsXml(text: string): string {
   const trimmed = text.trim();
   if (trimmed.length === 0) return text;
   // 裸の<dialogue>タグだけ出力された場合も救済
-  const dialogueOnly = trimmed.match(/^<dialogue>([\s\S]*?)<\/dialogue>$/);
+  const dialogueOnly = trimmed.match(/^<dialogue>([\S\s]*?)<\/dialogue>$/);
   if (dialogueOnly) {
     return `<response><dialogue>${dialogueOnly[1].trim()}</dialogue></response>`;
   }

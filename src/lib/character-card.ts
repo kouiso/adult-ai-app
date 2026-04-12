@@ -36,7 +36,10 @@ export function parseCharacterCard(systemPrompt: string): CharacterCard | null {
   const getArray = (key: string): string[] => {
     const val = getValue(key);
     if (!val) return [];
-    return val.split(/[,、]/).map((s) => s.trim()).filter(Boolean);
+    return val
+      .split(/[,、]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
   };
 
   const name = getValue("name");

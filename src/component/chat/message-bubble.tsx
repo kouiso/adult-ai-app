@@ -6,8 +6,8 @@ import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/component/ui/avatar";
-import { isXmlResponse, parseXmlResponse } from "@/lib/xml-response-parser";
 import { cn } from "@/lib/utils";
+import { isXmlResponse, parseXmlResponse } from "@/lib/xml-response-parser";
 
 interface MessageBubbleProps {
   id: string;
@@ -104,9 +104,7 @@ const StructuredNarrative = memo(({ content }: { content: string }) => {
         </p>
       )}
       {parsed.action && (
-        <p className="italic text-muted-foreground/80 leading-relaxed">
-          {parsed.action}
-        </p>
+        <p className="italic text-muted-foreground/80 leading-relaxed">{parsed.action}</p>
       )}
       {parsed.dialogue && (
         <p className="font-medium leading-relaxed">
@@ -114,9 +112,7 @@ const StructuredNarrative = memo(({ content }: { content: string }) => {
         </p>
       )}
       {parsed.inner && (
-        <p className="text-xs italic text-muted-foreground/60 leading-relaxed">
-          {parsed.inner}
-        </p>
+        <p className="text-xs italic text-muted-foreground/60 leading-relaxed">{parsed.inner}</p>
       )}
     </div>
   );
@@ -289,16 +285,21 @@ const AvatarViewer = ({ src, alt, onClose }: AvatarViewerProps) => {
         if (e.key === "Escape") onClose();
       }}
       role="dialog"
+      tabIndex={-1}
       aria-modal="true"
       aria-label={`${alt}の画像`}
     >
-      <img
-        src={src}
-        alt={alt}
-        className="max-h-[80vh] max-w-[90vw] rounded-2xl object-contain shadow-2xl"
+      <button
+        type="button"
+        className="max-h-[80vh] max-w-[90vw] cursor-default appearance-none border-none bg-transparent p-0"
         onClick={(e) => e.stopPropagation()}
-        onKeyDown={() => {}}
-      />
+      >
+        <img
+          src={src}
+          alt={alt}
+          className="max-h-[80vh] max-w-[90vw] rounded-2xl object-contain shadow-2xl"
+        />
+      </button>
     </div>
   );
 };
@@ -314,7 +315,11 @@ const MessageAvatar = ({ isUser, characterName, avatarUrl, onAvatarClick }: Mess
   const clickable = !isUser && !!avatarUrl;
   return (
     <Avatar
-      className={cn("h-8 w-8 shrink-0", clickable && "cursor-pointer ring-offset-background transition-all hover:ring-2 hover:ring-primary/40 hover:ring-offset-1")}
+      className={cn(
+        "h-8 w-8 shrink-0",
+        clickable &&
+          "cursor-pointer ring-offset-background transition-all hover:ring-2 hover:ring-primary/40 hover:ring-offset-1",
+      )}
       onClick={clickable ? onAvatarClick : undefined}
     >
       {!isUser && avatarUrl && <AvatarImage src={avatarUrl} alt={characterName} />}
@@ -507,7 +512,12 @@ export const MessageBubble = memo(
 
     return (
       <div className={cn("flex gap-3 px-4 py-3 group/message", isUser && "flex-row-reverse")}>
-        <MessageAvatar isUser={isUser} characterName={characterName} avatarUrl={characterAvatar} onAvatarClick={() => setShowAvatarViewer(true)} />
+        <MessageAvatar
+          isUser={isUser}
+          characterName={characterName}
+          avatarUrl={characterAvatar}
+          onAvatarClick={() => setShowAvatarViewer(true)}
+        />
         <div className={cn("max-w-[75%] space-y-2", isUser && "text-right")}>
           {isEditing ? (
             <UserEditForm

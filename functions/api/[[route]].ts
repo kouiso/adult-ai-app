@@ -995,7 +995,7 @@ FORBIDDEN: Outputting plain text without <response> wrapper. FORBIDDEN: Omitting
     const sceneContext = SCENE_CONTEXT_MESSAGES[phase];
     const sceneContextWithArc = sceneContext
       ? `${sceneContext}${emotionalArc}${characterVoice}`
-      : (emotionalArc || characterVoice)
+      : emotionalArc || characterVoice
         ? `${emotionalArc}${characterVoice}`.trim()
         : null;
     if (sceneContextWithArc) {
@@ -1068,24 +1068,40 @@ FORBIDDEN: Outputting plain text without <response> wrapper. FORBIDDEN: Omitting
     // ポーズバリエーション: 同じフェーズでも毎回異なるポーズを生成するためのヒント
     const poseDiversityPool: Record<ScenePhase, readonly string[]> = {
       conversation: [
-        "sitting, looking_at_viewer", "standing, hand_on_hip", "leaning_forward, smile",
-        "arms_behind_back, looking_away", "chin_rest, elbow_on_table",
-        "crossed_arms, smirk", "waving, tilted_head",
+        "sitting, looking_at_viewer",
+        "standing, hand_on_hip",
+        "leaning_forward, smile",
+        "arms_behind_back, looking_away",
+        "chin_rest, elbow_on_table",
+        "crossed_arms, smirk",
+        "waving, tilted_head",
       ],
       intimate: [
-        "lying_on_bed, looking_up", "sitting_on_lap, face_to_face", "against_wall, arms_around_neck",
-        "kneeling, hand_on_chest", "from_behind, looking_over_shoulder",
-        "straddling, hands_on_shoulders", "side_lying, intertwined",
+        "lying_on_bed, looking_up",
+        "sitting_on_lap, face_to_face",
+        "against_wall, arms_around_neck",
+        "kneeling, hand_on_chest",
+        "from_behind, looking_over_shoulder",
+        "straddling, hands_on_shoulders",
+        "side_lying, intertwined",
       ],
       erotic: [
-        "missionary, legs_spread", "doggystyle, arched_back", "cowgirl, hands_on_chest",
-        "from_side, leg_lifted", "bent_over, gripping_sheets",
-        "reverse_cowgirl, looking_back", "standing_sex, against_wall",
+        "missionary, legs_spread",
+        "doggystyle, arched_back",
+        "cowgirl, hands_on_chest",
+        "from_side, leg_lifted",
+        "bent_over, gripping_sheets",
+        "reverse_cowgirl, looking_back",
+        "standing_sex, against_wall",
       ],
       climax: [
-        "arched_back, head_tilted_back", "trembling, eyes_rolled_back", "collapsed, afterglow",
-        "clinging, nails_digging", "legs_locked, full_body_tension",
-        "on_back, spread_legs, convulsing", "face_down, gripping_pillow",
+        "arched_back, head_tilted_back",
+        "trembling, eyes_rolled_back",
+        "collapsed, afterglow",
+        "clinging, nails_digging",
+        "legs_locked, full_body_tension",
+        "on_back, spread_legs, convulsing",
+        "face_down, gripping_pillow",
       ],
     };
 
@@ -1447,7 +1463,11 @@ Rules:
       const userId = await ensureUser(database, userEmail);
 
       // Novitaドメイン以外からのfetchを拒否（SSRF防御）
-      const ALLOWED_IMAGE_HOSTS = ["image.novita.ai", "novita-output.s3.amazonaws.com", "faas-output-image.s3.ap-southeast-1.amazonaws.com"];
+      const ALLOWED_IMAGE_HOSTS = [
+        "image.novita.ai",
+        "novita-output.s3.amazonaws.com",
+        "faas-output-image.s3.ap-southeast-1.amazonaws.com",
+      ];
       const parsedUrl = new URL(imageUrl);
       if (!ALLOWED_IMAGE_HOSTS.includes(parsedUrl.hostname)) {
         return c.json({ error: "disallowed image source" }, 400);
