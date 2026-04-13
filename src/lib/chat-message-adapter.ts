@@ -2,7 +2,7 @@
 // chat-view.tsx のクロージャ内に閉じていたロジックを純関数として切り出し、
 // テストハーネスからも同じ経路で呼び出せるようにする
 
-import type { ChatMessage } from "@/store/chat-store";
+import type { ChatMessage } from "../store/chat-store";
 
 export type ApiMessage = {
   role: "system" | "user" | "assistant";
@@ -41,8 +41,7 @@ export function buildMessagesForApi(
 ): ApiMessage[] {
   // systemロールとストリーミング中のメッセージを除外
   const filtered = msgs.filter(
-    (m): m is { role: "user" | "assistant"; content: string } =>
-      (m.role === "user" || m.role === "assistant") && !m.isStreaming,
+    (m) => (m.role === "user" || m.role === "assistant") && !m.isStreaming,
   );
 
   const firstPerson = extractFirstPerson(systemPrompt);
