@@ -113,13 +113,21 @@ function checkInnerExists(innerText: string, phase: ScenePhase): boolean {
   return innerText.length >= 5;
 }
 
+// 「自分」は再帰的用法（「反応してしまう自分がいる」等）で頻出するため
+// 主語位置（文頭・「」直後・読点直後 + 助詞）のみ検出する
+const JIBUN_SUBJECT_PATTERN = /(?:^|[\s、。「！？])自分[がだでとにのはもを]/;
+
 // 一人称チェック（最優先 — 他のチェックより先に判定）
-function checkWrongFirstPerson(
+// 「自分」のみコンテキスト考慮の正規表現、他は部分一致
+export function checkWrongFirstPerson(
   plainText: string,
   wrongFirstPersons: string[] | undefined,
 ): boolean {
   if (!wrongFirstPersons || wrongFirstPersons.length === 0) return true;
-  return !wrongFirstPersons.some((fp) => plainText.includes(fp));
+  return !wrongFirstPersons.some((fp) => {
+    if (fp === "自分") return JIBUN_SUBJECT_PATTERN.test(plainText);
+    return plainText.includes(fp);
+  });
 }
 
 // XML固有チェック（パース成功時のみ）
