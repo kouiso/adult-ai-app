@@ -70,7 +70,23 @@ export function buildMessagesForApi(
   return [{ role: "system" as const, content: systemPrompt }, ...withReminders];
 }
 
-const ALL_FIRST_PERSONS = ["私", "僕", "俺", "あたし", "ワイ", "自分"] as const;
+// 品質ガード・リトライ指示の両方で使う一人称の完全リスト
+// ひらがな・カタカナ両方を含め、漏れによるドリフトを防ぐ
+export const ALL_FIRST_PERSONS = [
+  "私",
+  "僕",
+  "俺",
+  "あたし",
+  "ワイ",
+  "自分",
+  "わたし",
+  "ぼく",
+  "おれ",
+  "アタシ",
+  "ワタシ",
+  "ボク",
+  "オレ",
+] as const;
 
 /**
  * 品質ガードリトライ用のメッセージ配列を構築する。

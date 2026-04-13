@@ -15,7 +15,11 @@ import {
   streamChat,
   streamChatWithQualityGuard,
 } from "@/lib/api";
-import { buildMessagesForApi, extractFirstPerson } from "@/lib/chat-message-adapter";
+import {
+  ALL_FIRST_PERSONS,
+  buildMessagesForApi,
+  extractFirstPerson,
+} from "@/lib/chat-message-adapter";
 import { DEFAULT_SYSTEM_PROMPT } from "@/lib/config";
 import { parseSystemPrompt } from "@/lib/prompt-builder";
 import { detectScenePhase } from "@/lib/scene-phase";
@@ -367,6 +371,8 @@ export const ChatView = () => {
       const first = conversations[0];
       setConversationId(first.id);
       const nextMessages = await loadMessages(first.id);
+      // 非同期ロード中に別の会話が選択された場合はスキップ
+      if (useChatStore.getState().currentConversationId !== first.id) return first.id;
       setMessages(nextMessages);
       return first.id;
     }
@@ -404,6 +410,8 @@ export const ChatView = () => {
         setConversationId(listed[0].id);
         const nextMessages = await loadMessages(listed[0].id);
         if (!alive) return;
+        // 非同期ロード中に別の会話が選択された場合はスキップ
+        if (useChatStore.getState().currentConversationId !== listed[0].id) return;
         setMessages(nextMessages);
       } catch (error) {
         console.error("failed to bootstrap conversations", error);
@@ -431,6 +439,8 @@ export const ChatView = () => {
       setMobileDrawerOpen(false);
       try {
         const nextMessages = await loadMessages(conversationId);
+        // 非同期ロード中にユーザーが別の会話に切り替えた場合、古いメッセージで上書きしない
+        if (useChatStore.getState().currentConversationId !== conversationId) return;
         setMessages(nextMessages);
 
         // グリーティングを表示（まだメッセージがない会話のみ）
@@ -476,16 +486,22 @@ export const ChatView = () => {
     async (conversationId: string) => {
       try {
         await deleteConversationEntry(conversationId);
-        if (currentConversationId === conversationId) {
-          const remaining = conversations.filter((c) => c.id !== conversationId);
-          if (remaining.length > 0) {
-            setConversationId(remaining[0].id);
-            const nextMessages = await loadMessages(remaining[0].id);
-            setMessages(nextMessages);
-          } else {
-            setConversationId(null);
-            setMessages([]);
-          }
+        if (currentConversationId !== conversationId) {
+          toast.success("会話を削除しました");
+          return;
+        }
+        const remaining = conversations.filter((c) => c.id !== conversationId);
+        if (remaining.length === 0) {
+          setConversationId(null);
+          setMessages([]);
+          toast.success("会話を削除しました");
+          return;
+        }
+        setConversationId(remaining[0].id);
+        const nextMessages = await loadMessages(remaining[0].id);
+        // 非同期ロード中に別の会話が選択された場合はスキップ
+        if (useChatStore.getState().currentConversationId === remaining[0].id) {
+          setMessages(nextMessages);
         }
         toast.success("会話を削除しました");
       } catch (error) {
@@ -629,11 +645,10 @@ export const ChatView = () => {
           phase,
           prevAssistantResponse: prevAssistant,
           firstPerson: extractFirstPerson(currentSystemPrompt) ?? undefined,
-          // 一般的な一人称リスト（キャラの正規一人称は除外される）
+          // キャラの正規一人称以外すべてブロック（あたし漏れ等のドリフト防止）
           wrongFirstPersons: (() => {
             const fp = extractFirstPerson(currentSystemPrompt);
-            const all = ["私", "僕", "俺", "わたし", "ぼく", "おれ", "ワタシ", "ボク", "オレ"];
-            return fp ? all.filter((p) => p !== fp) : undefined;
+            return fp ? ALL_FIRST_PERSONS.filter((p) => p !== fp) : undefined;
           })(),
           prevInnerTexts,
         },
