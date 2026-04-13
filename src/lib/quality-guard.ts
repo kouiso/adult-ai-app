@@ -1,9 +1,8 @@
 // 品質ガード: LLMの確率的出力をコードで決定的に保証する
 // プロンプトは「お願い」、品質ガードは「保証」
 
-import { isXmlResponse, parseXmlResponse, stripXmlTags } from "./xml-response-parser";
-
-import type { ScenePhase } from "./scene-phase";
+import type { ScenePhase } from "@/lib/scene-phase";
+import { isXmlResponse, parseXmlResponse, stripXmlTags } from "@/lib/xml-response-parser";
 
 export interface QualityCheckContext {
   phase: ScenePhase;

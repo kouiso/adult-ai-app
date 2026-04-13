@@ -537,17 +537,10 @@ function sanitizeCharacterPromptForConversation(content: string): string {
   return result;
 }
 
-// phaseごとの感情弧パターン（静的RegExpで security/detect-non-literal-regexp 回避）
-const EMOTIONAL_ARC_PATTERNS: Record<ScenePhase, RegExp> = {
-  conversation: /^arc_conversation:\s*(.+)$/m,
-  intimate: /^arc_intimate:\s*(.+)$/m,
-  erotic: /^arc_erotic:\s*(.+)$/m,
-  climax: /^arc_climax:\s*(.+)$/m,
-};
-
 function extractEmotionalArc(systemContent: string | undefined, phase: ScenePhase): string {
   if (!systemContent) return "";
-  const arcMatch = systemContent.match(EMOTIONAL_ARC_PATTERNS[phase]);
+  const arcKey = `arc_${phase}` as const;
+  const arcMatch = systemContent.match(new RegExp(`^${arcKey}:\\s*(.+)$`, "m"));
   return arcMatch ? `\n[Character emotional state] ${arcMatch[1].trim()}` : "";
 }
 

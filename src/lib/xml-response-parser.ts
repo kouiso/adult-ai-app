@@ -15,18 +15,10 @@ export function isXmlResponse(text: string): boolean {
   return text.includes("<response>") && text.includes("</response>");
 }
 
-// XMLタグの中身を抽出（静的パターンで security/detect-non-literal-regexp 回避）
-const TAG_PATTERNS: Record<string, RegExp> = {
-  action: /<action>([\S\s]*?)<\/action>/,
-  dialogue: /<dialogue>([\S\s]*?)<\/dialogue>/,
-  inner: /<inner>([\S\s]*?)<\/inner>/,
-  narration: /<narration>([\S\s]*?)<\/narration>/,
-};
-
+// XMLタグの中身を抽出（最初のマッチのみ）
 function extractTag(text: string, tag: string): string {
-  const pattern = TAG_PATTERNS[tag];
-  if (!pattern) return "";
-  const match = text.match(pattern);
+  const re = new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`);
+  const match = text.match(re);
   return match ? match[1].trim() : "";
 }
 

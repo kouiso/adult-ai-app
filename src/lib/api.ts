@@ -313,7 +313,7 @@ async function executeQualityAttempt(
     if (fallbackApplied !== response) onChunk(fallbackApplied);
 
     const checkResult = runQualityChecks(fallbackApplied, qualityContext);
-    console.info(
+    console.log(
       `[quality-guard] attempt=${attempt} len=${fallbackApplied.length} phase=${qualityContext.phase} passed=${checkResult.passed} failed=${checkResult.failedCheck ?? "none"}`,
     );
 

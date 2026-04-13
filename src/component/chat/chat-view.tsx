@@ -951,7 +951,6 @@ export const ChatView = () => {
     updateMessageContentEntry,
     isOnline,
     setLoading,
-    currentConversation?.characterSystemPrompt,
   ]);
 
   const stableOnSelectConversation = useCallback(
