@@ -16,6 +16,20 @@ export interface CharacterCard {
 
 const CARD_MARKER = "【キャラカード】" as const;
 
+// YAML風 key: value の静的パターン（security/detect-non-literal-regexp 回避）
+const CARD_KEY_PATTERNS: Record<string, RegExp> = {
+  name: /^name:\s*(.+)$/m,
+  first_person: /^first_person:\s*(.+)$/m,
+  speech_endings: /^speech_endings:\s*(.+)$/m,
+  verbal_tics: /^verbal_tics:\s*(.+)$/m,
+  forbidden_words: /^forbidden_words:\s*(.+)$/m,
+  arc_conversation: /^arc_conversation:\s*(.+)$/m,
+  arc_intimate: /^arc_intimate:\s*(.+)$/m,
+  arc_erotic: /^arc_erotic:\s*(.+)$/m,
+  arc_climax: /^arc_climax:\s*(.+)$/m,
+  sensory_focus: /^sensory_focus:\s*(.+)$/m,
+};
+
 // systemPromptからキャラカードをパースする
 // YAML風のkey: value形式で埋め込まれたデータを抽出
 export function parseCharacterCard(systemPrompt: string): CharacterCard | null {
@@ -28,8 +42,9 @@ export function parseCharacterCard(systemPrompt: string): CharacterCard | null {
   const section = endIdx === -1 ? cardText : cardText.slice(0, endIdx);
 
   const getValue = (key: string): string => {
-    const re = new RegExp(`^${key}:\\s*(.+)$`, "m");
-    const match = section.match(re);
+    const pattern = CARD_KEY_PATTERNS[key];
+    if (!pattern) return "";
+    const match = section.match(pattern);
     return match ? match[1].trim() : "";
   };
 

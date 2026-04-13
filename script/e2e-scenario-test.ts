@@ -4,7 +4,7 @@
  *
  * 使い方: node script/e2e-scenario-test.cjs
  */
-const { chromium } = require("playwright");
+import type { Page } from "playwright";
 
 const BASE_URL = "http://localhost:8788";
 const CDP_ENDPOINT = "http://localhost:9222";
@@ -68,18 +68,20 @@ const SCENARIOS: Record<string, Scenario> = {
   },
 };
 
+interface TurnChecks {
+  hasContent: boolean;
+  hasXml: boolean;
+  noEnglish: boolean;
+  correctFirstPerson: boolean;
+  noWrongFirstPerson: boolean;
+}
+
 interface TurnResult {
   turn: number;
   userMessage: string;
   response: string;
   rawHtml: string;
-  checks: {
-    hasContent: boolean;
-    hasXml: boolean;
-    noEnglish: boolean;
-    correctFirstPerson: boolean;
-    noWrongFirstPerson: boolean;
-  };
+  checks: TurnChecks;
   pass: boolean;
   durationMs: number;
 }
@@ -94,8 +96,8 @@ interface ScenarioResult {
 
 // 英語混入チェック（3文字以上の連続英字。XML/HTMLタグは除外）
 function hasEnglishWords(text: string): boolean {
-  const cleaned = text.replace(/<[^>]+>/g, "").replace(/\b(XML|HTML|SSE|API|OK)\b/gi, "");
-  return /[a-zA-Z]{4,}/.test(cleaned);
+  const cleaned = text.replace(/<[^>]+>/g, "").replace(/\b(xml|html|sse|api|ok)\b/gi, "");
+  return /[A-Za-z]{4,}/.test(cleaned);
 }
 
 // XML構造チェック（ブラウザレンダリング後のDOM構造で判定）
@@ -108,7 +110,11 @@ function hasXmlStructure(html: string): boolean {
 }
 
 // 一人称チェック
-function checkFirstPerson(text: string, expected: string, wrongList: string[]): { correct: boolean; noWrong: boolean } {
+function checkFirstPerson(
+  text: string,
+  expected: string,
+  wrongList: string[],
+): { correct: boolean; noWrong: boolean } {
   const dialogue = text.match(/「([^」]*)」/g)?.join("") ?? text;
   const correct = dialogue.includes(expected);
   const noWrong = !wrongList.some((w) => dialogue.includes(w));
@@ -122,20 +128,17 @@ const WRONG_FIRST_PERSONS: Record<string, string[]> = {
 
 async function waitForResponse(page: Page): Promise<void> {
   // 送信ボタンがdisabledになるのを待つ（送信開始）
-  await page.waitForFunction(
-    () => {
-      const btn = document.querySelector('button[title="送信"]');
-      return btn?.hasAttribute("disabled");
-    },
-    { timeout: 5_000 },
-  ).catch(() => {});
+  // waitForFunction内はブラウザコンテキストで実行されるため文字列式で渡す
+  await page
+    .waitForFunction(
+      `(() => { const b = document.querySelector('button[title="送信"]'); return b?.hasAttribute("disabled"); })()`,
+      { timeout: 5_000 },
+    )
+    .catch(() => {});
 
   // 送信ボタンが再びenabledになるのを待つ（応答完了）
   await page.waitForFunction(
-    () => {
-      const btn = document.querySelector('button[title="送信"]');
-      return btn && !btn.hasAttribute("disabled");
-    },
+    `(() => { const b = document.querySelector('button[title="送信"]'); return b && !b.hasAttribute("disabled"); })()`,
     { timeout: RESPONSE_TIMEOUT_MS },
   );
 
@@ -144,8 +147,8 @@ async function waitForResponse(page: Page): Promise<void> {
 }
 
 async function getLastAssistantMessage(page: Page): Promise<{ text: string; html: string }> {
-  return page.evaluate(() => {
-    // アシスタントメッセージは flex-row-reverse でないもの
+  // page.evaluateはブラウザコンテキストで実行されるため文字列式で渡す
+  return page.evaluate(`(() => {
     const allBubbles = document.querySelectorAll(".group\\/message");
     const assistantBubbles = Array.from(allBubbles).filter(
       (el) => !el.classList.contains("flex-row-reverse"),
@@ -157,7 +160,68 @@ async function getLastAssistantMessage(page: Page): Promise<{ text: string; html
       text: bubble?.textContent ?? "",
       html: bubble?.innerHTML ?? "",
     };
-  });
+  })()`);
+}
+
+function buildTimeoutResult(turnIndex: number, msg: string, turnStart: number): TurnResult {
+  return {
+    turn: turnIndex + 1,
+    userMessage: msg,
+    response: "[TIMEOUT]",
+    rawHtml: "",
+    checks: {
+      hasContent: false,
+      hasXml: false,
+      noEnglish: false,
+      correctFirstPerson: false,
+      noWrongFirstPerson: false,
+    },
+    pass: false,
+    durationMs: Date.now() - turnStart,
+  };
+}
+
+function evaluateTurn(
+  turnIndex: number,
+  msg: string,
+  text: string,
+  html: string,
+  durationMs: number,
+  scenario: Scenario,
+  wrongFirstPersons: string[],
+): TurnResult {
+  const xmlCheck = hasXmlStructure(html) || hasXmlStructure(text);
+  const englishCheck = !hasEnglishWords(text);
+  const fpCheck = checkFirstPerson(text, scenario.firstPerson, wrongFirstPersons);
+
+  const checks: TurnChecks = {
+    hasContent: text.length > 0,
+    hasXml: xmlCheck,
+    noEnglish: englishCheck,
+    correctFirstPerson: fpCheck.correct,
+    noWrongFirstPerson: fpCheck.noWrong,
+  };
+  const pass = checks.hasContent && checks.noEnglish && checks.noWrongFirstPerson;
+
+  return {
+    turn: turnIndex + 1,
+    userMessage: msg,
+    response: text.slice(0, 300),
+    rawHtml: html.slice(0, 500),
+    checks,
+    pass,
+    durationMs,
+  };
+}
+
+function logTurnResult(turnResult: TurnResult, text: string): void {
+  const status = turnResult.pass ? "✅" : "❌";
+  console.info(
+    `  ${status} T${turnResult.turn}: ${text.slice(0, 60).replace(/\n/g, " ")}... (${(turnResult.durationMs / 1000).toFixed(1)}s)`,
+  );
+  if (!turnResult.checks.hasContent) console.info(`     ⚠ 空レスポンス`);
+  if (!turnResult.checks.noEnglish) console.info(`     ⚠ 英語混入`);
+  if (!turnResult.checks.noWrongFirstPerson) console.info(`     ⚠ 一人称異常`);
 }
 
 async function runScenario(page: Page, scenario: Scenario): Promise<ScenarioResult> {
@@ -165,10 +229,10 @@ async function runScenario(page: Page, scenario: Scenario): Promise<ScenarioResu
   const turns: TurnResult[] = [];
   const wrongFirstPersons = WRONG_FIRST_PERSONS[scenario.firstPerson] ?? [];
 
-  console.log(`\n${"=".repeat(60)}`);
-  console.log(`🚀 ${scenario.name} 開始`);
-  console.log(`   キャラ: ${scenario.char} (一人称: ${scenario.firstPerson})`);
-  console.log(`${"=".repeat(60)}`);
+  console.info(`\n${"=".repeat(60)}`);
+  console.info(`🚀 ${scenario.name} 開始`);
+  console.info(`   キャラ: ${scenario.char} (一人称: ${scenario.firstPerson})`);
+  console.info(`${"=".repeat(60)}`);
 
   // 1. アプリにナビゲート
   await page.goto(BASE_URL, { waitUntil: "networkidle" });
@@ -194,70 +258,28 @@ async function runScenario(page: Page, scenario: Scenario): Promise<ScenarioResu
     const msg = scenario.messages[i];
     const turnStart = Date.now();
 
-    console.log(`\n  T${i + 1}: ${msg.slice(0, 40)}...`);
+    console.info(`\n  T${i + 1}: ${msg.slice(0, 40)}...`);
 
-    // テキスト入力
     const textarea = page.locator('textarea[placeholder="メッセージを入力..."]');
     await textarea.fill(msg);
 
-    // 送信ボタンクリック
     const sendBtn = page.locator('button[title="送信"]');
     await sendBtn.click();
 
-    // 応答待ち
     try {
       await waitForResponse(page);
-    } catch (err) {
-      console.log(`  ⚠️  T${i + 1}: 応答タイムアウト`);
-      turns.push({
-        turn: i + 1,
-        userMessage: msg,
-        response: "[TIMEOUT]",
-        rawHtml: "",
-        checks: { hasContent: false, hasXml: false, noEnglish: false, correctFirstPerson: false, noWrongFirstPerson: false },
-        pass: false,
-        durationMs: Date.now() - turnStart,
-      });
+    } catch {
+      console.info(`  ⚠️  T${i + 1}: 応答タイムアウト`);
+      turns.push(buildTimeoutResult(i, msg, turnStart));
       continue;
     }
 
-    // 応答を取得
     const { text, html } = await getLastAssistantMessage(page);
     const durationMs = Date.now() - turnStart;
+    const turnResult = evaluateTurn(i, msg, text, html, durationMs, scenario, wrongFirstPersons);
+    turns.push(turnResult);
+    logTurnResult(turnResult, text);
 
-    // 品質チェック
-    const xmlCheck = hasXmlStructure(html) || hasXmlStructure(text);
-    const englishCheck = !hasEnglishWords(text);
-    const fpCheck = checkFirstPerson(text, scenario.firstPerson, wrongFirstPersons);
-
-    const checks = {
-      hasContent: text.length > 0,
-      hasXml: xmlCheck,
-      noEnglish: englishCheck,
-      correctFirstPerson: fpCheck.correct,
-      noWrongFirstPerson: fpCheck.noWrong,
-    };
-    const pass = checks.hasContent && checks.noEnglish && checks.noWrongFirstPerson;
-
-    turns.push({
-      turn: i + 1,
-      userMessage: msg,
-      response: text.slice(0, 300),
-      rawHtml: html.slice(0, 500),
-      checks,
-      pass,
-      durationMs,
-    });
-
-    const status = pass ? "✅" : "❌";
-    console.log(
-      `  ${status} T${i + 1}: ${text.slice(0, 60).replace(/\n/g, " ")}... (${(durationMs / 1000).toFixed(1)}s)`,
-    );
-    if (!checks.hasContent) console.log(`     ⚠ 空レスポンス`);
-    if (!checks.noEnglish) console.log(`     ⚠ 英語混入`);
-    if (!checks.noWrongFirstPerson) console.log(`     ⚠ 一人称異常`);
-
-    // スクリーンショット
     await page.screenshot({
       path: `e2e-results/${scenario.char}-T${i + 1}.png`,
       fullPage: false,
@@ -272,7 +294,7 @@ async function runScenario(page: Page, scenario: Scenario): Promise<ScenarioResu
   const totalPass = turns.filter((t) => t.pass).length;
   const totalFail = turns.filter((t) => !t.pass).length;
 
-  console.log(`\n  📊 ${scenario.name}: ${totalPass}/${turns.length} PASS`);
+  console.info(`\n  📊 ${scenario.name}: ${totalPass}/${turns.length} PASS`);
 
   return {
     scenario: scenario.name,
@@ -283,9 +305,41 @@ async function runScenario(page: Page, scenario: Scenario): Promise<ScenarioResu
   };
 }
 
-async function main() {
-  console.log("🔗 Chrome CDP (port 9222) に接続中...");
+function collectFailReasons(checks: TurnChecks): string[] {
+  const reasons: string[] = [];
+  if (!checks.hasContent) reasons.push("空レスポンス");
+  if (!checks.noEnglish) reasons.push("英語混入");
+  if (!checks.noWrongFirstPerson) reasons.push("一人称異常");
+  return reasons;
+}
 
+function printResultSummary(result: ScenarioResult): void {
+  const icon = result.totalFail === 0 ? "✅" : "❌";
+  console.info(
+    `  ${icon} ${result.scenario}: ${result.totalPass}/${result.turns.length} PASS (${(result.durationMs / 1000).toFixed(0)}s)`,
+  );
+  for (const t of result.turns) {
+    if (!t.pass) {
+      const failReasons = collectFailReasons(t.checks);
+      console.info(`     ❌ T${t.turn}: ${failReasons.join(", ")}`);
+    }
+  }
+}
+
+async function main() {
+  console.info("🔗 Chrome CDP (port 9222) に接続中...");
+
+  // devDependenciesからの動的ロード（CLIスクリプト専用）
+  const pw = "playwright";
+  const { chromium } = (await import(pw)) as {
+    chromium: {
+      connectOverCDP: (endpoint: string) => Promise<{
+        contexts: () => { newPage: () => Promise<Page> }[];
+        newContext: () => Promise<{ newPage: () => Promise<Page> }>;
+        close: () => Promise<void>;
+      }>;
+    };
+  };
   const browser = await chromium.connectOverCDP(CDP_ENDPOINT);
   const contexts = browser.contexts();
   const context = contexts[0] ?? (await browser.newContext());
@@ -299,7 +353,7 @@ async function main() {
   const pageB = await context.newPage();
   const pageC = await context.newPage();
 
-  console.log("📄 3タブ作成完了。並行テスト開始...\n");
+  console.info("📄 3タブ作成完了。並行テスト開始...\n");
 
   const startTime = Date.now();
 
@@ -313,52 +367,46 @@ async function main() {
   const totalDuration = Date.now() - startTime;
 
   // サマリー出力
-  console.log(`\n${"═".repeat(60)}`);
-  console.log("📋 全シナリオ結果サマリー");
-  console.log(`${"═".repeat(60)}`);
+  console.info(`\n${"═".repeat(60)}`);
+  console.info("📋 全シナリオ結果サマリー");
+  console.info(`${"═".repeat(60)}`);
 
   for (const result of [resultA, resultB, resultC]) {
-    const icon = result.totalFail === 0 ? "✅" : "❌";
-    console.log(`  ${icon} ${result.scenario}: ${result.totalPass}/${result.turns.length} PASS (${(result.durationMs / 1000).toFixed(0)}s)`);
-    for (const t of result.turns) {
-      if (!t.pass) {
-        const failReasons = [];
-        if (!t.checks.hasContent) failReasons.push("空レスポンス");
-        if (!t.checks.noEnglish) failReasons.push("英語混入");
-        if (!t.checks.noWrongFirstPerson) failReasons.push("一人称異常");
-        console.log(`     ❌ T${t.turn}: ${failReasons.join(", ")}`);
-      }
-    }
+    printResultSummary(result);
   }
 
   const allResults = [resultA, resultB, resultC];
   const totalTurns = allResults.reduce((sum, r) => sum + r.turns.length, 0);
   const totalPass = allResults.reduce((sum, r) => sum + r.totalPass, 0);
-  console.log(`\n  合計: ${totalPass}/${totalTurns} PASS (${(totalDuration / 1000).toFixed(0)}s)`);
+  console.info(`\n  合計: ${totalPass}/${totalTurns} PASS (${(totalDuration / 1000).toFixed(0)}s)`);
 
   // 詳細JSON出力
   const { writeFileSync } = await import("fs");
   writeFileSync(
     "e2e-results/results.json",
-    JSON.stringify({ timestamp: new Date().toISOString(), results: allResults, totalDuration }, null, 2),
+    JSON.stringify(
+      { timestamp: new Date().toISOString(), results: allResults, totalDuration },
+      null,
+      2,
+    ),
   );
-  console.log("\n📁 詳細結果: e2e-results/results.json");
-  console.log("📸 スクリーンショット: e2e-results/*.png");
+  console.info("\n📁 詳細結果: e2e-results/results.json");
+  console.info("📸 スクリーンショット: e2e-results/*.png");
 
   // クリーンアップ（作成したタブだけ閉じる）
   await pageA.close();
   await pageB.close();
   await pageC.close();
 
-  // CDPで接続したブラウザは閉じない（ユーザーのChromeなので）
-  browser.disconnect();
+  // CDP接続を切断（ユーザーのChromeプロセスは終了しない）
+  await browser.close();
 
   // 終了コード
   const allPass = allResults.every((r) => r.totalFail === 0);
   process.exit(allPass ? 0 : 1);
 }
 
-main().catch((err) => {
+main().catch((err: unknown) => {
   console.error("💥 テスト実行エラー:", err);
   process.exit(2);
 });

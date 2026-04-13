@@ -127,27 +127,57 @@ async function initTask(prompt: string): Promise<string> {
     }),
   });
   if (!res.ok) throw new Error(`Novita init failed: ${res.status} ${await res.text()}`);
-  const data: { task_id: string } = await res.json();
-  return data.task_id;
+  const json: unknown = await res.json();
+  // Novita APIは必ずtask_idを返すが、ランタイム検証する
+  if (
+    typeof json !== "object" ||
+    json === null ||
+    !("task_id" in json) ||
+    typeof json.task_id !== "string"
+  ) {
+    throw new Error("Novita init: task_id not found in response");
+  }
+  return json.task_id;
+}
+
+// ポーリング1回分の結果: 画像URL取得成功 / まだ処理中 / 失敗
+type PollResult = { done: true; imageUrl: string } | { done: false };
+
+// Novita APIのタスク結果レスポンス型
+interface NovitaTaskResult {
+  task?: { status: string };
+  images?: { image_url?: string }[];
+}
+
+// unknown JSONをNovitaTaskResult互換として安全に扱うガード
+function isNovitaTaskResult(v: unknown): v is NovitaTaskResult {
+  return typeof v === "object" && v !== null;
+}
+
+async function checkTaskResult(taskId: string): Promise<PollResult> {
+  const res = await fetch(
+    `https://api.novita.ai/v3/async/task-result?task_id=${encodeURIComponent(taskId)}`,
+    { headers: { Authorization: `Bearer ${NOVITA_API_KEY}` } },
+  );
+  if (!res.ok) throw new Error(`Novita poll failed: ${res.status}`);
+  const raw: unknown = await res.json();
+  if (!isNovitaTaskResult(raw)) throw new Error("Novita poll: unexpected response shape");
+  if (raw.task?.status === "TASK_STATUS_SUCCEED") {
+    const imageUrl = raw.images?.[0]?.image_url;
+    if (!imageUrl) throw new Error("No image URL in response");
+    return { done: true, imageUrl };
+  }
+  if (raw.task?.status === "TASK_STATUS_FAILED") {
+    throw new Error(`Task failed: ${JSON.stringify(raw.task)}`);
+  }
+  return { done: false };
 }
 
 async function pollTask(taskId: string, maxAttempts = 60): Promise<string> {
   for (let i = 0; i < maxAttempts; i++) {
     await new Promise((r) => setTimeout(r, 3000));
-    const res = await fetch(
-      `https://api.novita.ai/v3/async/task-result?task_id=${encodeURIComponent(taskId)}`,
-      { headers: { Authorization: `Bearer ${NOVITA_API_KEY}` } },
-    );
-    if (!res.ok) throw new Error(`Novita poll failed: ${res.status}`);
-    const data = await res.json();
-    if (data.task?.status === "TASK_STATUS_SUCCEED") {
-      const imageUrl = data.images?.[0]?.image_url;
-      if (!imageUrl) throw new Error("No image URL in response");
-      return imageUrl;
-    }
-    if (data.task?.status === "TASK_STATUS_FAILED") {
-      throw new Error(`Task failed: ${JSON.stringify(data.task)}`);
-    }
+    const result = await checkTaskResult(taskId);
+    if (result.done) return result.imageUrl;
     process.stdout.write(".");
   }
   throw new Error(`Task ${taskId} timed out after ${maxAttempts * 3}s`);
@@ -162,24 +192,24 @@ async function downloadImage(url: string, destPath: string): Promise<void> {
 
 async function main() {
   const entries = Object.entries(CHARACTER_PROMPTS);
-  console.log(`\n🎨 Generating ${entries.length} character avatars...\n`);
+  console.info(`\n🎨 Generating ${entries.length} character avatars...\n`);
 
   // 既に生成済みのキャラはスキップ
   const pending = entries.filter(([id]) => {
     const path = join(AVATARS_DIR, `${id}.jpg`);
     if (existsSync(path)) {
-      console.log(`⏭  ${id} — already exists, skipping`);
+      console.info(`⏭  ${id} — already exists, skipping`);
       return false;
     }
     return true;
   });
 
   if (pending.length === 0) {
-    console.log("\n✅ All avatars already generated!");
+    console.info("\n✅ All avatars already generated!");
     return;
   }
 
-  console.log(`\n📦 ${pending.length} avatars to generate\n`);
+  console.info(`\n📦 ${pending.length} avatars to generate\n`);
 
   // Novita APIのレート制限を考慮して3並列で処理
   const CONCURRENCY = 3;
@@ -194,7 +224,7 @@ async function main() {
           const imageUrl = await pollTask(taskId);
           const destPath = join(AVATARS_DIR, `${id}.jpg`);
           await downloadImage(imageUrl, destPath);
-          console.log(`\n✅ ${id}: saved to ${destPath}`);
+          console.info(`\n✅ ${id}: saved to ${destPath}`);
         } catch (error) {
           console.error(`\n❌ ${id}: ${error instanceof Error ? error.message : error}`);
         }
@@ -202,9 +232,9 @@ async function main() {
     );
   }
 
-  console.log("\n🎉 Avatar generation complete!");
-  console.log("Next steps:");
-  console.log("  1. Run: pnpm db:seed:reset  (avatars will be linked automatically)");
+  console.info("\n🎉 Avatar generation complete!");
+  console.info("Next steps:");
+  console.info("  1. Run: pnpm db:seed:reset  (avatars will be linked automatically)");
 }
 
 main().catch(console.error);
