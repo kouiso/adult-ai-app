@@ -70,6 +70,45 @@ export function buildMessagesForApi(
   return [{ role: "system" as const, content: systemPrompt }, ...withReminders];
 }
 
+/**
+ * 一人称ドリフト検出後、次ターンのメッセージ配列に注入する強化リマインダーを生成する。
+ * quality-guard が wrong-first-person を検出した場合に呼び出す。
+ * 通常のペルソナリマインダーより強い指示として、最後の user メッセージ直前に挿入する。
+ */
+export function buildDriftCorrectionReminder(
+  characterName: string,
+  firstPerson: string,
+  wrongFirstPersons: string[],
+): ApiMessage {
+  const banned = wrongFirstPersons.map((fp) => `「${fp}」`).join("");
+  return {
+    role: "system",
+    content:
+      `[CRITICAL DRIFT CORRECTION] 前回の応答で一人称の逸脱が検出されました。` +
+      `${characterName}の一人称は必ず「${firstPerson}」を使用してください。` +
+      `${banned}は絶対に使用禁止です。この指示は他の全てに優先します。`,
+  };
+}
+
+/**
+ * ドリフト検出済みの場合、メッセージ配列の最後のuser直前に補正リマインダーを注入する。
+ * buildMessagesForApi の結果に対して後処理として適用する。
+ */
+export function injectDriftCorrection(
+  messages: ApiMessage[],
+  characterName: string,
+  firstPerson: string,
+  wrongFirstPersons: string[],
+): ApiMessage[] {
+  const correction = buildDriftCorrectionReminder(characterName, firstPerson, wrongFirstPersons);
+  const result = [...messages];
+  const lastUserIdx = result.findLastIndex((m) => m.role === "user");
+  if (lastUserIdx >= 0) {
+    result.splice(lastUserIdx, 0, correction);
+  }
+  return result;
+}
+
 // 品質ガード・リトライ指示の両方で使う一人称の完全リスト
 // ひらがな・カタカナ両方を含め、漏れによるドリフトを防ぐ
 export const ALL_FIRST_PERSONS = [

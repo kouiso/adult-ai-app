@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { checkWrongFirstPerson } from "./quality-guard";
+import { checkWrongFirstPerson, runQualityChecks } from "./quality-guard";
 
 // 「自分」を含む wrongFirstPersons リスト（実運用と同じ構成）
 const WRONG_FPS_WITH_JIBUN = ["俺", "僕", "私", "自分"];
@@ -74,5 +74,92 @@ describe("checkWrongFirstPerson", () => {
     it("空配列 → 常にパス", () => {
       expect(checkWrongFirstPerson("俺がやる", [])).toBe(true);
     });
+  });
+});
+
+describe("runQualityChecks", () => {
+  const validXml =
+    "<response><action>*微笑みながら手を伸ばし、そっと頬に触れる*</action><dialogue>「こんにちは、どうしたの？今日はとても素敵な一日だね。あなたのことがずっと気になっていたの。一緒にいると本当に落ち着く」</dialogue><inner>少し気になる。この人のことをもっと知りたい。胸がどきどきして止まらない</inner></response>";
+
+  it("正常なXML応答はpassする", () => {
+    const result = runQualityChecks(validXml, { phase: "intimate" });
+    expect(result.passed).toBe(true);
+  });
+
+  it("XMLフォーマットがない場合はfail", () => {
+    const result = runQualityChecks("普通のテキスト応答です。短いけど", {
+      phase: "conversation",
+    });
+    expect(result.passed).toBe(false);
+    expect(result.failedCheck).toBe("xml-format-missing");
+  });
+
+  it("英語3文字以上を検出する", () => {
+    const xml = "<response><dialogue>「Hello there, nice to meet you」</dialogue></response>";
+    const result = runQualityChecks(xml, { phase: "conversation" });
+    expect(result.passed).toBe(false);
+    expect(result.failedCheck).toBe("no-english");
+  });
+
+  it("「ユーザー」漏れを検出する", () => {
+    const xml = "<response><dialogue>「ユーザーさん、こんにちは」</dialogue></response>";
+    const result = runQualityChecks(xml, { phase: "conversation" });
+    expect(result.passed).toBe(false);
+    expect(result.failedCheck).toBe("user-leak");
+  });
+
+  it("シーンフェーズで最低文字数を検証する", () => {
+    const shortXml = "<response><dialogue>「あ」</dialogue><inner>ドキドキ</inner></response>";
+    const result = runQualityChecks(shortXml, { phase: "erotic" });
+    expect(result.passed).toBe(false);
+    expect(result.failedCheck).toBe("scene-min-length");
+  });
+
+  it("conversationフェーズは最低文字数をスキップ", () => {
+    const shortXml = "<response><dialogue>「うん」</dialogue></response>";
+    const result = runQualityChecks(shortXml, { phase: "conversation" });
+    expect(result.passed).toBe(true);
+  });
+
+  it("禁止一人称を検出する", () => {
+    const xml = "<response><dialogue>「俺はここにいるよ」</dialogue></response>";
+    const result = runQualityChecks(xml, {
+      phase: "conversation",
+      wrongFirstPersons: ["俺", "僕"],
+    });
+    expect(result.passed).toBe(false);
+    expect(result.failedCheck).toBe("wrong-first-person");
+  });
+
+  it("異常に長い応答を検出する", () => {
+    // 5文字以上の同一部分列が3回出現しないようにする
+    // 各文字位置をユニークにするため、連番をそのまま日本語文字列化
+    const base = "零一二三四五六七八九十百千万億兆京垓秭穣溝澗正載極恒阿僧祇那由他不可思議無量大数";
+    let longText = "";
+    for (let i = 0; longText.length < 1300; i++) {
+      longText += base[i % base.length] + String(i);
+    }
+    const xml = `<response><dialogue>${longText}</dialogue></response>`;
+    const result = runQualityChecks(xml, { phase: "conversation" });
+    expect(result.passed).toBe(false);
+    expect(result.failedCheck).toBe("max-length-exceeded");
+  });
+
+  it("ターン内繰り返しを検出する", () => {
+    const repeated = "今日はとても素敵な一日ですね。";
+    const xml = `<response><dialogue>${repeated}${repeated}${repeated}${repeated}</dialogue></response>`;
+    const result = runQualityChecks(xml, { phase: "conversation" });
+    expect(result.passed).toBe(false);
+    expect(result.failedCheck).toBe("within-turn-repetition");
+  });
+
+  it("intimateフェーズで<inner>なしはfail", () => {
+    // scene-min-lengthをパスするために plainText が80文字以上必要
+    const longDialogue =
+      "「ねえ、こっち向いて。今日はずっと一緒にいたいな。あなたの隣にいるとすごく安心するんだ。もっと近くに来てほしいの。あなたの温もりを感じたい」";
+    const xml = `<response><action>*そっと手を伸ばし、相手の頬に指先を当てる*</action><dialogue>${longDialogue}</dialogue></response>`;
+    const result = runQualityChecks(xml, { phase: "intimate" });
+    expect(result.passed).toBe(false);
+    expect(result.failedCheck).toBe("inner-missing");
   });
 });

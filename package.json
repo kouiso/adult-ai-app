@@ -17,7 +17,9 @@
     "db:migrate:local": "wrangler d1 migrations apply adult-ai-db --local",
     "db:migrate:remote": "wrangler d1 migrations apply adult-ai-db --remote",
     "db:seed": "tsx scripts/seed.ts",
-    "db:seed:reset": "tsx scripts/seed.ts --reset"
+    "db:seed:reset": "tsx scripts/seed.ts --reset",
+    "e2e": "tsx script/test-xml-quality.ts A 3 && tsx script/test-xml-quality.ts B 3 && tsx script/test-xml-quality.ts C 3",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@ai-sdk/openai": "^3.0.47",
@@ -61,6 +63,7 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
+    "@vitest/coverage-v8": "^4.1.4",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9.39.4",
     "eslint-config-prettier": "^10.1.8",
