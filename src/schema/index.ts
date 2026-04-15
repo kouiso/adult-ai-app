@@ -7,4 +7,5 @@ export {
   messageRelations,
   userRelations,
 } from "./relation";
+export { usageLogTable } from "./usage-log";
 export { userTable } from "./user";

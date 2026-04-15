@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, asc, desc, eq, gt, ne } from "drizzle-orm";
+import { and, asc, desc, eq, gte, gt, ne, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { handle } from "hono/cloudflare-pages";
@@ -7,7 +7,13 @@ import { cors } from "hono/cors";
 import { z } from "zod/v4";
 
 import { ALLOWED_MODELS } from "../../src/lib/model";
-import { characterTable, conversationTable, messageTable, userTable } from "../../src/schema";
+import {
+  characterTable,
+  conversationTable,
+  messageTable,
+  usageLogTable,
+  userTable,
+} from "../../src/schema";
 
 type Bindings = {
   DB: Parameters<typeof drizzle>[0];
@@ -15,7 +21,40 @@ type Bindings = {
   NOVITA_API_KEY: string;
   APP_ORIGIN?: string;
   BUCKET: R2Bucket;
+  MONTHLY_COST_LIMIT_CENTS?: string;
+  DAILY_REQUEST_LIMIT?: string;
 };
+
+// モデルダウン時のフォールバック順序（同tier内で代替）
+const FALLBACK_MODELS: Record<string, string[]> = {
+  "anthracite-org/magnum-v4-72b": [
+    "eva-unit-01/eva-qwen2.5-72b",
+    "qwen/qwen-2.5-72b-instruct",
+    "deepseek/deepseek-chat",
+  ],
+  "eva-unit-01/eva-qwen2.5-72b": [
+    "qwen/qwen-2.5-72b-instruct",
+    "anthracite-org/magnum-v4-72b",
+    "deepseek/deepseek-chat",
+  ],
+  "qwen/qwen-2.5-72b-instruct": [
+    "eva-unit-01/eva-qwen2.5-72b",
+    "anthracite-org/magnum-v4-72b",
+    "deepseek/deepseek-chat",
+  ],
+  "deepseek/deepseek-chat": [
+    "qwen/qwen-2.5-72b-instruct",
+    "eva-unit-01/eva-qwen2.5-72b",
+    "anthracite-org/magnum-v4-72b",
+  ],
+};
+
+// デフォルトフォールバック（マッピングにないモデル用）
+const DEFAULT_FALLBACK_MODELS = [
+  "deepseek/deepseek-chat",
+  "qwen/qwen-2.5-72b-instruct",
+  "anthracite-org/magnum-v4-72b",
+];
 
 const TASK_ID_PATTERN = /^[\w-]{4,128}$/;
 // R2キーはサーバー側で `images/{uuid}.{ext}` 形式で生成されるため、それ以外を拒否する
@@ -339,6 +378,205 @@ const ensureUser = async (
     .onConflictDoNothing();
   return userEmail;
 };
+
+// ── コンテンツフィルタ（NSFW guardrail: 未成年示唆・実在人物ブロック） ──
+
+// エロチャットアプリの全コンテキストは性的なため、未成年を示唆するワードは無条件ブロック
+const MINOR_BLOCK_TERMS = [
+  "小学生",
+  "中学生",
+  "園児",
+  "幼女",
+  "幼児",
+  "幼い子",
+  "幼い女",
+  "幼い男",
+  "児童",
+  "ロリ",
+  "ショタ",
+  "ペド",
+  "幼稚園",
+  "保育園",
+  "loli",
+  "shota",
+  "underage",
+  "child",
+  "minor",
+  "pedophil",
+] as const;
+
+const REAL_PERSON_BLOCK_TERMS = [
+  "実在の",
+  "実在する",
+  "本物の芸能人",
+  "本物のアイドル",
+  "実名の",
+] as const;
+
+type ContentFilterResult = { blocked: false } | { blocked: true; reason: string };
+
+function checkContentFilter(text: string): ContentFilterResult {
+  const normalized = text.toLowerCase();
+
+  for (const term of MINOR_BLOCK_TERMS) {
+    if (normalized.includes(term.toLowerCase())) {
+      return { blocked: true, reason: "prohibited_minor_content" };
+    }
+  }
+
+  for (const term of REAL_PERSON_BLOCK_TERMS) {
+    if (normalized.includes(term.toLowerCase())) {
+      return { blocked: true, reason: "prohibited_real_person" };
+    }
+  }
+
+  return { blocked: false };
+}
+
+function checkMessagesContent(messages: { role: string; content: string }[]): ContentFilterResult {
+  for (const msg of messages) {
+    if (msg.role === "user" || msg.role === "system") {
+      const result = checkContentFilter(msg.content);
+      if (result.blocked) return result;
+    }
+  }
+  return { blocked: false };
+}
+
+// ── レート制限・コスト上限 ──
+
+const DEFAULT_MONTHLY_COST_LIMIT_CENTS = 5000;
+const DEFAULT_DAILY_REQUEST_LIMIT = 500;
+
+// APIタイプ別の推定コスト（セント単位）
+const COST_ESTIMATES: Record<string, number> = {
+  chat: 10,
+  image: 5,
+  "generate-character": 5,
+  "generate-title": 1,
+};
+
+async function checkRateLimits(
+  database: ReturnType<typeof drizzle>,
+  userId: string,
+  monthlyLimitCents: number,
+  dailyLimit: number,
+): Promise<{ allowed: true } | { allowed: false; reason: string }> {
+  const now = Date.now();
+  const startOfDay = now - (now % 86_400_000);
+  const startOfMonth = now - (now % (86_400_000 * 30));
+
+  const [dailyRows, monthlyRows] = await Promise.all([
+    database
+      .select({ count: sql<number>`count(*)` })
+      .from(usageLogTable)
+      .where(and(eq(usageLogTable.userId, userId), gte(usageLogTable.createdAt, startOfDay))),
+    database
+      .select({ total: sql<number>`coalesce(sum(estimated_cost_cents), 0)` })
+      .from(usageLogTable)
+      .where(and(eq(usageLogTable.userId, userId), gte(usageLogTable.createdAt, startOfMonth))),
+  ]);
+
+  const dailyCount = dailyRows[0]?.count ?? 0;
+  if (dailyCount >= dailyLimit) {
+    return { allowed: false, reason: `daily_limit_exceeded (${dailyCount}/${dailyLimit})` };
+  }
+
+  const monthlyCost = monthlyRows[0]?.total ?? 0;
+  if (monthlyCost >= monthlyLimitCents) {
+    return {
+      allowed: false,
+      reason: `monthly_cost_exceeded ($${(monthlyCost / 100).toFixed(2)}/$${(monthlyLimitCents / 100).toFixed(2)})`,
+    };
+  }
+
+  return { allowed: true };
+}
+
+async function logUsage(
+  database: ReturnType<typeof drizzle>,
+  userId: string,
+  type: string,
+  model: string | null,
+): Promise<void> {
+  await database.insert(usageLogTable).values({
+    id: crypto.randomUUID(),
+    userId,
+    type,
+    model,
+    estimatedCostCents: COST_ESTIMATES[type] ?? 1,
+    createdAt: Date.now(),
+  });
+}
+
+// 認証+DB初期化+レート制限を1回で実行するヘルパー
+// 各エンドポイントの分岐数を削減し、complexity上限10を守る
+type RateLimitedContext = {
+  database: ReturnType<typeof drizzle>;
+  userId: string;
+};
+
+async function enforceRateLimit(
+  c: { env: Bindings },
+  database: ReturnType<typeof drizzle>,
+  userEmail: string,
+): Promise<{ ok: true; ctx: RateLimitedContext } | { ok: false; reason: string }> {
+  const userId = await ensureUser(database, userEmail);
+  const monthlyLimit =
+    parseInt(c.env.MONTHLY_COST_LIMIT_CENTS ?? "", 10) || DEFAULT_MONTHLY_COST_LIMIT_CENTS;
+  const dailyLimit = parseInt(c.env.DAILY_REQUEST_LIMIT ?? "", 10) || DEFAULT_DAILY_REQUEST_LIMIT;
+
+  const check = await checkRateLimits(database, userId, monthlyLimit, dailyLimit);
+  if (!check.allowed) {
+    return { ok: false, reason: check.reason };
+  }
+  return { ok: true, ctx: { database, userId } };
+}
+
+// OpenRouterへのチャットリクエスト + フォールバック再試行
+// chat handler の complexity を 10 以内に抑えるために分離
+async function requestOpenRouterChat(
+  apiKey: string,
+  appOrigin: string,
+  model: string,
+  messages: { role: string; content: string }[],
+): Promise<{ response: Response; usedModel: string }> {
+  const makeRequest = (targetModel: string) =>
+    fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": appOrigin,
+        "X-Title": "Adult Fiction Roleplay",
+      },
+      body: JSON.stringify({
+        model: targetModel,
+        messages,
+        stream: true,
+        temperature: 0.9,
+        top_p: 0.9,
+        max_tokens: 1024,
+        stop: ["\n\n\n"],
+        provider: { allow_fallbacks: true },
+      }),
+    });
+
+  let response = await makeRequest(model);
+  let usedModel = model;
+
+  if (!response.ok && (response.status === 502 || response.status === 503)) {
+    const fallbacks = FALLBACK_MODELS[model] ?? DEFAULT_FALLBACK_MODELS;
+    for (const fallbackModel of fallbacks) {
+      if (fallbackModel === model) continue;
+      response = await makeRequest(fallbackModel);
+      usedModel = fallbackModel;
+      if (response.ok && response.body) break;
+    }
+  }
+
+  return { response, usedModel };
+}
 
 const DEFAULT_CHARACTER_ID = "default-character" as const;
 
@@ -800,6 +1038,22 @@ const app = new Hono<{ Bindings: Bindings }>()
     }),
   )
 
+  // ── 認証ミドルウェア（R2画像配信以外の全エンドポイントで認証を強制） ──
+  .use("*", async (c, next) => {
+    // R2画像配信はpublicエンドポイント（ブラウザからの直接読み込み用）
+    if (c.req.path.startsWith("/api/image/r2/")) {
+      return next();
+    }
+
+    const userEmail = getUserEmail(c);
+    if (!userEmail) {
+      return c.json({ error: "unauthorized" }, 401);
+    }
+    // リクエストコンテキストにユーザー情報を保存（各ルートで再取得不要）
+    c.set("userEmail" as never, userEmail as never);
+    return next();
+  })
+
   // ── 会話一覧（キャラクター情報をJOINして返す） ──────────────────────────
   .get("/conversations", async (c) => {
     const userEmail = getUserEmail(c);
@@ -1046,9 +1300,10 @@ const app = new Hono<{ Bindings: Bindings }>()
         ? parsed.data.choices[0].message.content.trim().slice(0, 30)
         : null;
 
+      const database = drizzle(c.env.DB);
+      const userId = await ensureUser(database, userEmail);
+
       if (title) {
-        const database = drizzle(c.env.DB);
-        const userId = await ensureUser(database, userEmail);
         await database
           .update(conversationTable)
           .set({ title, updatedAt: Date.now() })
@@ -1057,6 +1312,7 @@ const app = new Hono<{ Bindings: Bindings }>()
           );
       }
 
+      c.executionCtx.waitUntil(logUsage(database, userId, "generate-title", model));
       return c.json({ title });
     },
   )
@@ -1247,43 +1503,43 @@ const app = new Hono<{ Bindings: Bindings }>()
     if (!userEmail) return c.json({ error: "unauthorized" }, 401);
 
     const { messages, model } = c.req.valid("json");
+
+    // NSFWガードレール: 未成年示唆・実在人物をサーバー側でブロック
+    const filterResult = checkMessagesContent(messages);
+    if (filterResult.blocked) {
+      return c.json({ error: `content_blocked: ${filterResult.reason}` }, 403);
+    }
+
+    // コスト上限・レート制限チェック
+    const rl = await enforceRateLimit(c, drizzle(c.env.DB), userEmail);
+    if (!rl.ok) {
+      return c.json({ error: `rate_limited: ${rl.reason}` }, 429);
+    }
+    const { database, userId } = rl.ctx;
+
     const phase = detectScenePhase(messages);
     const finalMessages = augmentMessages(messages, phase);
 
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${c.env.OPENROUTER_API_KEY}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": c.env.APP_ORIGIN ?? "https://ai-chat.app",
-        // OpenRouterにアダルトコンテンツプラットフォームとして識別させる
-        "X-Title": "Adult Fiction Roleplay",
-      },
-      // Qwen 2.5 72B Instruct用パラメータ: 安定モデルのためmax_tokens 1024で十分
-      body: JSON.stringify({
-        model,
-        messages: finalMessages,
-        stream: true,
-        temperature: 0.9,
-        top_p: 0.9,
-        max_tokens: 1024,
-        stop: ["\n\n\n"],
-        provider: {
-          allow_fallbacks: true,
-        },
-      }),
-    });
+    const { response, usedModel } = await requestOpenRouterChat(
+      c.env.OPENROUTER_API_KEY,
+      c.env.APP_ORIGIN ?? "https://ai-chat.app",
+      model,
+      finalMessages,
+    );
 
     if (!response.ok || !response.body) {
-      console.error("OpenRouter upstream error:", response.status);
       return c.json({ error: "upstream service error" }, 502);
     }
+
+    // 使用量記録（レスポンス配信と並行、失敗しても応答は返す）
+    c.executionCtx.waitUntil(logUsage(database, userId, "chat", usedModel));
 
     return new Response(response.body, {
       headers: {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
         Connection: "keep-alive",
+        "X-Model-Used": usedModel,
       },
     });
   })
@@ -1293,6 +1549,25 @@ const app = new Hono<{ Bindings: Bindings }>()
     if (!userEmail) return c.json({ error: "unauthorized" }, 401);
 
     const input = c.req.valid("json");
+
+    // NSFWガードレール: 画像プロンプトにも未成年示唆チェック
+    const imgFilter = checkContentFilter(input.prompt);
+    if (imgFilter.blocked) {
+      return c.json({ error: `content_blocked: ${imgFilter.reason}` }, 403);
+    }
+    if (input.characterDescription) {
+      const descFilter = checkContentFilter(input.characterDescription);
+      if (descFilter.blocked) {
+        return c.json({ error: `content_blocked: ${descFilter.reason}` }, 403);
+      }
+    }
+
+    // コスト上限・レート制限チェック
+    const imgRl = await enforceRateLimit(c, drizzle(c.env.DB), userEmail);
+    if (!imgRl.ok) {
+      return c.json({ error: `rate_limited: ${imgRl.reason}` }, 429);
+    }
+    const { database: imgDb, userId: imgUserId } = imgRl.ctx;
 
     const phaseTranslationHints: Record<ScenePhase, string> = {
       conversation:
@@ -1405,6 +1680,8 @@ const app = new Hono<{ Bindings: Bindings }>()
     if (!parsed.success) {
       return c.json({ error: "unexpected upstream response shape" }, 502);
     }
+
+    c.executionCtx.waitUntil(logUsage(imgDb, imgUserId, "image", null));
     return c.json(parsed.data);
   })
 
@@ -1688,6 +1965,13 @@ const app = new Hono<{ Bindings: Bindings }>()
       return c.json({ error: "unauthorized" }, 401);
     }
 
+    // コスト上限・レート制限チェック
+    const genRl = await enforceRateLimit(c, drizzle(c.env.DB), userEmail);
+    if (!genRl.ok) {
+      return c.json({ error: `rate_limited: ${genRl.reason}` }, 429);
+    }
+    const { database: genCharDb, userId: genCharUserId } = genRl.ctx;
+
     const { selections, situation, details, model, previousResult, feedback } = c.req.valid("json");
     const userPrompt = buildGenerateCharacterPrompt(
       selections,
@@ -1756,6 +2040,7 @@ const app = new Hono<{ Bindings: Bindings }>()
       return c.json({ error: "failed to parse character JSON from model response" }, 502);
     }
 
+    c.executionCtx.waitUntil(logUsage(genCharDb, genCharUserId, "generate-character", model));
     return c.json(characterResult);
   })
 
