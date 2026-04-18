@@ -6,7 +6,7 @@
 //   turns: number of turns to test — default: 3
 
 import { buildMessagesForApi, buildRetryMessages } from "../src/lib/chat-message-adapter";
-import { runQualityChecks, MAX_QUALITY_RETRIES } from "../src/lib/quality-guard";
+import { getMaxQualityRetries, runQualityChecks } from "../src/lib/quality-guard";
 import { detectScenePhase } from "../src/lib/scene-phase";
 import { isXmlResponse, parseXmlResponse, stripXmlTags } from "../src/lib/xml-response-parser";
 
@@ -78,9 +78,11 @@ function parseSseLine(line: string): string | null {
   if (data === "[DONE]") return null;
   try {
     const parsed = JSON.parse(data);
-    return (parsed.choices?.[0]?.delta?.content as string) ?? null;
-  } catch {
+    const content = parsed.choices?.[0]?.delta?.content;
+    return typeof content === "string" ? content : null;
+  } catch (error) {
     // SSEパース失敗は無視（不完全なチャンクの可能性）
+    console.error("failed to parse SSE line", error);
     return null;
   }
 }
@@ -158,8 +160,9 @@ async function runRetryLoop(
   let qualityResult: QualityCheckResult = { passed: false, failedCheck: "not-tested" };
   let totalElapsed = 0;
   let currentMessages: ApiMessage[] = apiMessages;
+  const maxRetries = getMaxQualityRetries(phase);
 
-  while (attempt <= MAX_QUALITY_RETRIES) {
+  while (attempt <= maxRetries) {
     const startTime = Date.now();
     const res = await fetch(`${BASE_URL}/api/chat`, {
       method: "POST",
@@ -183,7 +186,7 @@ async function runRetryLoop(
       prevInnerTexts,
     });
 
-    if (qualityResult.passed || attempt >= MAX_QUALITY_RETRIES) break;
+    if (qualityResult.passed || attempt >= maxRetries) break;
 
     // リトライ: アダプター経由で統一されたリトライメッセージを構築
     console.info(`  retry ${attempt + 1}: ${qualityResult.failedCheck}`);

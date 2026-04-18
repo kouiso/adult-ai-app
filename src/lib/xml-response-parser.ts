@@ -7,6 +7,7 @@ export interface StructuredResponse {
   dialogue: string;
   inner: string;
   narration: string;
+  remember: string[];
   raw: string;
 }
 
@@ -22,6 +23,7 @@ const TAG_PATTERNS: Record<string, RegExp> = {
   inner: /<inner>([\S\s]*?)<\/inner>/,
   narration: /<narration>([\S\s]*?)<\/narration>/,
 };
+const REMEMBER_PATTERN = /<remember>([\S\s]*?)<\/remember>/g;
 
 function extractTag(text: string, tag: string): string {
   const pattern = TAG_PATTERNS[tag];
@@ -30,25 +32,36 @@ function extractTag(text: string, tag: string): string {
   return match ? match[1].trim() : "";
 }
 
+function extractRememberTags(text: string): string[] {
+  return [...text.matchAll(REMEMBER_PATTERN)]
+    .map((match) => match[1]?.trim() ?? "")
+    .filter((note) => note.length > 0);
+}
+
+export function stripRememberTags(text: string): string {
+  return text.replace(REMEMBER_PATTERN, "").trim();
+}
+
 // シーンフェーズ用: action + dialogue + inner の完全XML
 export function parseXmlResponse(text: string): StructuredResponse | null {
   if (!isXmlResponse(text)) return null;
 
   const action = extractTag(text, "action");
-  const dialogue = extractTag(text, "dialogue");
+  const dialogue = stripRememberTags(extractTag(text, "dialogue"));
   const inner = extractTag(text, "inner");
   const narration = extractTag(text, "narration");
+  const remember = extractRememberTags(text);
 
   // dialogueは必須（会話フェーズでもdialogueだけは必要）
   if (!dialogue) return null;
 
-  return { action, dialogue, inner, narration, raw: text };
+  return { action, dialogue, inner, narration, remember, raw: text };
 }
 
 // XMLタグを除去してプレーンテキストに変換（品質チェック・TTS用）
 export function stripXmlTags(text: string): string {
-  return text
-    .replace(/<\/?(?:response|action|dialogue|inner|narration)>/g, "")
+  return stripRememberTags(text)
+    .replace(/<\/?(?:response|action|dialogue|inner|narration|remember)>/g, "")
     .replace(/\n{2,}/g, "\n")
     .trim();
 }

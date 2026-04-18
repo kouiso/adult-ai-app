@@ -1,9 +1,11 @@
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { useQuery } from "@tanstack/react-query";
 import { Menu, Search, X } from "lucide-react";
 import { toast } from "sonner";
 import { useShallow } from "zustand/react/shallow";
 
+import { sceneCards, type SceneCard } from "@/data/scene-cards";
 import { useChatQuery } from "@/hook/use-chat-query";
 import { useNetworkStatus } from "@/hook/use-network-status";
 import { useSpeechSynthesis } from "@/hook/use-speech-synthesis";
@@ -11,9 +13,11 @@ import {
   generateConversationTitle,
   generateImage,
   getImageTaskResult,
+  listConversationMessages,
   persistImageToR2,
   streamChat,
   streamChatWithQualityGuard,
+  type PersistedMessage,
 } from "@/lib/api";
 import {
   ALL_FIRST_PERSONS,
@@ -22,18 +26,21 @@ import {
 } from "@/lib/chat-message-adapter";
 import { DEFAULT_SYSTEM_PROMPT } from "@/lib/config";
 import { parseSystemPrompt } from "@/lib/prompt-builder";
+import { queryKey } from "@/lib/query-key";
 import { detectScenePhase } from "@/lib/scene-phase";
 import { parseXmlResponse } from "@/lib/xml-response-parser";
 import type { ChatMessage } from "@/store/chat-store";
 import { useChatStore } from "@/store/chat-store";
 import { useSettingsStore } from "@/store/settings-store";
 
+import { LegalLinks } from "../legal/legal-links";
 import { Sheet, SheetContent } from "../ui/sheet";
 import { Skeleton } from "../ui/skeleton";
 
 import { ChatInput } from "./chat-input";
 import { ConversationList } from "./conversation-list";
 import { MessageBubble } from "./message-bubble";
+import { SceneCardPicker } from "./scene-card-picker";
 
 const IMAGE_PROMPT_MAX_LENGTH = 900;
 // exponential backoff: 1s → 2s → 4s → 8s → cap 10s
@@ -58,6 +65,9 @@ const buildFallbackPair = (reversedMsgs: ChatMessage[]): MessagePair[] => {
     },
   ];
 };
+
+const hasContinueConversationContent = (messages: PersistedMessage[]): boolean =>
+  messages.some((message) => message.role === "assistant" && message.content.trim().length > 0);
 
 const collectRecentMessagePairs = (msgs: ChatMessage[], maxTurns: number): MessagePair[] => {
   const pairs: MessagePair[] = [];
@@ -101,7 +111,12 @@ const buildImagePromptFromHistory = (msgs: ChatMessage[]): string => {
 
 type ImageResultHandlerDeps = {
   imageMessageId: string;
-  updateMessage: (id: string, content: string, isStreaming: boolean) => void;
+  updateMessage: (
+    id: string,
+    content: string,
+    isStreaming: boolean,
+    warningLevel?: boolean,
+  ) => void;
   updateMessageImage: (id: string, imageUrl: string) => void;
   persistMessageImageEntry: (params: {
     messageId: string;
@@ -195,7 +210,13 @@ const canMessageSpeak = (
 ): boolean =>
   ttsEnabled && !message.isStreaming && !!message.content && message.role === "assistant";
 
-const EmptyState = ({ isMessageListLoading }: { isMessageListLoading: boolean }) => {
+const EmptyState = ({
+  isMessageListLoading,
+  onSelectScene,
+}: {
+  isMessageListLoading: boolean;
+  onSelectScene: (scene: SceneCard) => void;
+}) => {
   if (isMessageListLoading) {
     return (
       <div className="w-full max-w-2xl space-y-4 px-4">
@@ -217,12 +238,15 @@ const EmptyState = ({ isMessageListLoading }: { isMessageListLoading: boolean })
   }
 
   return (
-    <div className="text-center">
+    <div className="w-full max-w-3xl px-4 text-center">
       <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
         <p className="text-3xl">💬</p>
       </div>
       <p className="text-lg font-semibold text-foreground">会話を始めましょう</p>
       <p className="mt-1 text-sm text-muted-foreground">メッセージを入力してください</p>
+      <div className="mt-8 text-left">
+        <SceneCardPicker sceneCards={sceneCards} onSelect={onSelectScene} />
+      </div>
     </div>
   );
 };
@@ -352,6 +376,15 @@ export const ChatView = () => {
     () => conversations.find((c) => c.id === currentConversationId),
     [conversations, currentConversationId],
   );
+  const latestConversation = useMemo(() => conversations[0] ?? null, [conversations]);
+  const { data: latestConversationMessages = [] } = useQuery({
+    queryKey: latestConversation
+      ? queryKey.conversationMessageList(latestConversation.id)
+      : ["conversation-message-list", "none"],
+    queryFn: () =>
+      latestConversation ? listConversationMessages(latestConversation.id) : Promise.resolve([]),
+    enabled: latestConversation !== null,
+  });
   const { currentSystemPrompt, currentCharacterName, currentCharacterAvatar, currentTitle } =
     useMemo(
       () => ({
@@ -363,28 +396,36 @@ export const ChatView = () => {
       [currentConversation],
     );
 
-  const ensureConversation = useCallback(async (): Promise<string> => {
-    const currentId = useChatStore.getState().currentConversationId;
-    if (currentId) return currentId;
-
-    if (conversations.length > 0) {
-      const first = conversations[0];
-      setConversationId(first.id);
-      const nextMessages = await loadMessages(first.id);
-      // 非同期ロード中に別の会話が選択された場合はスキップ
-      if (useChatStore.getState().currentConversationId !== first.id) return first.id;
-      setMessages(nextMessages);
-      return first.id;
-    }
-
+  const createConversationAndSelect = useCallback(async () => {
     const activeCharacterId = useSettingsStore.getState().activeCharacterId;
     const created = await createConversationEntry({
       characterId: activeCharacterId ?? undefined,
     });
     setConversationId(created.id);
     setMessages([]);
-    return created.id;
-  }, [conversations, createConversationEntry, loadMessages, setConversationId, setMessages]);
+    setMobileDrawerOpen(false);
+    return created;
+  }, [createConversationEntry, setConversationId, setMessages]);
+
+  const ensureConversationForSend = useCallback(async () => {
+    const currentId = useChatStore.getState().currentConversationId;
+    if (currentId) {
+      const found = conversations.find((conversation) => conversation.id === currentId);
+      if (found) return found;
+    }
+
+    if (conversations.length > 0) {
+      const first = conversations[0];
+      setConversationId(first.id);
+      const nextMessages = await loadMessages(first.id);
+      // 非同期ロード中に別の会話が選択された場合はスキップ
+      if (useChatStore.getState().currentConversationId !== first.id) return first;
+      setMessages(nextMessages);
+      return first;
+    }
+
+    return createConversationAndSelect();
+  }, [conversations, createConversationAndSelect, loadMessages, setConversationId, setMessages]);
 
   useEffect(() => {
     let alive = true;
@@ -397,12 +438,7 @@ export const ChatView = () => {
         if (!alive) return;
 
         if (listed.length === 0) {
-          const activeCharacterId = useSettingsStore.getState().activeCharacterId;
-          const created = await createConversationEntry({
-            characterId: activeCharacterId ?? undefined,
-          });
-          if (!alive) return;
-          setConversationId(created.id);
+          setConversationId(null);
           setMessages([]);
           return;
         }
@@ -424,7 +460,6 @@ export const ChatView = () => {
     };
   }, [
     conversations,
-    createConversationEntry,
     currentConversationId,
     isConversationListLoading,
     loadMessages,
@@ -461,13 +496,7 @@ export const ChatView = () => {
 
   const handleCreateConversation = useCallback(async () => {
     try {
-      const activeCharacterId = useSettingsStore.getState().activeCharacterId;
-      const created = await createConversationEntry({
-        characterId: activeCharacterId ?? undefined,
-      });
-      setConversationId(created.id);
-      setMessages([]);
-      setMobileDrawerOpen(false);
+      const created = await createConversationAndSelect();
 
       // グリーティングがあれば即表示
       if (created.characterGreeting) {
@@ -480,7 +509,7 @@ export const ChatView = () => {
     } catch (error) {
       console.error("failed to create conversation", error);
     }
-  }, [createConversationEntry, setConversationId, setMessages]);
+  }, [createConversationAndSelect]);
 
   const handleDeleteConversation = useCallback(
     async (conversationId: string) => {
@@ -559,16 +588,20 @@ export const ChatView = () => {
     [],
   );
 
-  const handleSend = useCallback(
-    async (text: string) => {
-      if (!isOnline) {
-        toast.error("オフライン中はメッセージを送信できません");
-        return;
-      }
-
+  const sendMessageToConversation = useCallback(
+    async ({
+      text,
+      conversationId,
+      systemPrompt,
+      characterName,
+    }: {
+      text: string;
+      conversationId: string;
+      systemPrompt: string;
+      characterName: string;
+    }) => {
       const { addMessage, updateMessage, markMessageError } = useChatStore.getState();
       const currentModel = useSettingsStore.getState().model;
-      const conversationId = await ensureConversation();
 
       const userMsg: ChatMessage = {
         id: crypto.randomUUID(),
@@ -577,7 +610,6 @@ export const ChatView = () => {
       };
       addMessage(userMsg);
 
-      // DB永続化はストリーム開始をブロックしない（fire-and-forget）
       void createMessageEntry({
         conversationId,
         id: userMsg.id,
@@ -590,23 +622,16 @@ export const ChatView = () => {
       setLoading(true);
 
       const currentMessages = useChatStore.getState().messages;
-      const apiMessages = buildApiMessages(
-        currentMessages,
-        currentSystemPrompt,
-        currentCharacterName,
-      );
+      const apiMessages = buildApiMessages(currentMessages, systemPrompt, characterName);
 
-      // 品質ガード用コンテキスト: フェーズ検出+直前のassistant応答
       const phase = detectScenePhase(apiMessages);
       const assistantMessages = currentMessages.filter(
-        (m) => m.role === "assistant" && !m.isStreaming,
+        (message) => message.role === "assistant" && !message.isStreaming,
       );
       const prevAssistant = assistantMessages.at(-1)?.content;
-
-      // 直近5ターンの<inner>テキストを抽出（感情弧の多様性チェック用）
       const prevInnerTexts = assistantMessages
         .slice(-5)
-        .map((m) => parseXmlResponse(m.content)?.inner ?? "")
+        .map((message) => parseXmlResponse(message.content)?.inner ?? "")
         .filter((inner) => inner.length >= 5);
 
       let accumulated = "";
@@ -614,7 +639,6 @@ export const ChatView = () => {
         apiMessages,
         currentModel,
         (chunk) => {
-          // 再生成時はchunkに全文が来るのでリセットして表示
           if (chunk.length > accumulated.length + 100) {
             accumulated = chunk;
           } else {
@@ -624,8 +648,8 @@ export const ChatView = () => {
             updateMessage(assistantId, accumulated, true);
           });
         },
-        (finalText) => {
-          updateMessage(assistantId, finalText, false);
+        ({ content: finalText, warningLevel }) => {
+          updateMessage(assistantId, finalText, false, warningLevel);
           setLoading(false);
           void createMessageEntry({
             conversationId,
@@ -644,26 +668,59 @@ export const ChatView = () => {
         {
           phase,
           prevAssistantResponse: prevAssistant,
-          firstPerson: extractFirstPerson(currentSystemPrompt) ?? undefined,
-          // キャラの正規一人称以外すべてブロック（あたし漏れ等のドリフト防止）
+          firstPerson: extractFirstPerson(systemPrompt) ?? undefined,
           wrongFirstPersons: (() => {
-            const fp = extractFirstPerson(currentSystemPrompt);
-            return fp ? ALL_FIRST_PERSONS.filter((p) => p !== fp) : undefined;
+            const firstPerson = extractFirstPerson(systemPrompt);
+            return firstPerson
+              ? ALL_FIRST_PERSONS.filter((candidate) => candidate !== firstPerson)
+              : undefined;
           })(),
           prevInnerTexts,
         },
       );
     },
-    [
-      buildApiMessages,
-      createMessageEntry,
-      currentCharacterName,
-      currentSystemPrompt,
-      ensureConversation,
-      isOnline,
-      setLoading,
-      tryGenerateTitle,
-    ],
+    [buildApiMessages, createMessageEntry, setLoading, tryGenerateTitle],
+  );
+
+  const handleSend = useCallback(
+    async (text: string) => {
+      if (!isOnline) {
+        toast.error("オフライン中はメッセージを送信できません");
+        return;
+      }
+
+      const conversation = await ensureConversationForSend();
+      await sendMessageToConversation({
+        text,
+        conversationId: conversation.id,
+        systemPrompt: conversation.characterSystemPrompt || DEFAULT_SYSTEM_PROMPT,
+        characterName: conversation.characterName ?? "AI",
+      });
+    },
+    [ensureConversationForSend, isOnline, sendMessageToConversation],
+  );
+
+  const handleStartScene = useCallback(
+    async (scene: SceneCard) => {
+      if (!isOnline) {
+        toast.error("オフライン中はシーン開始できません");
+        return;
+      }
+
+      try {
+        const created = await createConversationAndSelect();
+        await sendMessageToConversation({
+          text: scene.firstMessage,
+          conversationId: created.id,
+          systemPrompt: created.characterSystemPrompt || DEFAULT_SYSTEM_PROMPT,
+          characterName: created.characterName ?? "AI",
+        });
+      } catch (error) {
+        console.error("failed to start scene", error);
+        toast.error("シーン開始に失敗しました");
+      }
+    },
+    [createConversationAndSelect, isOnline, sendMessageToConversation],
   );
 
   // ── 再生成 ─────────────────────────────────────────────────────────────
@@ -985,6 +1042,22 @@ export const ChatView = () => {
     () => void handleDeleteAllConversations(),
     [handleDeleteAllConversations],
   );
+  const stableOnStartScene = useCallback(
+    (scene: SceneCard) => void handleStartScene(scene),
+    [handleStartScene],
+  );
+
+  const continueConversationCard = useMemo(() => {
+    if (!latestConversation || latestConversationMessages.length === 0) return null;
+    if (!hasContinueConversationContent(latestConversationMessages)) return null;
+    return {
+      conversationId: latestConversation.id,
+      characterName: latestConversation.characterName,
+      characterAvatar: latestConversation.characterAvatar,
+      updatedAt: latestConversation.updatedAt,
+      messages: latestConversationMessages,
+    };
+  }, [latestConversation, latestConversationMessages]);
 
   const conversationListContent = useMemo(
     () => (
@@ -992,16 +1065,21 @@ export const ChatView = () => {
         conversations={conversations}
         currentConversationId={currentConversationId}
         isLoading={isConversationListLoading}
+        continueConversationCard={continueConversationCard}
+        sceneCards={sceneCards}
         onSelect={stableOnSelectConversation}
         onCreate={stableOnCreateConversation}
+        onStartScene={stableOnStartScene}
         onDelete={stableOnDeleteConversation}
         onDeleteAll={stableOnDeleteAllConversations}
       />
     ),
     [
       conversations,
+      continueConversationCard,
       currentConversationId,
       isConversationListLoading,
+      stableOnStartScene,
       stableOnSelectConversation,
       stableOnCreateConversation,
       stableOnDeleteConversation,
@@ -1129,7 +1207,10 @@ export const ChatView = () => {
           <div className="mx-auto max-w-3xl py-4">
             {messages.length === 0 && (
               <div className="flex h-[60vh] items-center justify-center">
-                <EmptyState isMessageListLoading={isMessageListLoading} />
+                <EmptyState
+                  isMessageListLoading={isMessageListLoading}
+                  onSelectScene={stableOnStartScene}
+                />
               </div>
             )}
             {visibleMessages.map((message) => (
@@ -1142,6 +1223,7 @@ export const ChatView = () => {
                 isStreaming={message.isStreaming}
                 isLoading={isLoading}
                 error={message.error}
+                warningLevel={message.warningLevel}
                 characterName={currentCharacterName}
                 characterAvatar={currentCharacterAvatar}
                 nsfwBlur={nsfwBlur}
@@ -1163,6 +1245,11 @@ export const ChatView = () => {
           onGenerateImage={stableHandleGenerateImage}
           isLoading={isInputDisabled}
         />
+        <footer className="border-t border-border/50 bg-card/70 px-4 py-3">
+          <div className="mx-auto max-w-3xl">
+            <LegalLinks className="justify-center sm:justify-end" />
+          </div>
+        </footer>
       </div>
     </div>
   );

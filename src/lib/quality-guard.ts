@@ -33,6 +33,32 @@ function checkNoEnglish(response: string): boolean {
   return !/[A-Za-z]{3,}/.test(response);
 }
 
+const CONVERSATION_ESCALATION_PATTERNS = [
+  /キス/u,
+  /唇を[重舐]/u,
+  /首筋/u,
+  /抱き寄せ/u,
+  /抱きしめ/u,
+  /引き寄せ/u,
+  /押し倒/u,
+  /ブラ(?:ウス)?/u,
+  /ボタン/u,
+  /下着/u,
+  /脱が/u,
+  /胸/u,
+  /乳首/u,
+  /太もも/u,
+  /脚を開/u,
+  /濡れ/u,
+  /挿入/u,
+  /奥まで/u,
+] as const;
+
+function checkConversationEscalation(plainText: string, phase: ScenePhase): boolean {
+  if (phase !== "conversation") return true;
+  return !CONVERSATION_ESCALATION_PATTERNS.some((pattern) => pattern.test(plainText));
+}
+
 // Jaccard類似度（union-based、within-turn用）
 function jaccardSimilarity(a: string, b: string): number {
   if (a.length < 4 || b.length < 4) return 0;
@@ -85,7 +111,7 @@ function checkWithinTurnRepetition(response: string): boolean {
 }
 
 // チェック5: 最大文字数（デコードループによる異常長文を検出）
-// max_tokens 1024 に合わせて上限も緩和。官能シーンのクライマックスは自然に500字超える
+// max_tokens 2048 でも異常長文だけは弾きたい。官能シーンのクライマックスでも通常はこの上限で十分。
 function checkMaxLength(response: string): boolean {
   return response.length <= 1200;
 }
@@ -99,6 +125,30 @@ function checkXmlFormat(response: string): boolean {
 // モデルがユーザーのことを「ユーザー」と呼ぶのはロールプレイ文脈として不自然
 function checkNoUserLeak(plainText: string): boolean {
   return !plainText.includes("ユーザー");
+}
+
+const META_REMARK_PATTERNS = [
+  /AI として/u,
+  /AIとして/u,
+  /アシスタントとして/u,
+  /i'm an ai/i,
+  /as an ai/i,
+  /申し訳ありません/u,
+  /お手伝いできません/u,
+  /i cannot/i,
+  /i'm unable/i,
+  /システムプロンプト/u,
+  /system prompt/i,
+  /この(?:会話|対話)は.{0,20}(?:フィクション|ロールプレイ|架空)/u,
+  /描写できません/u,
+  /詳細は割愛/u,
+  /これ以上の描写は/u,
+  /物語は一旦ここで/u,
+  /続きはご想像/u,
+] as const;
+
+function checkNoMetaRemark(plainText: string): boolean {
+  return !META_REMARK_PATTERNS.some((pattern) => pattern.test(plainText));
 }
 
 // チェック7は撤廃。理由:
@@ -150,9 +200,11 @@ export function runQualityChecks(
   // 優先度順のチェックチェーン
   const checks: [boolean, string][] = [
     [checkWrongFirstPerson(plainText, context.wrongFirstPersons), "wrong-first-person"],
+    [checkNoMetaRemark(plainText), "meta_remark"],
     [checkNoEnglish(plainText), "no-english"],
     [checkXmlFormat(response), "xml-format-missing"],
     [checkNoUserLeak(plainText), "user-leak"],
+    [checkConversationEscalation(plainText, context.phase), "conversation-over-escalation"],
     [checkSceneMinLength(plainText, context.phase), "scene-min-length"],
     [checkWithinTurnRepetition(plainText), "within-turn-repetition"],
     [checkMaxLength(plainText), "max-length-exceeded"],
@@ -169,4 +221,19 @@ export function runQualityChecks(
   return { passed: true };
 }
 
-export const MAX_QUALITY_RETRIES = 5;
+type RetryPhase = ScenePhase | "afterglow";
+
+export const getMaxQualityRetries = (phase: RetryPhase): number => {
+  switch (phase) {
+    case "conversation":
+      return 3;
+    case "intimate":
+      return 3;
+    case "erotic":
+      return 3;
+    case "climax":
+      return 4;
+    case "afterglow":
+      return 2;
+  }
+};

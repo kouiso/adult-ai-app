@@ -6,8 +6,9 @@ import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/component/ui/avatar";
+import { Badge } from "@/component/ui/badge";
 import { cn } from "@/lib/utils";
-import { isXmlResponse, parseXmlResponse } from "@/lib/xml-response-parser";
+import { isXmlResponse, parseXmlResponse, stripRememberTags } from "@/lib/xml-response-parser";
 
 interface MessageBubbleProps {
   id: string;
@@ -22,6 +23,7 @@ interface MessageBubbleProps {
   canSpeak?: boolean;
   isSpeaking?: boolean;
   error?: boolean;
+  warningLevel?: boolean;
   isLast?: boolean;
   isHighlighted?: boolean;
   onSpeak?: (messageId: string, text: string) => void;
@@ -122,6 +124,7 @@ StructuredNarrative.displayName = "StructuredNarrative";
 // ストリーミング中はReactMarkdownのフルパースを避けて生テキスト表示にする
 // ReactMarkdown+remarkGfmはチャンク毎に数十msメインスレッドをブロックするため
 const StreamingContent = memo(({ content }: { content: string }) => {
+  const sanitizedContent = stripRememberTags(content);
   if (!content) {
     return (
       <div className="flex gap-1">
@@ -131,12 +134,13 @@ const StreamingContent = memo(({ content }: { content: string }) => {
       </div>
     );
   }
-  return <span className="whitespace-pre-wrap">{content}</span>;
+  return <span className="whitespace-pre-wrap">{sanitizedContent}</span>;
 });
 
 StreamingContent.displayName = "StreamingContent";
 
 const MessageContent = memo(({ content, isStreaming, role }: MessageContentProps) => {
+  const sanitizedContent = stripRememberTags(content);
   if (isStreaming) {
     return <StreamingContent content={content} />;
   }
@@ -147,7 +151,7 @@ const MessageContent = memo(({ content, isStreaming, role }: MessageContentProps
     if (isXmlResponse(content)) {
       return <StructuredNarrative content={content} />;
     }
-    const paragraphs = content.split(/\n+/).filter(Boolean);
+    const paragraphs = sanitizedContent.split(/\n+/).filter(Boolean);
     return (
       <>
         {paragraphs.map((para, i) => (
@@ -165,7 +169,7 @@ const MessageContent = memo(({ content, isStreaming, role }: MessageContentProps
       rehypePlugins={rehypePlugins}
       components={markdownComponents}
     >
-      {content}
+      {sanitizedContent}
     </ReactMarkdown>
   );
 });
@@ -559,6 +563,7 @@ interface BubbleFooterProps {
   isEditing: boolean;
   isLast: boolean;
   error: boolean;
+  warningLevel: boolean;
   canSpeak: boolean;
   isSpeaking: boolean;
   content: string;
@@ -580,6 +585,7 @@ const BubbleFooter = ({
   isEditing,
   isLast,
   error,
+  warningLevel,
   canSpeak,
   isSpeaking,
   content,
@@ -594,6 +600,14 @@ const BubbleFooter = ({
 }: BubbleFooterProps) => (
   <>
     {error && !isUser && !isEditing && <ErrorIndicator messageId={id} onRetry={onRetry} />}
+    {warningLevel && !isUser && !isEditing && !error && (
+      <Badge
+        variant="outline"
+        className="border-yellow-500/40 text-yellow-700 dark:text-yellow-300"
+      >
+        ⚠ quality warning
+      </Badge>
+    )}
 
     {!isStreaming && !isEditing && !error && (
       <MessageActions
@@ -624,6 +638,7 @@ const assistantBubbleStyle =
 const applyBubbleDefaults = (props: MessageBubbleProps) => ({
   isLoading: false,
   error: false,
+  warningLevel: false,
   characterName: "AI",
   nsfwBlur: false,
   canSpeak: false,
@@ -642,6 +657,7 @@ export const MessageBubble = memo((rawProps: MessageBubbleProps) => {
     isStreaming,
     isLoading,
     error,
+    warningLevel,
     characterName,
     characterAvatar,
     nsfwBlur,
@@ -698,6 +714,7 @@ export const MessageBubble = memo((rawProps: MessageBubbleProps) => {
           isEditing={isEditing}
           isLast={isLast}
           error={error}
+          warningLevel={warningLevel}
           canSpeak={canSpeak}
           isSpeaking={isSpeaking}
           content={content}

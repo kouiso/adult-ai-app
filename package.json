@@ -18,7 +18,11 @@
     "db:migrate:remote": "wrangler d1 migrations apply adult-ai-db --remote",
     "db:seed": "tsx scripts/seed.ts",
     "db:seed:reset": "tsx scripts/seed.ts --reset",
-    "e2e": "tsx script/test-xml-quality.ts A 3 && tsx script/test-xml-quality.ts B 3 && tsx script/test-xml-quality.ts C 3",
+    "e2e": "tsx script/test-xml-quality.ts A 3 && tsx script/test-xml-quality.ts B 3 && tsx script/test-xml-quality.ts C 3 && pnpm e2e:smoke",
+    "e2e:smoke": "tsx script/e2e/run.ts --smoke",
+    "e2e:long": "tsx script/e2e/run.ts",
+    "e2e:wave1": "tsx script/e2e/run.ts --wave=1",
+    "e2e:wave2": "tsx script/e2e/run.ts --wave=2",
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {

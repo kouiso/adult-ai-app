@@ -2,8 +2,9 @@ import { z } from "zod/v4";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
-// Qwen 2.5 72B: 100%安定した日本語出力。Magnumは25%しかクリーン出力できない
-const DEFAULT_MODEL = "qwen/qwen-2.5-72b-instruct" as const;
+import { DEFAULT_CHAT_MODEL } from "@/lib/model";
+
+const DEFAULT_MODEL = DEFAULT_CHAT_MODEL;
 
 // バージョンごとの廃止モデル → DEFAULT_MODELへの移行テーブル
 const LEGACY_MODEL_MIGRATIONS: [number, string][] = [
@@ -17,6 +18,9 @@ const LEGACY_MODEL_MIGRATIONS: [number, string][] = [
   [16, "sao10k/l3.3-euryale-70b"],
   [18, "anthracite-org/magnum-v4-72b"],
   [20, "deepseek/deepseek-chat"],
+  // v22で既定モデルをEVAへ統一。旧既定値だけ自動移行して明示的な選択はなるべく壊さない。
+  [22, "qwen/qwen-2.5-72b-instruct"],
+  [22, "anthracite-org/magnum-v4-72b"],
 ];
 
 function shouldMigrateModel(version: number, currentModel: string): boolean {
@@ -84,7 +88,7 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: "ai-chat-settings",
-      version: 21,
+      version: 22,
       migrate: (persistedState: unknown, version: number): PersistedSettings => {
         const result = persistedSettingsSchema.safeParse(persistedState);
         const parsed = result.success

@@ -2,6 +2,7 @@
 // クライアント側の品質ガードでフェーズ情報が必要なため移植
 
 export type ScenePhase = "climax" | "erotic" | "intimate" | "conversation";
+export type MaxTokenPhase = ScenePhase | "afterglow";
 
 const PHASE_DETECTION_ORDER: {
   phase: Exclude<ScenePhase, "conversation">;
@@ -53,7 +54,6 @@ const PHASE_DETECTION_ORDER: {
       "唇",
       "抱きしめ",
       "舐め",
-      "吸い",
       "揉",
       "乳首",
       "下着",
@@ -63,9 +63,7 @@ const PHASE_DETECTION_ORDER: {
       "ブラウス",
       "シャツ",
       "裸",
-      "肌",
       "胸",
-      "触れ",
     ],
   },
 ];
@@ -84,3 +82,18 @@ export function detectScenePhase(messages: { role: string; content: string }[]):
   }
   return "conversation";
 }
+
+export const getMaxTokensForPhase = (phase: MaxTokenPhase): number => {
+  switch (phase) {
+    case "conversation":
+      return 1024;
+    case "intimate":
+      return 1536;
+    case "erotic":
+      return 2048;
+    case "climax":
+      return 2560;
+    case "afterglow":
+      return 1024;
+  }
+};

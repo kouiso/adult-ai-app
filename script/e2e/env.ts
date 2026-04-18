@@ -22,22 +22,14 @@ type E2EEnvOverrides = Partial<E2EEnv>;
 const pad = (value: number): string => String(value).padStart(2, "0");
 
 const formatTimestamp = (date: Date): string =>
-  [
-    date.getFullYear(),
-    pad(date.getMonth() + 1),
-    pad(date.getDate()),
-  ].join("") +
+  [date.getFullYear(), pad(date.getMonth() + 1), pad(date.getDate())].join("") +
   "-" +
   [pad(date.getHours()), pad(date.getMinutes()), pad(date.getSeconds())].join("");
 
 const generateRunId = (): string =>
   `run-${formatTimestamp(new Date())}-${randomBytes(2).toString("hex")}`;
 
-const parseInteger = (
-  rawValue: string | undefined,
-  fallback: number,
-  label: string,
-): number => {
+const parseInteger = (rawValue: string | undefined, fallback: number, label: string): number => {
   if (rawValue === undefined || rawValue.trim().length === 0) {
     return fallback;
   }
@@ -56,15 +48,13 @@ const defaultArtifactRoot = (runId: string): string =>
 
 export const loadE2EEnv = (): E2EEnv => {
   const runId = process.env.E2E_RUN_ID?.trim() || generateRunId();
-  const userEmail =
-    process.env.E2E_USER_EMAIL?.trim() || `e2e-${runId}@adult-ai-app.local`;
+  const userEmail = process.env.E2E_USER_EMAIL?.trim() || `e2e-${runId}@adult-ai-app.local`;
   const baseUrl = process.env.E2E_BASE_URL?.trim() || DEFAULT_BASE_URL;
   const cdpPort = parseInteger(process.env.E2E_CDP_PORT, DEFAULT_CDP_PORT, "E2E_CDP_PORT");
   const maxTabs = capMaxTabs(
     parseInteger(process.env.E2E_MAX_TABS, DEFAULT_MAX_TABS, "E2E_MAX_TABS"),
   );
-  const artifactRoot =
-    process.env.E2E_ARTIFACT_ROOT?.trim() || defaultArtifactRoot(runId);
+  const artifactRoot = process.env.E2E_ARTIFACT_ROOT?.trim() || defaultArtifactRoot(runId);
 
   if (!userEmail.includes("@")) {
     throw new Error(`E2E_USER_EMAIL が不正です: ${userEmail}`);
@@ -97,9 +87,7 @@ export const resolveEnv = (overrides: E2EEnvOverrides = {}): E2EEnv => {
     runId,
     maxTabs: capMaxTabs(overrides.maxTabs ?? loaded.maxTabs),
     artifactRoot,
-    resultsRoot:
-      overrides.resultsRoot ??
-      path.dirname(path.dirname(artifactRoot)),
+    resultsRoot: overrides.resultsRoot ?? path.dirname(path.dirname(artifactRoot)),
     devOrigin: overrides.devOrigin ?? overrides.baseUrl ?? loaded.devOrigin,
     workerOrigin:
       overrides.workerOrigin ??

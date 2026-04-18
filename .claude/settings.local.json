@@ -2,7 +2,16 @@
   "permissions": {
     "allow": [
       "Bash(git push origin main)",
-      "Bash(git push origin main --force-with-lease)"
+      "Bash(git push origin main --force-with-lease)",
+      "Bash(mv .claude/scenario-b-final-results.md .claude/scenario-b-results.md .claude/scenario-c-results.md .claude/quality-gap-proposal.md .claude/quality-surge-report-2026-04-12.md .work/test-results/)",
+      "Bash(mv commit-analysis-2026-04-12.md TODO.md .work/analysis/)",
+      "Bash(mv .claude/plans/wild-soaring-conway.md .claude/plans/novita-l1-input-redesign.md .work/plans/)",
+      "Bash(mv .claude/handoff-2026-04-11.md .claude/handoff-2026-04-17.md .work/handoff/)",
+      "Bash(mv final-01-main.png final-02-chat.png final-03-settings.png final-04-characters.png .work/screenshots/)",
+      "Bash(rm -f .claude/snapshot-charmanager.txt .claude/snapshot-charmgr.md .claude/snapshot-charmgr2.md .claude/snapshot-pre-send.md .claude/snapshot-t2-debug.md .claude/scenario-b-rerun-results.md .claude/scenario-b-verify-results.md .claude/scenario-c-rerun-results.md .claude/handoff-2026-04-04.md)",
+      "Bash(rm -f snapshot-after-close.md snapshot-charmanager.md snapshot-check.md snapshot-ready.md snapshot-t1-lost.md snapshot-t2-final.md snapshot-t2-pre.md snapshot-t2-retry.md snapshot-t3-pre.md)",
+      "Bash(rm -f t2-pre-send.md t3-pre-send.md t4-pre-send.md t5-pre-send.md t6-pre-send.md t7-pre-send.md t8-pre-send.md)",
+      "Bash(rm -rf .serena/ .claude/plans/)"
     ]
   }
 }

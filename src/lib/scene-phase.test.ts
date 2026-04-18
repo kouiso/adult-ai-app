@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { detectScenePhase } from "./scene-phase";
+import { detectScenePhase, getMaxTokensForPhase } from "./scene-phase";
 
 describe("detectScenePhase", () => {
   it("climaxキーワードを含むとclimaxを返す", () => {
@@ -16,6 +16,16 @@ describe("detectScenePhase", () => {
   it("intimateキーワードを含むとintimateを返す", () => {
     const messages = [{ role: "user", content: "キスして" }];
     expect(detectScenePhase(messages)).toBe("intimate");
+  });
+
+  it("軽い接触だけではconversationのまま", () => {
+    const messages = [{ role: "user", content: "肩に触れるだけで震えてるじゃん" }];
+    expect(detectScenePhase(messages)).toBe("conversation");
+  });
+
+  it("比喩的な肌の表現だけではconversationのまま", () => {
+    const messages = [{ role: "user", content: "視線が肌に吸い込まれそうで困る" }];
+    expect(detectScenePhase(messages)).toBe("conversation");
   });
 
   it("キーワードなしはconversationを返す", () => {
@@ -51,5 +61,27 @@ describe("detectScenePhase", () => {
 
   it("空メッセージ配列はconversation", () => {
     expect(detectScenePhase([])).toBe("conversation");
+  });
+});
+
+describe("getMaxTokensForPhase", () => {
+  it("conversation は 1024", () => {
+    expect(getMaxTokensForPhase("conversation")).toBe(1024);
+  });
+
+  it("intimate は 1536", () => {
+    expect(getMaxTokensForPhase("intimate")).toBe(1536);
+  });
+
+  it("erotic は 2048", () => {
+    expect(getMaxTokensForPhase("erotic")).toBe(2048);
+  });
+
+  it("climax は 2560", () => {
+    expect(getMaxTokensForPhase("climax")).toBe(2560);
+  });
+
+  it("afterglow は 1024", () => {
+    expect(getMaxTokensForPhase("afterglow")).toBe(1024);
   });
 });

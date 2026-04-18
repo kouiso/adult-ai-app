@@ -1,3 +1,39 @@
+export const DEFAULT_CHAT_MODEL = "anthracite-org/magnum-v4-72b" as const;
+
+// 既定モデルがOpenRouter側で利用不能なときだけ順に退避する。
+// 理由: 実在確認できた高品質モデルだけで安全にフォールバックさせたい。
+export const DEFAULT_CHAT_MODEL_FALLBACKS = [
+  "qwen/qwen-2.5-72b-instruct",
+  "deepseek/deepseek-chat",
+  "anthropic/claude-sonnet-4",
+] as const;
+
+// API入力で許可する一覧と、サーバー内部でのみ使う退避先は役割が異なる。
+// 理由: UIの選択肢を増やさずに、サーバー再試行だけを安全に強化したい。
+export const MODEL_FALLBACKS: Readonly<Record<string, readonly string[]>> = {
+  [DEFAULT_CHAT_MODEL]: DEFAULT_CHAT_MODEL_FALLBACKS,
+  "qwen/qwen-2.5-72b-instruct": [
+    DEFAULT_CHAT_MODEL,
+    "deepseek/deepseek-chat",
+    "anthropic/claude-sonnet-4",
+  ],
+  "deepseek/deepseek-chat": [
+    DEFAULT_CHAT_MODEL,
+    "qwen/qwen-2.5-72b-instruct",
+    "anthropic/claude-sonnet-4",
+  ],
+  "anthropic/claude-sonnet-4": [
+    DEFAULT_CHAT_MODEL,
+    "qwen/qwen-2.5-72b-instruct",
+    "deepseek/deepseek-chat",
+  ],
+};
+
+export const DEFAULT_FALLBACK_MODELS = [
+  DEFAULT_CHAT_MODEL,
+  ...DEFAULT_CHAT_MODEL_FALLBACKS,
+] as const;
+
 export const MODEL_CATALOG = [
   // ── 無料 ────────────────────────────────────────────────────────────────
   {
@@ -57,22 +93,16 @@ export const MODEL_CATALOG = [
     desc: "Euryale旧版・実績あり",
   },
   {
-    id: "anthracite-org/magnum-v4-72b",
-    name: "Magnum v4 72B",
-    tier: "プレミアム",
-    desc: "官能描写特化・高文章品質",
-  },
-  {
-    id: "eva-unit-01/eva-qwen2.5-72b",
-    name: "EVA Qwen2.5 72B ⭐ 推奨",
-    tier: "プレミアム",
-    desc: "Qwen2.5ベース・日本語ネイティブ・ERP特化",
-  },
-  {
     id: "qwen/qwen-2.5-72b-instruct",
     name: "Qwen 2.5 72B Instruct ⭐ 推奨",
     tier: "プレミアム",
     desc: "日本語ネイティブ・指示追従性最高・安定出力",
+  },
+  {
+    id: "anthracite-org/magnum-v4-72b",
+    name: "Magnum v4 72B ⭐ 推奨",
+    tier: "プレミアム",
+    desc: "官能描写特化・高文章品質",
   },
   {
     id: "nousresearch/hermes-4-70b",

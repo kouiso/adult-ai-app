@@ -1,15 +1,24 @@
 import { zValidator } from "@hono/zod-validator";
-import { and, asc, desc, eq, gte, gt, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, gt, inArray, ne, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { handle } from "hono/cloudflare-pages";
 import { cors } from "hono/cors";
 import { z } from "zod/v4";
 
-import { ALLOWED_MODELS } from "../../src/lib/model";
+import {
+  ALLOWED_MODELS,
+  DEFAULT_CHAT_MODEL,
+  DEFAULT_FALLBACK_MODELS,
+  MODEL_FALLBACKS,
+} from "../../src/lib/model";
+import { getHonorificStage, injectMemoryNotesIntoSystemPrompt } from "../../src/lib/prompt-builder";
+import { detectScenePhase, getMaxTokensForPhase } from "../../src/lib/scene-phase";
+import { parseXmlResponse, stripRememberTags } from "../../src/lib/xml-response-parser";
 import {
   characterTable,
   conversationTable,
+  memoryNoteTable,
   messageTable,
   usageLogTable,
   userTable,
@@ -25,37 +34,6 @@ type Bindings = {
   DAILY_REQUEST_LIMIT?: string;
 };
 
-// モデルダウン時のフォールバック順序（同tier内で代替）
-const FALLBACK_MODELS: Record<string, string[]> = {
-  "anthracite-org/magnum-v4-72b": [
-    "eva-unit-01/eva-qwen2.5-72b",
-    "qwen/qwen-2.5-72b-instruct",
-    "deepseek/deepseek-chat",
-  ],
-  "eva-unit-01/eva-qwen2.5-72b": [
-    "qwen/qwen-2.5-72b-instruct",
-    "anthracite-org/magnum-v4-72b",
-    "deepseek/deepseek-chat",
-  ],
-  "qwen/qwen-2.5-72b-instruct": [
-    "eva-unit-01/eva-qwen2.5-72b",
-    "anthracite-org/magnum-v4-72b",
-    "deepseek/deepseek-chat",
-  ],
-  "deepseek/deepseek-chat": [
-    "qwen/qwen-2.5-72b-instruct",
-    "eva-unit-01/eva-qwen2.5-72b",
-    "anthracite-org/magnum-v4-72b",
-  ],
-};
-
-// デフォルトフォールバック（マッピングにないモデル用）
-const DEFAULT_FALLBACK_MODELS = [
-  "deepseek/deepseek-chat",
-  "qwen/qwen-2.5-72b-instruct",
-  "anthracite-org/magnum-v4-72b",
-];
-
 const TASK_ID_PATTERN = /^[\w-]{4,128}$/;
 // R2キーはサーバー側で `images/{uuid}.{ext}` 形式で生成されるため、それ以外を拒否する
 const R2_KEY_PATTERN = /^images\/[\da-f-]+\.(jpg|png)$/;
@@ -69,7 +47,7 @@ const chatSchema = z.object({
       }),
     )
     .max(100),
-  model: z.enum(ALLOWED_MODELS).optional().default("anthracite-org/magnum-v4-72b"),
+  model: z.enum(ALLOWED_MODELS).optional().default(DEFAULT_CHAT_MODEL),
 });
 
 const imageSchema = z.object({
@@ -129,10 +107,29 @@ const generateCharacterSchema = z.object({
   }),
   situation: z.string().max(500).default(""),
   details: z.string().max(1000).default(""),
-  model: z.enum(ALLOWED_MODELS).optional().default("anthracite-org/magnum-v4-72b"),
+  model: z.enum(ALLOWED_MODELS).optional().default(DEFAULT_CHAT_MODEL),
   previousResult: generateCharacterResultSchema.optional(),
   feedback: z.string().max(500).optional(),
 });
+
+const FALLBACK_CHAIN = [
+  "eva-unit-01/eva-qwen2.5-72b",
+  "anthracite-org/magnum-v4-72b",
+  "neversleep/llama-3-lumimaid-70b",
+] as const;
+
+const FIRST_TOKEN_TIMEOUT_MS = 8_000;
+const LAST_CHUNK_TIMEOUT_MS = 30_000;
+const FIRST_TOKEN_TIMEOUT_LABEL = "first-token-timeout";
+const LAST_CHUNK_TIMEOUT_LABEL = "last-chunk-timeout";
+const MODEL_FALLBACK_PATTERNS = [
+  /model_not_available/i,
+  /content_policy/i,
+  /content policy/i,
+  /not a valid model id/i,
+  /no endpoints found/i,
+] as const;
+const MIN_OPENROUTER_MAX_TOKENS = 256;
 
 const characterUpdateSchema = z.object({
   name: z.string().min(1).max(100).optional(),
@@ -177,7 +174,7 @@ const generateTitleSchema = z.object({
       }),
     )
     .max(10),
-  model: z.enum(ALLOWED_MODELS).optional().default("anthracite-org/magnum-v4-72b"),
+  model: z.enum(ALLOWED_MODELS).optional().default(DEFAULT_CHAT_MODEL),
 });
 
 const messageUpdateContentSchema = z.object({
@@ -186,83 +183,7 @@ const messageUpdateContentSchema = z.object({
 
 const idSchema = z.string().min(1).max(128);
 
-// ── シーンフェーズ検出 ──────────────────────────────────────────────────
-// 小型モデル（7B-13B）はコンテキスト保持が弱く、シーンの段階を忘れて
-// クライマックス中に前戯に退行する問題がある。
-// キーワードベースでフェーズを検出し、systemメッセージとして注入することで
-// attentionを最も強く当てるpositional signalとして機能させる。
-
-type ScenePhase = "climax" | "erotic" | "intimate" | "conversation";
-
-// 優先度順に配列化（climax > erotic > intimate）
-// Object.entriesの順序に依存しないよう明示的に順序付け
-const PHASE_DETECTION_ORDER: {
-  phase: Exclude<ScenePhase, "conversation">;
-  keywords: readonly string[];
-}[] = [
-  {
-    phase: "climax",
-    // 誤検出防止: 日常用法と重複しない表現を優先
-    keywords: [
-      "いく",
-      "イク",
-      "イッ",
-      "出して",
-      "中に出",
-      "射精",
-      "どくどく",
-      "びくびく",
-      "痙攣",
-      "絶頂",
-      "アクメ",
-      "果て",
-    ],
-  },
-  {
-    phase: "erotic",
-    keywords: [
-      "挿入",
-      "奥まで",
-      "腰を振",
-      "突き",
-      "濡れ",
-      "感じて",
-      "咥え",
-      "しゃぶ",
-      "腰が動",
-      "締めつけ",
-      "ピストン",
-      "中に入",
-      "入れる",
-      "入れて",
-      "腰を動",
-      "喘",
-      "あえ",
-    ],
-  },
-  {
-    phase: "intimate",
-    keywords: [
-      "キス",
-      "唇",
-      "抱きしめ",
-      "舐め",
-      "吸い",
-      "揉",
-      "乳首",
-      "下着",
-      "脱が",
-      "脱い",
-      "ボタン",
-      "ブラウス",
-      "シャツ",
-      "裸",
-      "肌",
-      "胸",
-      "触れ",
-    ],
-  },
-];
+type ScenePhase = ReturnType<typeof detectScenePhase>;
 
 // Few-shot exemplars: demonstrate XML format with target-language (Japanese) content
 // Meta-instructions in English, example content in Japanese (the output language)
@@ -329,21 +250,6 @@ const SCENE_CONTEXT_MESSAGES: Record<ScenePhase, string | null> = {
     EXEMPLAR_INTIMATE,
   conversation: null,
 };
-
-function detectScenePhase(messages: { role: string; content: string }[]): ScenePhase {
-  // ユーザーメッセージのみでフェーズを判定
-  // assistantの応答を含めるとモデルの暴走が次ターンのフェーズを不当に昇格させる
-  const scanTarget = messages
-    .filter((m) => m.role === "user")
-    .slice(-3)
-    .map((m) => m.content)
-    .join("");
-
-  for (const { phase, keywords } of PHASE_DETECTION_ORDER) {
-    if (keywords.some((kw) => scanTarget.includes(kw))) return phase;
-  }
-  return "conversation";
-}
 
 // Array.prototype.findLastIndex がCloudflare Workers (ES2022) で使えない場合のポリフィル
 function findLastIndex<T>(arr: T[], predicate: (item: T) => boolean): number {
@@ -533,15 +439,133 @@ async function enforceRateLimit(
   return { ok: true, ctx: { database, userId } };
 }
 
+function buildModelChain(model: string): string[] {
+  if (model === FALLBACK_CHAIN[0]) return [...FALLBACK_CHAIN];
+
+  const fallbacks = MODEL_FALLBACKS[model] ?? DEFAULT_FALLBACK_MODELS;
+  return Array.from(new Set([model, ...fallbacks]));
+}
+
+function shouldFallbackToNextModel(status: number, responseText: string): boolean {
+  if (status === 503) return true;
+  return MODEL_FALLBACK_PATTERNS.some((pattern) => pattern.test(responseText));
+}
+
+function parseAffordableMaxTokens(responseText: string): number | null {
+  const matched = responseText.match(/can only afford (\d+)/i);
+  if (!matched) return null;
+  const affordable = Number.parseInt(matched[1], 10);
+  if (!Number.isFinite(affordable)) return null;
+  return affordable;
+}
+
+function parseOpenRouterSseLine(data: string): string | "[DONE]" | null {
+  if (data === "[DONE]") return "[DONE]";
+  try {
+    const parsed: { choices?: Array<{ delta?: { content?: string } }> } = JSON.parse(data);
+    return parsed.choices?.[0]?.delta?.content ?? null;
+  } catch (error) {
+    console.error("failed to parse OpenRouter SSE line", error);
+    return null;
+  }
+}
+
+function hasFirstContentToken(
+  decoder: TextDecoder,
+  chunk: Uint8Array,
+  pendingBuffer: string,
+): { matched: boolean; pendingBuffer: string } {
+  const nextBuffer = pendingBuffer + decoder.decode(chunk, { stream: true });
+  const lines = nextBuffer.split("\n");
+  const remainder = lines.pop() ?? "";
+
+  for (const line of lines) {
+    if (!line.startsWith("data: ")) continue;
+    const parsed = parseOpenRouterSseLine(line.slice(6).trim());
+    if (parsed && parsed !== "[DONE]") {
+      return { matched: true, pendingBuffer: remainder };
+    }
+  }
+
+  return { matched: false, pendingBuffer: remainder };
+}
+
+async function readStreamChunkWithTimeout(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  timeoutMs: number,
+  abortController: AbortController,
+  timeoutLabel: string,
+  model: string,
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  try {
+    return await Promise.race([
+      reader.read(),
+      new Promise<ReadableStreamReadResult<Uint8Array>>((_, reject) => {
+        timeoutId = setTimeout(() => {
+          abortController.abort(`${timeoutLabel}:${model}`);
+          reject(new Error(`${timeoutLabel} after ${timeoutMs}ms for ${model}`));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
+function createProxyStream(
+  initialChunks: Uint8Array[],
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  abortController: AbortController,
+  model: string,
+): ReadableStream<Uint8Array> {
+  return new ReadableStream<Uint8Array>({
+    async start(controller) {
+      try {
+        for (const chunk of initialChunks) controller.enqueue(chunk);
+
+        while (true) {
+          const { done, value } = await readStreamChunkWithTimeout(
+            reader,
+            LAST_CHUNK_TIMEOUT_MS,
+            abortController,
+            LAST_CHUNK_TIMEOUT_LABEL,
+            model,
+          );
+
+          if (done) break;
+          if (value) controller.enqueue(value);
+        }
+
+        controller.close();
+      } catch (error) {
+        console.error(`OpenRouter stream proxy error (${model})`, error);
+        controller.error(error);
+      } finally {
+        reader.releaseLock();
+      }
+    },
+    cancel(reason) {
+      abortController.abort(String(reason));
+      return reader.cancel(String(reason)).catch((error) => {
+        console.error(`failed to cancel OpenRouter stream (${model})`, error);
+      });
+    },
+  });
+}
+
 // OpenRouterへのチャットリクエスト + フォールバック再試行
 // chat handler の complexity を 10 以内に抑えるために分離
+/* eslint-disable complexity, max-depth */
 async function requestOpenRouterChat(
   apiKey: string,
   appOrigin: string,
   model: string,
+  phase: ScenePhase,
   messages: { role: string; content: string }[],
 ): Promise<{ response: Response; usedModel: string }> {
-  const makeRequest = (targetModel: string) =>
+  const makeRequest = (targetModel: string, maxTokens: number, signal: AbortSignal) =>
     fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -556,27 +580,115 @@ async function requestOpenRouterChat(
         stream: true,
         temperature: 0.9,
         top_p: 0.9,
-        max_tokens: 1024,
+        max_tokens: maxTokens,
         stop: ["\n\n\n"],
         provider: { allow_fallbacks: true },
       }),
+      signal,
     });
 
-  let response = await makeRequest(model);
-  let usedModel = model;
+  const baseMaxTokens = getMaxTokensForPhase(phase);
+  const modelChain = buildModelChain(model);
+  let lastResponse: Response | null = null;
+  let lastModel = model;
 
-  if (!response.ok && (response.status === 502 || response.status === 503)) {
-    const fallbacks = FALLBACK_MODELS[model] ?? DEFAULT_FALLBACK_MODELS;
-    for (const fallbackModel of fallbacks) {
-      if (fallbackModel === model) continue;
-      response = await makeRequest(fallbackModel);
-      usedModel = fallbackModel;
-      if (response.ok && response.body) break;
+  for (const candidateModel of modelChain) {
+    let maxTokens = baseMaxTokens;
+
+    for (let tokenAttempt = 0; tokenAttempt < 2; tokenAttempt += 1) {
+      const abortController = new AbortController();
+
+      try {
+        const response = await makeRequest(candidateModel, maxTokens, abortController.signal);
+        lastResponse = response;
+        lastModel = candidateModel;
+
+        if (!response.ok) {
+          const responseText = await response.clone().text();
+          const affordableMaxTokens = parseAffordableMaxTokens(responseText);
+          if (
+            response.status === 402 &&
+            affordableMaxTokens !== null &&
+            affordableMaxTokens >= MIN_OPENROUTER_MAX_TOKENS &&
+            affordableMaxTokens < maxTokens
+          ) {
+            console.warn(
+              `OpenRouter lowering max_tokens (${candidateModel}) ${maxTokens} -> ${affordableMaxTokens}`,
+            );
+            maxTokens = affordableMaxTokens;
+            continue;
+          }
+          if (shouldFallbackToNextModel(response.status, responseText)) {
+            console.warn(`OpenRouter fallback triggered (${candidateModel})`, response.status);
+            break;
+          }
+          return { response, usedModel: candidateModel };
+        }
+
+        if (!response.body) {
+          console.error(`OpenRouter response body missing (${candidateModel})`);
+          break;
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        const initialChunks: Uint8Array[] = [];
+        let pendingBuffer = "";
+        let sawFirstToken = false;
+
+        while (!sawFirstToken) {
+          const { done, value } = await readStreamChunkWithTimeout(
+            reader,
+            FIRST_TOKEN_TIMEOUT_MS,
+            abortController,
+            FIRST_TOKEN_TIMEOUT_LABEL,
+            candidateModel,
+          );
+
+          if (done) break;
+          if (!value) continue;
+
+          initialChunks.push(value);
+          const parsed = hasFirstContentToken(decoder, value, pendingBuffer);
+          sawFirstToken = parsed.matched;
+          pendingBuffer = parsed.pendingBuffer;
+        }
+
+        if (!sawFirstToken) {
+          await reader.cancel(`${FIRST_TOKEN_TIMEOUT_LABEL}:${candidateModel}`).catch((error) => {
+            console.error(`failed to cancel empty OpenRouter stream (${candidateModel})`, error);
+          });
+          console.warn(`OpenRouter fallback triggered (${candidateModel}) without first token`);
+          break;
+        }
+
+        return {
+          response: new Response(
+            createProxyStream(initialChunks, reader, abortController, candidateModel),
+            {
+              headers: {
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache",
+                Connection: "keep-alive",
+              },
+            },
+          ),
+          usedModel: candidateModel,
+        };
+      } catch (error) {
+        console.error(`OpenRouter request failed (${candidateModel})`, error);
+        break;
+      }
     }
   }
 
-  return { response, usedModel };
+  if (lastResponse) return { response: lastResponse, usedModel: lastModel };
+  return {
+    response: new Response("upstream service error", { status: 503 }),
+    usedModel: lastModel,
+  };
 }
+/* eslint-enable complexity, max-depth */
 
 const DEFAULT_CHARACTER_ID = "default-character" as const;
 
@@ -633,6 +745,79 @@ async function fetchCharacterForConversation(
   return rows[0];
 }
 
+async function fetchRecentMemoryNotes(
+  database: ReturnType<typeof drizzle>,
+  userId: string,
+  characterId: string,
+): Promise<string[]> {
+  // memory_note load: 次会話開始時に最新20件をsystem promptへ注入する
+  const rows = await database
+    .select({ content: memoryNoteTable.content })
+    .from(memoryNoteTable)
+    .where(and(eq(memoryNoteTable.userId, userId), eq(memoryNoteTable.characterId, characterId)))
+    .orderBy(desc(memoryNoteTable.createdAt))
+    .limit(20);
+
+  return rows.map((row) => row.content);
+}
+
+async function fetchMessageCountsByCharacter(
+  database: ReturnType<typeof drizzle>,
+  userId: string,
+  characterIds: string[],
+): Promise<Map<string, number>> {
+  if (characterIds.length === 0) return new Map();
+
+  const rows = await database
+    .select({
+      characterId: messageTable.characterId,
+      totalMessages: sql<number>`count(*)`,
+    })
+    .from(messageTable)
+    .where(and(eq(messageTable.userId, userId), inArray(messageTable.characterId, characterIds)))
+    .groupBy(messageTable.characterId);
+
+  return new Map(rows.map((row) => [row.characterId, Number(row.totalMessages)]));
+}
+
+function buildCharacterSystemPromptWithRelationship(
+  systemPrompt: string,
+  characterName: string,
+  memoryNotes: string[],
+  totalMessageCount: number,
+): string {
+  const normalizedMessageCount = Math.max(0, totalMessageCount);
+  const honorificStage = getHonorificStage(normalizedMessageCount);
+
+  // 呼び方段階の計算ができる件数だけ通すことで、関係性セクションを必ず再構築する。
+  if (!honorificStage) {
+    return injectMemoryNotesIntoSystemPrompt(
+      systemPrompt,
+      characterName,
+      memoryNotes,
+      normalizedMessageCount,
+    );
+  }
+
+  return injectMemoryNotesIntoSystemPrompt(
+    systemPrompt,
+    characterName,
+    memoryNotes,
+    normalizedMessageCount,
+  );
+}
+
+function prepareAssistantContent(content: string): {
+  rememberNotes: string[];
+  visibleContent: string;
+} {
+  const parsed = parseXmlResponse(content);
+  return {
+    rememberNotes: parsed?.remember ?? [],
+    visibleContent: stripRememberTags(content),
+  };
+}
+
 function buildConversationResponse(
   conversationId: string,
   title: string | undefined,
@@ -653,11 +838,49 @@ function buildConversationResponse(
   };
 }
 
+async function buildCreatedConversationResponse(
+  database: ReturnType<typeof drizzle>,
+  userId: string,
+  conversationId: string,
+  title: string | undefined,
+  now: number,
+  characterId: string,
+) {
+  const ch = await fetchCharacterForConversation(database, characterId);
+  const messageCountsByCharacter = await fetchMessageCountsByCharacter(database, userId, [
+    characterId,
+  ]);
+  const memoryNotes = await fetchRecentMemoryNotes(database, userId, characterId);
+  const characterSystemPrompt = ch?.systemPrompt
+    ? buildCharacterSystemPromptWithRelationship(
+        ch.systemPrompt,
+        ch.name,
+        memoryNotes,
+        messageCountsByCharacter.get(characterId) ?? 0,
+      )
+    : (ch?.systemPrompt ?? "");
+
+  return buildConversationResponse(
+    conversationId,
+    title,
+    now,
+    characterId,
+    ch
+      ? {
+          ...ch,
+          systemPrompt: characterSystemPrompt,
+        }
+      : ch,
+  );
+}
+
 // ── POST /chat ヘルパー ──
 
 type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
 function buildPlatformPrefix(phase: ScenePhase): string {
+  // クライアントのキャラカード生成規則と似た文面でも統合しない。
+  // 理由: こちらはサーバー最終強制の実行時プロンプトで、フェーズ別制御とXML拘束が責務だから。
   // シーンフェーズ用のプラットフォーム指示（圧縮版）
   // 英語メタ指示は最小限に。キャラカード自体に語らせるのがSillyTavern流
   // "NEVER reuse expressions" は削除 — 官能シーンではモチーフの自然な反復が必要
@@ -692,17 +915,19 @@ Write concrete five-senses descriptions. Do NOT escalate until the user leads.`;
 【応答の長さ】
 3〜5文、200〜280字。<inner>と<narration>と<dialogue>のバランスを取ること。
 
-【予感の描写】
-相手の存在に対する身体反応（心拍の変化、息が詰まる感覚、触れたい衝動）を描写すること。行為が始まる前の緊張と予感こそが最もエロティック。環境描写だけでなく、相手の体温・呼吸・近さに対するキャラ自身の身体の反応を書くこと。
-具体的な身体の微細反応を描くこと：指先・唇・首筋・呼吸の変化。抽象的な「ドキドキ」ではなく、読者が同じ感覚を追体験できる解像度で。
+【会話フェーズの上限】
+会話フェーズでは、距離感・視線・声色・鼓動の乱れまでは描いてよいが、まだ行為は始まっていない。
+キス、愛撫、脱衣、性的接触、性器や胸への言及を既成事実として描写してはいけない。
+相手が触れたとしても、その瞬間の動揺や戸惑いを中心に返し、次の行為へ勝手に進めないこと。
 
 【演技スタイル】
 - キャラ固有の口調・方言・口癖を必ず守って反応する。
-- 明示的な肉体描写に飛躍しない。ユーザーが誘導するまでは自然な会話を維持する。`;
+- 自然な会話と照れ、緊張、間を優先する。身体描写は首から上と呼吸・鼓動の範囲に留める。
+- ユーザーが誘導するまでは自然な会話を維持し、接触の既成事実を勝手に足さない。`;
 
   // シーン描写構造はエロティック/クライマックスシーンでのみ強制する
   // 会話フェーズではキャラの人格・口調を自然に演じることを優先
-  // シーン描写用XML構造。文字数ハード制限は撤廃（max_tokens 1024で自然に制御）
+  // シーン描写用XML構造。文字数ハード制限は撤廃（max_tokens 2048で自然に制御）
   const SCENE_RESPONSE_STRUCTURE = `
 
 [Scene response format]
@@ -1080,6 +1305,10 @@ const app = new Hono<{ Bindings: Bindings }>()
       .where(eq(conversationTable.userId, userId))
       .orderBy(desc(conversationTable.updatedAt));
 
+    const messageCountsByCharacter = await fetchMessageCountsByCharacter(database, userId, [
+      ...new Set(rows.map((row) => row.characterId)),
+    ]);
+
     const conversations = rows.map((r) => ({
       id: r.id,
       title: r.title,
@@ -1088,7 +1317,15 @@ const app = new Hono<{ Bindings: Bindings }>()
       characterId: r.characterId,
       characterName: r.characterName ?? "AI",
       characterGreeting: r.characterGreeting ?? "",
-      characterSystemPrompt: r.characterSystemPrompt ?? "",
+      characterSystemPrompt:
+        r.characterSystemPrompt && r.characterName
+          ? buildCharacterSystemPromptWithRelationship(
+              r.characterSystemPrompt,
+              r.characterName,
+              [],
+              messageCountsByCharacter.get(r.characterId) ?? 0,
+            )
+          : (r.characterSystemPrompt ?? ""),
       characterAvatar: r.characterAvatar ?? null,
     }));
 
@@ -1129,13 +1366,13 @@ const app = new Hono<{ Bindings: Bindings }>()
       })
       .onConflictDoNothing();
 
-    const ch = await fetchCharacterForConversation(database, resolvedCharacterId);
-    const conversation = buildConversationResponse(
+    const conversation = await buildCreatedConversationResponse(
+      database,
+      userId,
       conversationId,
       title,
       now,
       resolvedCharacterId,
-      ch,
     );
 
     return c.json({ conversation }, 201);
@@ -1386,22 +1623,49 @@ const app = new Hono<{ Bindings: Bindings }>()
         return c.json({ error: "conversation not found" }, 404);
       }
 
-      await database.insert(messageTable).values({
-        id: payload.id,
-        userId,
-        conversationId,
-        characterId: currentConversation.characterId,
-        role: payload.role,
-        content: payload.content,
-        imageUrl: payload.imageUrl,
-        imageKey: payload.imageKey,
-        createdAt: Date.now(),
-      });
+      const now = Date.now();
+      const assistantContent =
+        payload.role === "assistant"
+          ? prepareAssistantContent(payload.content)
+          : { rememberNotes: [], visibleContent: payload.content };
 
-      await database
-        .update(conversationTable)
-        .set({ updatedAt: Date.now() })
-        .where(and(eq(conversationTable.id, conversationId), eq(conversationTable.userId, userId)));
+      try {
+        await database.insert(messageTable).values({
+          id: payload.id,
+          userId,
+          conversationId,
+          characterId: currentConversation.characterId,
+          role: payload.role,
+          content: assistantContent.visibleContent,
+          imageUrl: payload.imageUrl,
+          imageKey: payload.imageKey,
+          createdAt: now,
+        });
+
+        if (assistantContent.rememberNotes.length > 0) {
+          // D1 local では drizzle transaction が BEGIN を発行して失敗するため逐次実行する
+          await database.insert(memoryNoteTable).values(
+            assistantContent.rememberNotes.map((note) => ({
+              id: crypto.randomUUID(),
+              userId,
+              characterId: currentConversation.characterId,
+              content: note,
+              sourceMessageId: payload.id,
+              createdAt: now,
+            })),
+          );
+        }
+
+        await database
+          .update(conversationTable)
+          .set({ updatedAt: now })
+          .where(
+            and(eq(conversationTable.id, conversationId), eq(conversationTable.userId, userId)),
+          );
+      } catch (error) {
+        console.error("failed to persist message and memory_note", error);
+        return c.json({ error: "failed to persist message" }, 500);
+      }
 
       return c.json({ ok: true }, 201);
     },
@@ -1488,11 +1752,56 @@ const app = new Hono<{ Bindings: Bindings }>()
       const { content } = c.req.valid("json");
       const database = drizzle(c.env.DB);
       const userId = await ensureUser(database, userEmail);
+      const messageRows = await database
+        .select({ role: messageTable.role, characterId: messageTable.characterId })
+        .from(messageTable)
+        .where(and(eq(messageTable.id, messageId), eq(messageTable.userId, userId)))
+        .limit(1);
 
-      await database
-        .update(messageTable)
-        .set({ content })
-        .where(and(eq(messageTable.id, messageId), eq(messageTable.userId, userId)));
+      const currentMessage = messageRows[0];
+      if (!currentMessage) {
+        return c.json({ error: "message not found" }, 404);
+      }
+
+      const assistantContent =
+        currentMessage.role === "assistant"
+          ? prepareAssistantContent(content)
+          : { rememberNotes: [], visibleContent: content };
+
+      try {
+        await database
+          .update(messageTable)
+          .set({ content: assistantContent.visibleContent })
+          .where(and(eq(messageTable.id, messageId), eq(messageTable.userId, userId)));
+
+        if (currentMessage.role === "assistant") {
+          await database
+            .delete(memoryNoteTable)
+            .where(
+              and(
+                eq(memoryNoteTable.userId, userId),
+                eq(memoryNoteTable.sourceMessageId, messageId),
+              ),
+            );
+
+          if (assistantContent.rememberNotes.length > 0) {
+            // D1 local では drizzle transaction が BEGIN を発行して失敗するため逐次実行する
+            await database.insert(memoryNoteTable).values(
+              assistantContent.rememberNotes.map((note) => ({
+                id: crypto.randomUUID(),
+                userId,
+                characterId: currentMessage.characterId,
+                content: note,
+                sourceMessageId: messageId,
+                createdAt: Date.now(),
+              })),
+            );
+          }
+        }
+      } catch (error) {
+        console.error("failed to update message and memory_note", error);
+        return c.json({ error: "failed to update message" }, 500);
+      }
 
       return c.json({ ok: true });
     },
@@ -1524,6 +1833,7 @@ const app = new Hono<{ Bindings: Bindings }>()
       c.env.OPENROUTER_API_KEY,
       c.env.APP_ORIGIN ?? "https://ai-chat.app",
       model,
+      phase,
       finalMessages,
     );
 
@@ -1539,7 +1849,7 @@ const app = new Hono<{ Bindings: Bindings }>()
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
         Connection: "keep-alive",
-        "X-Model-Used": usedModel,
+        "x-model-used": usedModel,
       },
     });
   })

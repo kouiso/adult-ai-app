@@ -1,9 +1,9 @@
-import type { Page } from "playwright";
-
 import { buildLocalAuthHeaders, installLocalApiAuth } from "./auth";
 import { waitForDomReady } from "./browser-wait";
+
 import type { E2eEnv } from "./env";
 import type { ScenarioId } from "./types";
+import type { Page } from "playwright";
 
 export type ScenarioSetup = {
   scenarioId: ScenarioId;
@@ -57,12 +57,14 @@ const normalizeToken = (value: string): string =>
   value
     .trim()
     .toLowerCase()
-    .replace(/[_\s]+/g, "-")
+    .replace(/[\s_]+/g, "-")
     .replace(/[^\p{L}\p{N}-]+/gu, "");
 
 const isDefaultCharacterSlug = (characterSlug: string): boolean => {
   const normalized = normalizeToken(characterSlug);
-  return normalized === "" || normalized === "default" || normalized === "ai" || normalized === "sakura";
+  return (
+    normalized === "" || normalized === "default" || normalized === "ai" || normalized === "sakura"
+  );
 };
 
 const matchCharacter = (
@@ -141,10 +143,7 @@ const dismissAgeGateIfPresent = async (page: Page): Promise<void> => {
   await ageGate.waitFor({ state: "hidden", timeout: 10_000 });
 };
 
-const seedE2eSettings = async (
-  page: Page,
-  activeCharacterId: string | null,
-): Promise<void> => {
+const seedE2eSettings = async (page: Page, activeCharacterId: string | null): Promise<void> => {
   const persisted = JSON.stringify({
     state: {
       model: E2E_MODEL,

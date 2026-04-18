@@ -106,8 +106,9 @@ function parseSseChunk(data: string): string | "[DONE]" | null {
   try {
     const parsed: { choices?: Array<{ delta?: { content?: string } }> } = JSON.parse(data);
     return parsed.choices?.[0]?.delta?.content ?? null;
-  } catch {
+  } catch (error) {
     // SSEストリームでの不完全なJSONチャンクは正常の範囲なので次へ進む
+    console.error("failed to parse SSE chunk", error);
     return null;
   }
 }
@@ -208,6 +209,7 @@ export async function streamChat(
 
     await processStream(response.body, onChunk, onDone);
   } catch (err) {
+    console.error("streamChat failed", err);
     onError(String(err));
   }
 }
@@ -216,8 +218,14 @@ export async function streamChat(
 // 応答完了後に品質チェックを行い、不合格なら自動再生成する
 import { buildRetryMessages } from "@/lib/chat-message-adapter";
 import type { QualityCheckContext } from "@/lib/quality-guard";
-import { MAX_QUALITY_RETRIES, runQualityChecks } from "@/lib/quality-guard";
+import { getMaxQualityRetries, runQualityChecks } from "@/lib/quality-guard";
+import type { ScenePhase } from "@/lib/scene-phase";
 import { isXmlResponse, wrapConversationPlainAsXml } from "@/lib/xml-response-parser";
+
+export interface ChatStreamResult {
+  content: string;
+  warningLevel?: boolean;
+}
 
 // SSEストリームを全て読み取り、完全なテキストを返す（再生成判定用）
 async function collectStreamResponse(
@@ -274,12 +282,17 @@ async function streamFirstAttempt(
 // 最終リトライでもなお平文の場合のみ<response><dialogue>で救済ラップする。
 // 理由: T1でモデルがXMLを無視する問題の根本対策はリトライ指示による矯正。
 // 全attemptで即座にラップすると<narration>/<inner>が永久に欠落する。
-function applyConversationXmlFallback(response: string, phase: string, attempt: number): string {
+function applyConversationXmlFallback(
+  response: string,
+  phase: ScenePhase,
+  attempt: number,
+): string {
+  const maxRetries = getMaxQualityRetries(phase);
   if (
     phase === "conversation" &&
     !isXmlResponse(response) &&
     response.trim().length >= 4 &&
-    attempt >= MAX_QUALITY_RETRIES
+    attempt >= maxRetries
   ) {
     return wrapConversationPlainAsXml(response);
   }
@@ -287,9 +300,8 @@ function applyConversationXmlFallback(response: string, phase: string, attempt: 
 }
 
 type QualityAttemptResult =
-  | { status: "pass"; response: string; isRetry: boolean }
-  | { status: "retry"; response: string }
-  | { status: "exhausted"; failedCheck: string }
+  | { status: "pass"; response: string; isRetry: boolean; warningLevel?: boolean }
+  | { status: "retry"; response: string; failedCheck: string }
   | { status: "error"; message: string };
 
 async function executeQualityAttempt(
@@ -299,13 +311,15 @@ async function executeQualityAttempt(
   qualityContext: QualityCheckContext,
   attempt: number,
   prevResponse: string,
+  prevFailedCheck: string | null,
 ): Promise<QualityAttemptResult> {
   try {
+    const maxRetries = getMaxQualityRetries(qualityContext.phase);
     const response =
       attempt === 0
         ? await streamFirstAttempt(messages, model, onChunk)
         : await collectStreamResponse(
-            buildRetryMessages(messages, prevResponse, qualityContext),
+            buildRetryMessages(messages, prevResponse, qualityContext, prevFailedCheck),
             model,
           );
 
@@ -320,14 +334,21 @@ async function executeQualityAttempt(
     if (checkResult.passed) {
       return { status: "pass", response: fallbackApplied, isRetry: attempt > 0 };
     }
-    if (attempt >= MAX_QUALITY_RETRIES) {
+    if (attempt >= maxRetries) {
       return {
-        status: "exhausted",
-        failedCheck: checkResult.failedCheck ?? "unknown",
+        status: "pass",
+        response: fallbackApplied,
+        isRetry: attempt > 0,
+        warningLevel: true,
       };
     }
-    return { status: "retry", response: fallbackApplied };
+    return {
+      status: "retry",
+      response: fallbackApplied,
+      failedCheck: checkResult.failedCheck ?? "unknown",
+    };
   } catch (err) {
+    console.error("executeQualityAttempt failed", err);
     return { status: "error", message: String(err) };
   }
 }
@@ -336,13 +357,15 @@ export async function streamChatWithQualityGuard(
   messages: { role: "system" | "user" | "assistant"; content: string }[],
   model: string,
   onChunk: (text: string) => void,
-  onDone: (finalText: string) => void,
+  onDone: (result: ChatStreamResult) => void,
   onError: (error: string) => void,
   qualityContext: QualityCheckContext,
 ): Promise<void> {
   let lastResponse = "";
+  let lastFailedCheck: string | null = null;
+  const maxRetries = getMaxQualityRetries(qualityContext.phase);
 
-  for (let attempt = 0; attempt <= MAX_QUALITY_RETRIES; attempt++) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const result = await executeQualityAttempt(
       messages,
       model,
@@ -350,21 +373,18 @@ export async function streamChatWithQualityGuard(
       qualityContext,
       attempt,
       lastResponse,
+      lastFailedCheck,
     );
 
     switch (result.status) {
       case "pass":
         if (result.isRetry) onChunk(result.response);
-        onDone(result.response);
+        onDone({ content: result.response, warningLevel: result.warningLevel });
         return;
       case "retry":
         lastResponse = result.response;
+        lastFailedCheck = result.failedCheck;
         break;
-      case "exhausted":
-        onError(
-          `quality-guard failed after ${MAX_QUALITY_RETRIES + 1} attempts (${result.failedCheck}). Press regenerate to try again.`,
-        );
-        return;
       case "error":
         onError(result.message);
         return;

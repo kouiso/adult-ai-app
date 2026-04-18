@@ -16,15 +16,35 @@ import {
 import { Button } from "@/component/ui/button";
 import { ScrollArea } from "@/component/ui/scroll-area";
 import { Skeleton } from "@/component/ui/skeleton";
+import type { SceneCard } from "@/data/scene-cards";
 import type { ConversationSummary } from "@/lib/api";
 import { cn } from "@/lib/utils";
+
+import { ContinueConversationCard } from "./continue-conversation-card";
+import { SceneCardPicker } from "./scene-card-picker";
+
+type ContinueConversationCardData = {
+  conversationId: string;
+  characterName: string;
+  characterAvatar: string | null;
+  updatedAt: number;
+  messages: {
+    id: string;
+    role: "system" | "user" | "assistant";
+    content: string;
+    createdAt: number;
+  }[];
+};
 
 interface ConversationListProps {
   conversations: ConversationSummary[];
   currentConversationId: string | null;
   isLoading: boolean;
+  continueConversationCard: ContinueConversationCardData | null;
+  sceneCards: readonly SceneCard[];
   onSelect: (conversationId: string) => void;
   onCreate: () => void | Promise<void>;
+  onStartScene: (scene: SceneCard) => void | Promise<void>;
   onDelete: (conversationId: string) => void | Promise<void>;
   onDeleteAll: () => void | Promise<void>;
 }
@@ -44,8 +64,11 @@ export const ConversationList = memo(
     conversations,
     currentConversationId,
     isLoading,
+    continueConversationCard,
+    sceneCards,
     onSelect,
     onCreate,
+    onStartScene,
     onDelete,
     onDeleteAll,
   }: ConversationListProps) => (
@@ -86,6 +109,23 @@ export const ConversationList = memo(
       </div>
       <ScrollArea className="h-0 flex-1">
         <div className="space-y-1 p-2">
+          {continueConversationCard ? (
+            <div className="mb-3">
+              <ContinueConversationCard
+                conversationId={continueConversationCard.conversationId}
+                characterName={continueConversationCard.characterName}
+                characterAvatar={continueConversationCard.characterAvatar}
+                updatedAt={continueConversationCard.updatedAt}
+                messages={continueConversationCard.messages}
+                onContinue={onSelect}
+              />
+            </div>
+          ) : null}
+
+          <div className="mb-3 rounded-2xl border border-border/60 bg-card/50 p-3">
+            <SceneCardPicker sceneCards={sceneCards} onSelect={onStartScene} layout="list" />
+          </div>
+
           {isLoading && conversations.length === 0 && (
             <>
               <div className="rounded-md border px-3 py-2">

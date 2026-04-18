@@ -3,11 +3,13 @@ import { promises as fs } from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { promisify } from "node:util";
+
 import { z } from "zod";
 
-import type { E2eEnv } from "./env";
 import { classifyFailure } from "./failure-taxonomy";
 import { atomicWriteJson, getPaths } from "./manifest";
+
+import type { E2eEnv } from "./env";
 import type { PreflightCheckResult, PreflightReport } from "./types";
 
 const execFileAsync = promisify(execFile);
@@ -63,10 +65,8 @@ const formatError = (error: unknown): string => {
       : error instanceof Error
         ? error.message
         : String(error);
-  const stderr =
-    parsed.success && parsed.data.stderr ? parsed.data.stderr.trim() : "";
-  const stdout =
-    parsed.success && parsed.data.stdout ? parsed.data.stdout.trim() : "";
+  const stderr = parsed.success && parsed.data.stderr ? parsed.data.stderr.trim() : "";
+  const stdout = parsed.success && parsed.data.stdout ? parsed.data.stdout.trim() : "";
   const category = classifyFailure({ message, context: "preflight" });
   const fragments = [`[${category}] ${message}`];
   if (stderr.length > 0) fragments.push(`stderr=${stderr}`);
@@ -111,10 +111,7 @@ const execCommand = async (
   return { stdout, stderr };
 };
 
-const fetchWithTimeout = async (
-  input: string,
-  timeoutMs: number,
-): Promise<Response> =>
+const fetchWithTimeout = async (input: string, timeoutMs: number): Promise<Response> =>
   fetch(input, {
     method: "GET",
     signal: AbortSignal.timeout(timeoutMs),
@@ -153,22 +150,14 @@ const readFileIfExists = async (filePath: string): Promise<string | null> => {
   try {
     return await fs.readFile(filePath, "utf8");
   } catch (error) {
-    if (
-      error instanceof Error &&
-      "code" in error &&
-      error.code === "ENOENT"
-    ) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
       return null;
     }
     throw error;
   }
 };
 
-const extractColumnName = (
-  source: string,
-  pattern: RegExp,
-  label: string,
-): string => {
+const extractColumnName = (source: string, pattern: RegExp, label: string): string => {
   const match = source.match(pattern);
   const value = match?.[1]?.trim();
   if (!value) {
@@ -178,13 +167,12 @@ const extractColumnName = (
 };
 
 const loadSchemaColumns = async (): Promise<SchemaColumns> => {
-  const [userSchema, conversationSchema, messageSchema, usageLogSchema] =
-    await Promise.all([
-      fs.readFile(path.join(PROJECT_ROOT, "src/schema/user.ts"), "utf8"),
-      fs.readFile(path.join(PROJECT_ROOT, "src/schema/conversation.ts"), "utf8"),
-      fs.readFile(path.join(PROJECT_ROOT, "src/schema/message.ts"), "utf8"),
-      fs.readFile(path.join(PROJECT_ROOT, "src/schema/usage-log.ts"), "utf8"),
-    ]);
+  const [userSchema, conversationSchema, messageSchema, usageLogSchema] = await Promise.all([
+    fs.readFile(path.join(PROJECT_ROOT, "src/schema/user.ts"), "utf8"),
+    fs.readFile(path.join(PROJECT_ROOT, "src/schema/conversation.ts"), "utf8"),
+    fs.readFile(path.join(PROJECT_ROOT, "src/schema/message.ts"), "utf8"),
+    fs.readFile(path.join(PROJECT_ROOT, "src/schema/usage-log.ts"), "utf8"),
+  ]);
 
   return {
     userEmail: extractColumnName(userSchema, /email:\s*text\("([^"]+)"/, "user.email"),
@@ -254,10 +242,7 @@ const extractCountFromJson = (stdout: string): number | null => {
       if (!row) continue;
       for (const value of Object.values(row)) {
         const normalized = countValueSchema.parse(value);
-        const count =
-          typeof normalized === "number"
-            ? normalized
-            : Number.parseInt(normalized, 10);
+        const count = typeof normalized === "number" ? normalized : Number.parseInt(normalized, 10);
         if (Number.isFinite(count)) {
           return count;
         }
@@ -272,8 +257,8 @@ const extractCountFromJson = (stdout: string): number | null => {
 const extractCountFromText = (stdout: string): number | null => {
   const directCount =
     stdout.match(/"count"\s*:\s*(\d+)/i) ??
-    stdout.match(/\bcount\b[^\d]*(\d+)/i) ??
-    stdout.match(/\bCOUNT\(\*\)\b[^\d]*(\d+)/i) ??
+    stdout.match(/\bcount\b\D*(\d+)/i) ??
+    stdout.match(/\bcount\(\*\)\b\D*(\d+)/i) ??
     stdout.match(/\b(\d+)\b/);
   if (!directCount?.[1]) {
     return null;
@@ -434,7 +419,8 @@ const checkD1Reset = async (): Promise<CheckOutcome> => {
   for (let attempt = 1; attempt <= SQLITE_BUSY_RETRIES; attempt += 1) {
     try {
       const { stdout, stderr } = await runWranglerD1(sql);
-      const detail = stderr.trim().length > 0 ? `${stdout.trim()} | ${stderr.trim()}` : stdout.trim();
+      const detail =
+        stderr.trim().length > 0 ? `${stdout.trim()} | ${stderr.trim()}` : stdout.trim();
       return {
         status: "pass",
         detail:
@@ -539,10 +525,7 @@ const checkVersionPin = async (configuredModel: string): Promise<CheckOutcome> =
   };
 };
 
-export async function runPreflight(
-  env: E2eEnv,
-  configuredModel: string,
-): Promise<PreflightReport> {
+export async function runPreflight(env: E2eEnv, configuredModel: string): Promise<PreflightReport> {
   const startedAt = new Date().toISOString();
   const checks = await Promise.all([
     runCheck("cdp.port_open", async () => checkCdpPortOpen(env)),

@@ -43,3 +43,18 @@ scenario-*.png
 public/iter-attempt-*.png
 public/visual-check-*.png
 e2e-results/
+
+# Working files (session artifacts, test results, handoff notes)
+.work/
+
+# Serena IDE config
+.serena/
+
+# Parallel worktrees (codex/agent sandboxes)
+.worktrees/
+
+# Lighthouse audit artifacts
+docs/lighthouse-*/
+docs/report.html
+docs/report.json
+docs/lighthouse-baseline-screenshot.png

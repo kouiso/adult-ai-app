@@ -138,6 +138,7 @@ export function buildRetryMessages(
     firstPerson?: string;
     prevAssistantResponse?: string;
   },
+  failedCheck?: string | null,
 ): ApiMessage[] {
   // banList注入を廃止: 前ターンのフレーズ禁止はクライマックスシーンで
   // 必然的に反復する官能語彙まで殺し、リトライごとに語彙空間が縮小 →
@@ -148,13 +149,35 @@ export function buildRetryMessages(
   const fpHint = qualityContext.firstPerson
     ? `\n一人称は「${qualityContext.firstPerson}」を使うこと。${banned.map((b) => `「${b}」`).join("")}は禁止。`
     : "";
+  const failureHint = (() => {
+    switch (failedCheck) {
+      case "no-english":
+        return "\n英単語・アルファベットは本文に一切含めないこと。日本語だけで自然に書き直すこと。";
+      case "within-turn-repetition":
+        return "\n前回と同じ台詞・比喩・文末を繰り返さず、別の展開と語彙で書き直すこと。";
+      case "xml-format-missing":
+        return "\n<response><narration>...</narration><dialogue>...</dialogue><inner>...</inner></response> を厳守すること。";
+      case "meta_remark":
+        return "\n説明口調や注釈をやめ、キャラクター本人として会話だけを返すこと。";
+      case "user-leak":
+        return "\n「ユーザー」という単語を使わず、相手を先輩として自然に呼ぶこと。";
+      case "wrong-first-person":
+        return "\n一人称の逸脱を絶対に繰り返さないこと。";
+      case "conversation-over-escalation":
+        return "\n会話フェーズです。キス・抱擁・脱衣・性的接触を既成事実として書かず、視線・間・鼓動の乱れだけで書き直すこと。";
+      default:
+        return "";
+    }
+  })();
 
   return [
     ...originalMessages,
     { role: "assistant" as const, content: lastResponse },
     {
       role: "user" as const,
-      content: `品質チェックに不合格でした。別の展開で書き直してください。<response>XMLフォーマットで出力すること。日本語のみ。${fpHint}`,
+      content:
+        `品質チェックに不合格でした。別の展開で最初から書き直してください。` +
+        `<response>XMLフォーマットで出力すること。日本語のみ。${fpHint}${failureHint}`,
     },
   ];
 }

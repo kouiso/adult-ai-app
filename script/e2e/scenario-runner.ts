@@ -1,8 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import type { Browser, ConsoleMessage, Page, Response } from "playwright";
-
 import { getQueue } from "./action-queue";
 import { buildLocalAuthHeaders } from "./auth";
 import { heartbeat, closeContext, createContext } from "./browser";
@@ -13,14 +11,29 @@ import {
   waitForStreamComplete,
 } from "./browser-wait";
 import { setupFreshConversation } from "./conversation-setup";
-import type { E2eEnv } from "./env";
 import { classifyFailure, type FailureCategory } from "./failure-taxonomy";
 import { runD1PersistenceJudge } from "./judges/d1-persistence";
 import { probeR2Stages, runR2PersistenceJudge } from "./judges/r2-persistence";
 import { judgePhase } from "./judges/scene-phase";
 import { runUISuccessJudge } from "./judges/ui-success";
-import { appendImage, appendTurn, atomicWriteJson, getScenarioDir, getScenarioImagesDir } from "./manifest";
-import type { JudgeVerdict, JudgeVerdictSet, Phase, ScenarioId, ScenarioResult, TurnResult } from "./types";
+import {
+  appendImage,
+  appendTurn,
+  atomicWriteJson,
+  getScenarioDir,
+  getScenarioImagesDir,
+} from "./manifest";
+
+import type { E2eEnv } from "./env";
+import type {
+  JudgeVerdict,
+  JudgeVerdictSet,
+  Phase,
+  ScenarioId,
+  ScenarioResult,
+  TurnResult,
+} from "./types";
+import type { Browser, ConsoleMessage, Page, Response } from "playwright";
 
 export type ScenarioDefinition = {
   scenarioId: ScenarioId;
@@ -110,10 +123,7 @@ const parsePersistedMessages = (value: unknown): PersistedMessage[] => {
     if (!isRecord(entry)) return [];
     const role = readString(entry.role);
     const content = readString(entry.content);
-    if (
-      (role === "user" || role === "assistant" || role === "system") &&
-      content !== null
-    ) {
+    if ((role === "user" || role === "assistant" || role === "system") && content !== null) {
       return [{ role, content }];
     }
     return [];
@@ -125,14 +135,16 @@ const listPersistedMessages = async (
   env: E2eEnv,
   conversationId: string,
 ): Promise<PersistedMessage[]> => {
-  const response = await page.context().request.get(
-    `${env.devOrigin}/api/conversations/${encodeURIComponent(conversationId)}/messages`,
-    {
-      failOnStatusCode: false,
-      headers: buildLocalAuthHeaders(env.userEmail),
-      timeout: 30_000,
-    },
-  );
+  const response = await page
+    .context()
+    .request.get(
+      `${env.devOrigin}/api/conversations/${encodeURIComponent(conversationId)}/messages`,
+      {
+        failOnStatusCode: false,
+        headers: buildLocalAuthHeaders(env.userEmail),
+        timeout: 30_000,
+      },
+    );
   if (!response.ok()) {
     throw new Error(`list messages failed: ${response.status()}`);
   }
@@ -163,7 +175,7 @@ const parseQualityGuardEvent = (msg: ConsoleMessage): QualityGuardEvent | null =
 
   const attemptMatch = text.match(/attempt=(\d+)/);
   const passedMatch = text.match(/passed=(true|false)/);
-  const failedMatch = text.match(/failed=([^\s]+)/);
+  const failedMatch = text.match(/failed=(\S+)/);
   const attempt = attemptMatch ? Number(attemptMatch[1]) : 0;
   const passed = passedMatch ? passedMatch[1] === "true" : false;
   const failedCheck = failedMatch && failedMatch[1] !== "none" ? failedMatch[1] : null;
@@ -283,7 +295,9 @@ const captureImageResult = async (
 const aggregateJudgeVerdict = (
   verdicts: Array<JudgeVerdict | null | undefined>,
 ): JudgeVerdict | null => {
-  const present = verdicts.filter((verdict): verdict is JudgeVerdict => verdict !== null && verdict !== undefined);
+  const present = verdicts.filter(
+    (verdict): verdict is JudgeVerdict => verdict !== null && verdict !== undefined,
+  );
   if (present.length === 0) return null;
 
   const failure = present.find((verdict) => !verdict.pass);
@@ -436,7 +450,12 @@ export async function runScenario(
           );
 
           const assistantMsg = await readAssistantText(page);
-          const screenshotPath = await takeTurnScreenshot(page, runDir, def.scenarioId, turn.turnIndex);
+          const screenshotPath = await takeTurnScreenshot(
+            page,
+            runDir,
+            def.scenarioId,
+            turn.turnIndex,
+          );
           const persistedMessages = await listPersistedMessages(page, env, scenario.conversationId);
           const renderedMessageCount = await readRenderedMessageCount(page);
           const phaseJudgment = judgePhase({
@@ -450,8 +469,10 @@ export async function runScenario(
 
           const turnQualityEvents = qualityEvents.slice(qualityStart);
           const turnResponses = chatResponses.slice(responseStart);
-          const qualityRetries =
-            turnQualityEvents.reduce((max, event) => Math.max(max, event.attempt), 0);
+          const qualityRetries = turnQualityEvents.reduce(
+            (max, event) => Math.max(max, event.attempt),
+            0,
+          );
           const finalQualityEvent = turnQualityEvents.at(-1) ?? null;
           const failedCheck =
             finalQualityEvent && !finalQualityEvent.passed ? finalQualityEvent.failedCheck : null;
@@ -565,9 +586,12 @@ export async function runScenario(
         } catch (error) {
           const detail = toFailureDetail(error);
           const failureCategory = classifyFailure({ message: detail, context: "browser" });
-          const screenshotPath = await takeTurnScreenshot(page, runDir, def.scenarioId, turn.turnIndex).catch(
-            async () => screenshotFallbackPath,
-          );
+          const screenshotPath = await takeTurnScreenshot(
+            page,
+            runDir,
+            def.scenarioId,
+            turn.turnIndex,
+          ).catch(async () => screenshotFallbackPath);
           const persistedMessageCount = await listPersistedMessages(
             page,
             env,

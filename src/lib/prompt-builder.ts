@@ -4,10 +4,22 @@
 interface PromptFields {
   name: string;
   personality: string;
+  appearance?: string;
   scenario: string;
   custom: string;
+  memoryNotes?: string[];
+  totalMessageCount?: number;
 }
 
+interface ParsedSystemPrompt {
+  personality: string;
+  scenario: string;
+  custom: string;
+  appearance?: string;
+}
+
+// サーバー側にも近い規則があるが、ここはキャラカード保存用の下書き生成を担う。
+// 理由: 編集時プレビューの安定化が目的で、実行時の最終強制はAPI側に残す必要がある。
 const BASE_RULES = `[ABSOLUTE LANGUAGE RULE - TOP PRIORITY]
 You MUST respond ONLY in Japanese (日本語). Every word of dialogue and narration must be Japanese.
 Never output English words, Chinese, Russian, Thai, or any non-Japanese text in your response.
@@ -59,9 +71,28 @@ function sanitizeField(text: string): string {
 
 // パース用のセクションマーカー
 const SECTION_PERSONALITY = "【キャラクター】" as const;
+const SECTION_APPEARANCE = "【外見】" as const;
+const SECTION_RELATIONSHIP = "【関係性】" as const;
 const SECTION_SCENARIO = "【シナリオ】" as const;
 const SECTION_CUSTOM = "【追加設定】" as const;
 const SECTION_CARD = "【キャラカード】" as const;
+
+export function getHonorificStage(totalMessageCount: number): string {
+  if (totalMessageCount <= 10) {
+    return "呼び方は苗字+さん (例: 磯貝さん)";
+  }
+  if (totalMessageCount <= 50) {
+    return "呼び方は苗字呼び捨て or 名前+さん (例: 磯貝 / 孝輔さん)";
+  }
+  if (totalMessageCount <= 200) {
+    return "呼び方は名前 (例: 孝輔)";
+  }
+  return "呼び方は愛称 or 2 人だけの呼び方 (例: こうちゃん)";
+}
+
+export function getCallingStyleInstruction(totalMessageCount: number): string {
+  return getHonorificStage(totalMessageCount);
+}
 
 function extractSection(prompt: string, marker: string, endMarkers: string[]): string {
   const startIdx = prompt.indexOf(marker);
@@ -94,42 +125,63 @@ function stripBaseRules(prompt: string): string {
   return prompt;
 }
 
-export function buildSystemPrompt(fields: PromptFields): string {
-  const sections: string[] = [BASE_RULES];
+function buildMemoryNotesSection(memoryNotes: string[] | undefined): string {
+  if (!memoryNotes || memoryNotes.length === 0) return "";
 
+  const sanitizedNotes = memoryNotes
+    .map((note) => sanitizeField(note).trim())
+    .filter((note) => note.length > 0);
+
+  if (sanitizedNotes.length === 0) return "";
+
+  return `\n## 覚えていること\n${sanitizedNotes.map((note) => `- ${note}`).join("\n")}`;
+}
+
+function buildPromptSection(title: string, content: string, prefixNewline = true): string | null {
+  if (!content) return null;
+  return `${prefixNewline ? "\n" : ""}${title}\n${content}`;
+}
+
+function buildPersonalitySection(name: string, personality: string): string | null {
+  if (!name && !personality) return null;
+
+  const lines = [`\n${SECTION_PERSONALITY}`];
+  if (name) lines.push(`名前: ${name}`);
+  if (personality) lines.push(personality);
+  return lines.join("\n");
+}
+
+export function buildSystemPrompt(fields: PromptFields): string {
   const name = sanitizeField(fields.name);
   const personality = sanitizeField(fields.personality);
+  const appearance = sanitizeField(fields.appearance ?? "");
   const scenario = sanitizeField(fields.scenario);
   const custom = sanitizeField(fields.custom);
+  const memoryNotesSection = buildMemoryNotesSection(fields.memoryNotes);
+  const relationshipInstruction =
+    typeof fields.totalMessageCount === "number" ? getHonorificStage(fields.totalMessageCount) : "";
 
-  if (name || personality) {
-    const lines = [`\n${SECTION_PERSONALITY}`];
-    if (name) lines.push(`名前: ${name}`);
-    if (personality) lines.push(personality);
-    sections.push(lines.join("\n"));
-  }
-
-  if (scenario) {
-    sections.push(`\n${SECTION_SCENARIO}\n${scenario}`);
-  }
-
-  if (custom) {
-    sections.push(`\n${SECTION_CUSTOM}\n${custom}`);
-  }
-
-  return sections.join("\n");
+  return [
+    BASE_RULES,
+    memoryNotesSection,
+    buildPersonalitySection(name, personality),
+    buildPromptSection(SECTION_APPEARANCE, appearance),
+    buildPromptSection(SECTION_RELATIONSHIP, relationshipInstruction),
+    buildPromptSection(SECTION_SCENARIO, scenario),
+    buildPromptSection(SECTION_CUSTOM, custom),
+  ]
+    .filter((section): section is string => Boolean(section))
+    .join("\n");
 }
 
 // 既存のシステムプロンプトからフィールドを逆パースする
 // 自動構築されたプロンプトはセクションマーカーで分割できる
 // 手動で書かれた古い形式のプロンプトはcustomフィールドにフォールバック
-export function parseSystemPrompt(prompt: string): {
-  personality: string;
-  scenario: string;
-  custom: string;
-} {
+export function parseSystemPrompt(prompt: string): ParsedSystemPrompt {
   const hasMarkers =
     prompt.includes(SECTION_PERSONALITY) ||
+    prompt.includes(SECTION_APPEARANCE) ||
+    prompt.includes(SECTION_RELATIONSHIP) ||
     prompt.includes(SECTION_SCENARIO) ||
     prompt.includes(SECTION_CUSTOM);
 
@@ -139,6 +191,14 @@ export function parseSystemPrompt(prompt: string): {
   }
 
   const personality = extractSection(prompt, SECTION_PERSONALITY, [
+    SECTION_APPEARANCE,
+    SECTION_RELATIONSHIP,
+    SECTION_SCENARIO,
+    SECTION_CUSTOM,
+    SECTION_CARD,
+  ]);
+  const appearance = extractSection(prompt, SECTION_APPEARANCE, [
+    SECTION_RELATIONSHIP,
     SECTION_SCENARIO,
     SECTION_CUSTOM,
     SECTION_CARD,
@@ -157,5 +217,26 @@ export function parseSystemPrompt(prompt: string): {
     personality: personalityCleaned,
     scenario: scenario.trim(),
     custom: custom.trim(),
+    appearance: appearance.trim() || undefined,
   };
+}
+
+export function injectMemoryNotesIntoSystemPrompt(
+  prompt: string,
+  name: string,
+  memoryNotes: string[],
+  totalMessageCount?: number,
+): string {
+  if (memoryNotes.length === 0 && totalMessageCount === undefined) return prompt;
+
+  const parsed = parseSystemPrompt(prompt);
+  return buildSystemPrompt({
+    name,
+    personality: parsed.personality,
+    appearance: parsed.appearance,
+    scenario: parsed.scenario,
+    custom: parsed.custom,
+    memoryNotes,
+    totalMessageCount,
+  });
 }

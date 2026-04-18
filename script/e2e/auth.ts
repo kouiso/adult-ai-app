@@ -2,9 +2,7 @@ import type { Page, Route } from "playwright";
 
 const LOCAL_AUTH_HEADER = "CF-Access-Authenticated-User-Email";
 
-export const buildLocalAuthHeaders = (
-  userEmail: string,
-): Record<string, string> => ({
+export const buildLocalAuthHeaders = (userEmail: string): Record<string, string> => ({
   [LOCAL_AUTH_HEADER]: userEmail,
 });
 

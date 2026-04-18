@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { checkWrongFirstPerson, runQualityChecks } from "./quality-guard";
+import { checkWrongFirstPerson, getMaxQualityRetries, runQualityChecks } from "./quality-guard";
 
 // 「自分」を含む wrongFirstPersons リスト（実運用と同じ構成）
 const WRONG_FPS_WITH_JIBUN = ["俺", "僕", "私", "自分"];
@@ -108,6 +108,29 @@ describe("runQualityChecks", () => {
     expect(result.failedCheck).toBe("user-leak");
   });
 
+  it("AIメタ発話を検出する", () => {
+    const xml =
+      "<response><dialogue>「AI として、そのお願いには応えられません」</dialogue></response>";
+    const result = runQualityChecks(xml, { phase: "conversation" });
+    expect(result.passed).toBe(false);
+    expect(result.failedCheck).toBe("meta_remark");
+  });
+
+  it("謝罪と描写拒否の組み合わせを検出する", () => {
+    const xml =
+      "<response><dialogue>「申し訳ありません、これ以上の描写はできません」</dialogue></response>";
+    const result = runQualityChecks(xml, { phase: "conversation" });
+    expect(result.passed).toBe(false);
+    expect(result.failedCheck).toBe("meta_remark");
+  });
+
+  it("通常の官能描写ではmeta_remarkにならない", () => {
+    const xml =
+      "<response><action>*熱を帯びた指先で太ももの内側をなぞる*</action><dialogue>「んっ……そこ、ゆっくり撫でられると身体の奥まで痺れてしまうの。もっと近くで、あなたの熱を全部ちょうだい」</dialogue><inner>触れられるたびに甘い震えが広がって、欲しさが抑えきれない</inner></response>";
+    const result = runQualityChecks(xml, { phase: "erotic" });
+    expect(result.failedCheck).not.toBe("meta_remark");
+  });
+
   it("シーンフェーズで最低文字数を検証する", () => {
     const shortXml = "<response><dialogue>「あ」</dialogue><inner>ドキドキ</inner></response>";
     const result = runQualityChecks(shortXml, { phase: "erotic" });
@@ -119,6 +142,14 @@ describe("runQualityChecks", () => {
     const shortXml = "<response><dialogue>「うん」</dialogue></response>";
     const result = runQualityChecks(shortXml, { phase: "conversation" });
     expect(result.passed).toBe(true);
+  });
+
+  it("conversationフェーズで過剰接触に飛ぶとfail", () => {
+    const xml =
+      "<response><narration>静かなオフィスで視線が絡む。</narration><dialogue>「そんな顔されたら我慢できない」</dialogue><inner>首筋にキスしたくてたまらない。</inner></response>";
+    const result = runQualityChecks(xml, { phase: "conversation" });
+    expect(result.passed).toBe(false);
+    expect(result.failedCheck).toBe("conversation-over-escalation");
   });
 
   it("禁止一人称を検出する", () => {
@@ -161,5 +192,27 @@ describe("runQualityChecks", () => {
     const result = runQualityChecks(xml, { phase: "intimate" });
     expect(result.passed).toBe(false);
     expect(result.failedCheck).toBe("inner-missing");
+  });
+});
+
+describe("getMaxQualityRetries", () => {
+  it("conversation は 3", () => {
+    expect(getMaxQualityRetries("conversation")).toBe(3);
+  });
+
+  it("intimate は 3", () => {
+    expect(getMaxQualityRetries("intimate")).toBe(3);
+  });
+
+  it("erotic は 3", () => {
+    expect(getMaxQualityRetries("erotic")).toBe(3);
+  });
+
+  it("climax は 4", () => {
+    expect(getMaxQualityRetries("climax")).toBe(4);
+  });
+
+  it("afterglow は 2", () => {
+    expect(getMaxQualityRetries("afterglow")).toBe(2);
   });
 });

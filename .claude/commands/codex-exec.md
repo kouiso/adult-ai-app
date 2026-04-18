@@ -1,0 +1,1 @@
+../../prompt/commands/codex-exec.md

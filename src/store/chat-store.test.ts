@@ -38,6 +38,20 @@ describe("useChatStore", () => {
     expect(messages[0].isStreaming).toBe(false);
   });
 
+  it("updateMessage: warningLevel を更新できる", () => {
+    useChatStore.getState().addMessage({
+      id: "msg-warning",
+      role: "assistant",
+      content: "",
+      isStreaming: true,
+    });
+
+    useChatStore.getState().updateMessage("msg-warning", "warned content", false, true);
+
+    const { messages } = useChatStore.getState();
+    expect(messages[0].warningLevel).toBe(true);
+  });
+
   it("updateMessageImage: 画像URLが設定される", () => {
     useChatStore.getState().addMessage({
       id: "msg-1",

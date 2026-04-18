@@ -7,7 +7,7 @@
 import type { Page } from "playwright";
 
 const BASE_URL = "http://localhost:8788";
-const CDP_ENDPOINT = "http://localhost:9222";
+const CDP_ENDPOINT = "http://localhost:9223";
 // AI応答の最大待ち時間（120秒）
 const RESPONSE_TIMEOUT_MS = 120_000;
 // ターン間のクールダウン（APIレートリミット対策）
