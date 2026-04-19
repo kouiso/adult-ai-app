@@ -224,16 +224,7 @@ export function runQualityChecks(
 type RetryPhase = ScenePhase | "afterglow";
 
 export const getMaxQualityRetries = (phase: RetryPhase): number => {
-  switch (phase) {
-    case "conversation":
-      return 3;
-    case "intimate":
-      return 3;
-    case "erotic":
-      return 3;
-    case "climax":
-      return 4;
-    case "afterglow":
-      return 2;
-  }
+  // 全 phase で 1 retry に固定 (v2 budget protection)
+  void phase;
+  return 1;
 };

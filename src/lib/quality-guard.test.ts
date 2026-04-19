@@ -196,23 +196,23 @@ describe("runQualityChecks", () => {
 });
 
 describe("getMaxQualityRetries", () => {
-  it("conversation は 3", () => {
-    expect(getMaxQualityRetries("conversation")).toBe(3);
+  it("conversation は 1", () => {
+    expect(getMaxQualityRetries("conversation")).toBe(1);
   });
 
-  it("intimate は 3", () => {
-    expect(getMaxQualityRetries("intimate")).toBe(3);
+  it("intimate は 1", () => {
+    expect(getMaxQualityRetries("intimate")).toBe(1);
   });
 
-  it("erotic は 3", () => {
-    expect(getMaxQualityRetries("erotic")).toBe(3);
+  it("erotic は 1", () => {
+    expect(getMaxQualityRetries("erotic")).toBe(1);
   });
 
-  it("climax は 4", () => {
-    expect(getMaxQualityRetries("climax")).toBe(4);
+  it("climax は 1", () => {
+    expect(getMaxQualityRetries("climax")).toBe(1);
   });
 
-  it("afterglow は 2", () => {
-    expect(getMaxQualityRetries("afterglow")).toBe(2);
+  it("afterglow は 1", () => {
+    expect(getMaxQualityRetries("afterglow")).toBe(1);
   });
 });
