@@ -555,20 +555,18 @@ export async function runScenario(
           if (turn.isImageTrigger) {
             // autoGenerateImages 設定は現状 UI 上の飾りで、
             // 実際の画像生成は ChatInput の「画像生成」ボタンを押した時のみ発火する。
-            // そのため isImageTrigger turn では runner 側で明示的にボタンをクリックしてから probe する。
-            await page
-              .locator('button[title="画像生成"]')
-              .click({ timeout: 10_000 })
-              .catch(() => undefined);
+            // 初回 Novita URL の短い露出を取りこぼさないよう、probe を先に起動してから発火する。
+            const imageCapturePromise = captureImageResult(
+              page,
+              env,
+              runDir,
+              def.scenarioId,
+              scenario.conversationId,
+              turn.turnIndex,
+            );
+            await page.locator('button[title="画像生成"]').click({ timeout: 10_000 });
             const image = await withTimeout(
-              captureImageResult(
-                page,
-                env,
-                runDir,
-                def.scenarioId,
-                scenario.conversationId,
-                turn.turnIndex,
-              ),
+              imageCapturePromise,
               turnTimeoutMs,
               `turn-${turn.turnIndex}-image`,
             );

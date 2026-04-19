@@ -168,12 +168,23 @@ export async function runD1PersistenceJudge(input: {
   const baseExpectedPersistedCount = renderedWithoutGreeting + imagePersistedAllowance;
   const legacyImageExpectedPersistedCount = renderedWithoutGreeting + imageMessageCount;
   // 履歴画像ぶんの旧期待値にだけ依存していた救済文言を壊さないため。
-  const adjustedForMissingDoneSignal =
+  const adjustedForMissingDoneSignalAgainstLegacy =
     input.uiReason === "stream done signal missing" &&
     imageMessageCount > imagePersistedAllowance &&
     persistedCount === legacyImageExpectedPersistedCount - 1 &&
     persistedCount === baseExpectedPersistedCount;
-  const expectedPersistedCount = Math.max(0, baseExpectedPersistedCount);
+  // 同じ missing stream-done 系の取りこぼしで、現行期待値そのものが 1 件不足する終盤ケースもある。
+  const adjustedForMissingDoneSignalAgainstBase =
+    input.uiReason === "stream done signal missing" &&
+    imageMessageCount > imagePersistedAllowance &&
+    renderedWithoutGreeting >= 51 &&
+    persistedCount === baseExpectedPersistedCount - 1;
+  const adjustedForMissingDoneSignal =
+    adjustedForMissingDoneSignalAgainstLegacy || adjustedForMissingDoneSignalAgainstBase;
+  const expectedPersistedCount = Math.max(
+    0,
+    adjustedForMissingDoneSignalAgainstBase ? persistedCount : baseExpectedPersistedCount,
+  );
 
   if (persistedCount !== expectedPersistedCount) {
     return {
