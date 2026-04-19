@@ -452,7 +452,8 @@ function buildModelChain(model: string): string[] {
 }
 
 function shouldFallbackToNextModel(status: number, responseText: string): boolean {
-  if (status === 503) return true;
+  // 502/503/504 は OpenRouter upstream transient (v2: fallback 対象に追加)
+  if (status === 502 || status === 503 || status === 504) return true;
   return MODEL_FALLBACK_PATTERNS.some((pattern) => pattern.test(responseText));
 }
 
