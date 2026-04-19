@@ -12,7 +12,7 @@ import {
 } from "./browser-wait";
 import { setupFreshConversation } from "./conversation-setup";
 import { classifyFailure, type FailureCategory } from "./failure-taxonomy";
-import { runD1PersistenceJudge } from "./judges/d1-persistence";
+import { runD1PersistenceJudge, waitForD1Durability } from "./judges/d1-persistence";
 import { probeR2Stages, runR2PersistenceJudge } from "./judges/r2-persistence";
 import { judgePhase } from "./judges/scene-phase";
 import { runUISuccessJudge } from "./judges/ui-success";
@@ -456,6 +456,14 @@ export async function runScenario(
           );
 
           const assistantMsg = await readAssistantText(page);
+          const renderedMessageCount = await readRenderedMessageCount(page);
+          const expectedPersistedCount = Math.max(0, renderedMessageCount - greetingMessageCount);
+          // streaming 後 assistant row 永続化までの race を barrier で吸収 (v2 P0d)
+          const d1Barrier = await waitForD1Durability({
+            userEmail: env.userEmail,
+            conversationId: scenario.conversationId,
+            expectedCount: expectedPersistedCount,
+          });
           const screenshotPath = await takeTurnScreenshot(
             page,
             runDir,
@@ -463,7 +471,6 @@ export async function runScenario(
             turn.turnIndex,
           );
           const persistedMessages = await listPersistedMessages(page, env, scenario.conversationId);
-          const renderedMessageCount = await readRenderedMessageCount(page);
           const phaseJudgment = judgePhase({
             assistantMsg,
             expectedPhase: turn.expectedPhase,
@@ -507,6 +514,10 @@ export async function runScenario(
             failedCheck,
             renderedMessageCount,
             persistedMessageCount: persistedMessages.length,
+            d1BarrierSettled: d1Barrier.settled,
+            d1BarrierElapsedMs: d1Barrier.elapsedMs,
+            d1BarrierLastCount: d1Barrier.lastCount,
+            d1BarrierTimeout: d1Barrier.settled ? undefined : true,
             firstTokenMs: streamStats.firstTokenMs,
             lastChunkMs: streamStats.lastChunkMs,
             hasDoneSignal: streamStats.hasDoneSignal,

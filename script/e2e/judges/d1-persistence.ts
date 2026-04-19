@@ -109,6 +109,48 @@ export async function fetchPersistedCount(conversationId: string): Promise<numbe
   return count;
 }
 
+const sleep = async (ms: number): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
+export async function waitForD1Durability(args: {
+  userEmail: string;
+  conversationId: string;
+  expectedCount: number;
+  timeoutMs?: number;
+  intervalMs?: number;
+}): Promise<{ settled: boolean; lastCount: number; elapsedMs: number }> {
+  const { userEmail, conversationId, expectedCount, timeoutMs = 2_000, intervalMs = 100 } = args;
+  void userEmail;
+
+  const startedAt = Date.now();
+  let lastCount = -1;
+
+  while (true) {
+    lastCount = await fetchPersistedCount(conversationId);
+    const elapsedMs = Date.now() - startedAt;
+
+    if (lastCount >= expectedCount) {
+      return {
+        settled: true,
+        lastCount,
+        elapsedMs,
+      };
+    }
+
+    if (elapsedMs >= timeoutMs) {
+      return {
+        settled: false,
+        lastCount,
+        elapsedMs,
+      };
+    }
+
+    await sleep(Math.min(intervalMs, timeoutMs - elapsedMs));
+  }
+}
+
 export async function runD1PersistenceJudge(input: {
   conversationId: string;
   renderedMessageCount: number;
