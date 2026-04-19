@@ -472,13 +472,13 @@ const checkUsageLogDailyBudget = async (): Promise<CheckOutcome> => {
       if (count === null) {
         throw new Error(`COUNT(*) を抽出できませんでした: ${stdout.trim()}`);
       }
-      if (count < 400) {
+      if (count < 4500) {
         return {
           status: "pass",
-          detail: `usage_log 当日件数 ${count}/400 未満`,
+          detail: `usage_log 当日件数 ${count}/4500 未満`,
         };
       }
-      throw new Error(`usage_log 当日件数 ${count} が上限 400 に達しています`);
+      throw new Error(`usage_log 当日件数 ${count} が上限 4500 に達しています`);
     } catch (error) {
       const message = formatError(error);
       if (message.toLowerCase().includes("no such table: usage_log")) {

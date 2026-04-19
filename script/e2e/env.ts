@@ -48,7 +48,10 @@ const defaultArtifactRoot = (runId: string): string =>
 
 export const loadE2EEnv = (): E2EEnv => {
   const runId = process.env.E2E_RUN_ID?.trim() || generateRunId();
-  const userEmail = process.env.E2E_USER_EMAIL?.trim() || `e2e-${runId}@adult-ai-app.local`;
+  // ローカル wrangler dev の getUserEmail() は常に "local-dev@adult-ai-app.local" を返す。
+  // seed.ts も同じ user_id で character を作成するため、E2E も同じ user を共有しないと
+  // GET /api/characters が空になってシナリオが character-not-found で失敗する。
+  const userEmail = process.env.E2E_USER_EMAIL?.trim() || "local-dev@adult-ai-app.local";
   const baseUrl = process.env.E2E_BASE_URL?.trim() || DEFAULT_BASE_URL;
   const cdpPort = parseInteger(process.env.E2E_CDP_PORT, DEFAULT_CDP_PORT, "E2E_CDP_PORT");
   const maxTabs = capMaxTabs(

@@ -149,7 +149,7 @@ const seedE2eSettings = async (page: Page, activeCharacterId: string | null): Pr
       model: E2E_MODEL,
       nsfwBlur: false,
       darkMode: true,
-      autoGenerateImages: false,
+      autoGenerateImages: true,
       ttsEnabled: false,
       ttsVoiceUri: "",
       ttsRate: 1,

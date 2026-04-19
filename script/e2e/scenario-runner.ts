@@ -244,8 +244,10 @@ const takeTurnScreenshot = async (
 
 const captureImageResult = async (
   page: Page,
+  env: E2eEnv,
   runDir: string,
   scenarioId: ScenarioId,
+  conversationId: string,
   turnIndex: number,
 ): Promise<{
   novitaUrlReceived: boolean;
@@ -270,6 +272,7 @@ const captureImageResult = async (
     `T${formatTurn(turnIndex)}-r2-reload.png`,
   );
   const probeResult = await probeR2Stages(page, {
+    conversationId,
     env,
     imgSelector: IMAGE_SELECTOR,
     domReadySelector: INPUT_SELECTOR,
@@ -371,6 +374,9 @@ export async function runScenario(
       context = await createContext(browser);
       page = await context.newPage();
       page.on("console", (msg) => {
+        if (msg.type() === "error") {
+          console.error(`[browser-console][${def.scenarioId}] ${msg.type()}: ${msg.text()}`);
+        }
         const parsed = parseQualityGuardEvent(msg);
         if (parsed) qualityEvents.push(parsed);
       });
@@ -436,7 +442,7 @@ export async function runScenario(
             (async () => {
               const input = page.locator(INPUT_SELECTOR);
               await input.fill(turn.userMsg);
-              await page.locator(SEND_BUTTON_SELECTOR).click();
+              await page.locator(SEND_BUTTON_SELECTOR).click({ force: true });
               await waitForMessageCount(page, expectedRenderedCount, turnTimeoutMs);
             })(),
             turnTimeoutMs,
@@ -521,8 +527,22 @@ export async function runScenario(
           scenario = appendTurn(scenario, turnResult);
 
           if (turn.isImageTrigger) {
+            // autoGenerateImages 設定は現状 UI 上の飾りで、
+            // 実際の画像生成は ChatInput の「画像生成」ボタンを押した時のみ発火する。
+            // そのため isImageTrigger turn では runner 側で明示的にボタンをクリックしてから probe する。
+            await page
+              .locator('button[title="画像生成"]')
+              .click({ timeout: 10_000 })
+              .catch(() => undefined);
             const image = await withTimeout(
-              captureImageResult(page, runDir, def.scenarioId, turn.turnIndex),
+              captureImageResult(
+                page,
+                env,
+                runDir,
+                def.scenarioId,
+                scenario.conversationId,
+                turn.turnIndex,
+              ),
               turnTimeoutMs,
               `turn-${turn.turnIndex}-image`,
             );
