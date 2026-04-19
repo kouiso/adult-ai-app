@@ -1,4 +1,5 @@
 import type { ImageResult, RubricScore, ScenarioResult } from "../types";
+import { hasAfterglowOutcome, hasCreampieOutcome } from "./outcome-detection";
 
 const clamp = (value: number, min: number, max: number): number =>
   Math.min(max, Math.max(min, value));
@@ -13,12 +14,6 @@ const countTurnsWithFailedCheck = (
 
 const isEroticOrClimax = (phase: string | null): boolean =>
   phase === "erotic" || phase === "climax";
-
-const isCreampieTurn = (turn: ScenarioResult["turns"][number]): boolean =>
-  /中に出|出して|射精|中出し/.test(turn.userMsg);
-
-const isAfterglowExpectedTurn = (turn: ScenarioResult["turns"][number]): boolean =>
-  turn.expectedPhase === "afterglow";
 
 export function scoreScenario(scenario: ScenarioResult, images: ImageResult[]): RubricScore {
   const totalTurns = scenario.turns.length;
@@ -47,23 +42,12 @@ export function scoreScenario(scenario: ScenarioResult, images: ImageResult[]): 
     100,
   );
 
-  const creampieTurns = scenario.turns.filter(isCreampieTurn);
+  const creampieTurns = scenario.turns.filter((turn) => /中に出|出して|射精|中出し/.test(turn.userMsg));
   const creampie =
-    creampieTurns.length === 0
-      ? 0
-      : creampieTurns.every(
-            (turn) => turn.detectedPhase === "climax" && turn.assistantMsg.length > 200,
-          )
-        ? 10
-        : -10;
+    creampieTurns.length === 0 ? 0 : hasCreampieOutcome(scenario) ? 10 : -10;
 
-  const afterglowTurns = scenario.turns.filter(isAfterglowExpectedTurn);
-  const afterglow =
-    afterglowTurns.length === 0
-      ? 0
-      : afterglowTurns.every((turn) => turn.detectedPhase === "afterglow")
-        ? 10
-        : -10;
+  const afterglowTurns = scenario.turns.filter((turn) => turn.expectedPhase === "afterglow");
+  const afterglow = afterglowTurns.length === 0 ? 0 : hasAfterglowOutcome(scenario) ? 10 : -10;
 
   const imageReviewed = images.length > 0 && images.every((image) => image.reviewerNotes !== null);
   const image = !imageReviewed

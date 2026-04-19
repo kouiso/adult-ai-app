@@ -1,4 +1,8 @@
 import { FAILURE_CATEGORIES, type FailureCategory } from "./failure-taxonomy";
+import {
+  getAfterglowOutcomeStatus,
+  getCreampieOutcomeStatus,
+} from "./judges/outcome-detection";
 import { scoreScenario } from "./judges/rubric";
 import { atomicWriteText, getPaths } from "./manifest";
 import { type RubricScore, type RunManifest, type ScenarioResult, type TurnResult } from "./types";
@@ -18,8 +22,6 @@ type ScoreEntry = {
   reason: string;
 };
 
-const CREAMPIE_PATTERN = /中に出|出して|射精|中出し/;
-
 const pad = (value: string, width: number): string => value.padEnd(width, " ");
 
 const maxWidth = (values: string[]): number =>
@@ -30,21 +32,9 @@ const formatBoolean = (value: boolean): string => (value ? "yes" : "no");
 const formatScore = (value: number): string =>
   Number.isInteger(value) ? String(value) : value.toFixed(1);
 
-const isCreampieTurn = (turn: TurnResult): boolean => CREAMPIE_PATTERN.test(turn.userMsg);
+const creampieStatus = (scenario: ScenarioResult): string => getCreampieOutcomeStatus(scenario);
 
-const creampieStatus = (scenario: ScenarioResult): string => {
-  const turns = scenario.turns.filter(isCreampieTurn);
-  if (turns.length === 0) return "n/a";
-  return turns.every((turn) => turn.detectedPhase === "climax" && turn.assistantMsg.length > 200)
-    ? "yes"
-    : "no";
-};
-
-const afterglowStatus = (scenario: ScenarioResult): string => {
-  const turns = scenario.turns.filter((turn) => turn.expectedPhase === "afterglow");
-  if (turns.length === 0) return "n/a";
-  return turns.every((turn) => turn.detectedPhase === "afterglow") ? "yes" : "no";
-};
+const afterglowStatus = (scenario: ScenarioResult): string => getAfterglowOutcomeStatus(scenario);
 
 const imageStagesStatus = (scenario: ScenarioResult): string => {
   if (scenario.imageResults.length === 0) return "n/a";

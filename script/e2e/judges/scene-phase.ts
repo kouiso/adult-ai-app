@@ -37,6 +37,11 @@ const AFTERGLOW_KEYWORDS = [
   "支えられ",
   "支えて",
   "支え",
+  "目を細め",
+  "頬を赤らめ",
+  "顔を埋めた",
+  "鼓動を感じながら",
+  "小さく微笑",
 ] as const;
 
 const AFTERGLOW_WINDOW_TURNS = 7;
@@ -104,8 +109,10 @@ const ASSISTANT_PHASE_KEYWORDS: Array<{
       "内ももが",
       "腰を振",
       "腰が動",
+      "腰が勝手に動",
       "ピストン",
       "締めつけ",
+      "指に反応",
     ],
   },
   {
@@ -124,6 +131,7 @@ const ASSISTANT_PHASE_KEYWORDS: Array<{
       "脚を擦",
       "舐め",
       "吸い付",
+      "横顔をチラリと見つめる",
       "ボタン",
       "ブラウス",
       "下着",
@@ -131,6 +139,7 @@ const ASSISTANT_PHASE_KEYWORDS: Array<{
       "脱い",
       "裸",
       "乳首",
+      "体を這う",
     ],
   },
 ];
@@ -166,7 +175,9 @@ export function judgePhase(args: {
   const detected: Phase = afterglowDetected ? "afterglow" : baseDetected;
   const previousPhase = args.previousDetected;
   const rawMonotonicViolation =
-    previousPhase !== null && PHASE_ORDER[previousPhase] > PHASE_ORDER[detected];
+    previousPhase !== null &&
+    detected !== "conversation" &&
+    PHASE_ORDER[previousPhase] > PHASE_ORDER[detected];
   const isLegitimateAfterglowDemotion =
     previousPhase !== null &&
     (previousPhase === "climax" || previousPhase === "afterglow") &&

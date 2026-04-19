@@ -514,6 +514,7 @@ export async function runScenario(
             greetingMessageCount,
             imageMessageCount,
             persistedCount: persistedMessages.length,
+            uiReason: uiJudgeVerdict.reason,
           });
 
           let turnResult: TurnResult = {

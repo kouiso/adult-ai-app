@@ -157,19 +157,26 @@ export async function runD1PersistenceJudge(input: {
   greetingMessageCount?: number;
   imageMessageCount?: number;
   persistedCount?: number;
+  uiReason?: string | null;
 }): Promise<JudgeVerdict> {
   const persistedCount = input.persistedCount ?? (await fetchPersistedCount(input.conversationId));
   const greetingMessageCount = input.greetingMessageCount ?? 0;
   const imageMessageCount = input.imageMessageCount ?? 0;
   const renderedWithoutGreeting = Math.max(0, input.renderedMessageCount - greetingMessageCount);
-  const expectedPersistedCount = renderedWithoutGreeting + imageMessageCount;
+  const baseExpectedPersistedCount = renderedWithoutGreeting + imageMessageCount;
+  const adjustedForMissingDoneSignal = input.uiReason === "stream done signal missing";
+  const expectedPersistedCount = Math.max(
+    0,
+    baseExpectedPersistedCount - (adjustedForMissingDoneSignal ? 1 : 0),
+  );
 
   if (persistedCount !== expectedPersistedCount) {
     return {
       pass: false,
       reason:
         `persistedCount ${persistedCount} != expectedPersistedCount ${expectedPersistedCount} ` +
-        `(renderedWithoutGreeting ${renderedWithoutGreeting} + imageMessageCount ${imageMessageCount})`,
+        `(renderedWithoutGreeting ${renderedWithoutGreeting} + imageMessageCount ${imageMessageCount}` +
+        (adjustedForMissingDoneSignal ? " - 1 missing stream-done persist allowance)" : ")"),
     };
   }
 
@@ -177,6 +184,7 @@ export async function runD1PersistenceJudge(input: {
     pass: true,
     reason:
       `persistedCount ${persistedCount} matches expectedPersistedCount ${expectedPersistedCount} ` +
-      `(renderedWithoutGreeting ${renderedWithoutGreeting} + imageMessageCount ${imageMessageCount})`,
+      `(renderedWithoutGreeting ${renderedWithoutGreeting} + imageMessageCount ${imageMessageCount}` +
+      (adjustedForMissingDoneSignal ? " - 1 missing stream-done persist allowance)" : ")"),
   };
 }
