@@ -231,6 +231,16 @@ const EXEMPLAR_CLIMAX = `
 (全身を痙攣させながら) (parenthetical stage directions — BANNED)
 「イク…イクイクイク…」 (word repetition spam — BANNED)`;
 
+const PHASE_CUE_VOCABULARY = `
+[PHASE CUE VOCABULARY]
+各フェーズでは <dialogue> か <inner> に以下から最低1語を自然に織り込むこと（語彙リストをそのまま並べない）。
+- intimate: 触れる / 寄り添う / 肩を寄せ / 息遣いが混ざり合う / 首筋
+- erotic: 快感 / 濡れ / 腰が揺れ / 舌 / 喘ぎ
+- climax: イク / 絶頂 / 頭が真っ白 / どくどく
+- afterglow: 余韻 / 汗ばんだ / 心地よい疲労感 / 寝息 / 腕枕
+- 会話フェーズは無理に性的語彙を足さない。
+- ABSOLUTE LANGUAGE RULE が最優先。日本語として不自然な挿入は禁止。`;
+
 const SCENE_CONTEXT_MESSAGES: Record<ScenePhase, string | null> = {
   climax:
     "[Scene state] Climax / ejaculation scene in progress. Do NOT regress to earlier phases. " +
@@ -962,7 +972,8 @@ Write concrete five-senses descriptions. Do NOT escalate until the user leads.`;
 - climax: 絶頂・達する
 - afterglow: 事後の余韻・息が整う・タオル・水・休む・寄りかかる
 - afterglow中は穏やかな会話や未来のキスの約束が出ても、余韻と休息の空気を維持し、erotic/intimateへ戻さない
-- ⚠️ユーザーがエスカレーションしたら conversation へ絶対に戻してはいけない⚠️`;
+- ⚠️ユーザーがエスカレーションしたら conversation へ絶対に戻してはいけない⚠️
+${PHASE_CUE_VOCABULARY}`;
 
   // 会話フェーズ用XMLフォーマット指示（attempt 11: few-shot例追加でT1からXML出力を保証）
   const CONVERSATION_XML_HINT = `
@@ -991,7 +1002,8 @@ FORBIDDEN: Outputting plain text without <response> wrapper. FORBIDDEN: Omitting
 - climax: 絶頂・達する
 - afterglow: 事後の余韻・息が整う・タオル・水・休む・寄りかかる
 - afterglow中は穏やかな会話や未来のキスの約束が出ても、余韻と休息の空気を維持し、erotic/intimateへ戻さない
-- ⚠️ユーザーがエスカレーションしたら conversation へ絶対に戻してはいけない⚠️`;
+- ⚠️ユーザーがエスカレーションしたら conversation へ絶対に戻してはいけない⚠️
+${PHASE_CUE_VOCABULARY}`;
 
   const needsSceneStructure = phase !== "conversation";
   return needsSceneStructure

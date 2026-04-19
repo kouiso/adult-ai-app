@@ -66,6 +66,20 @@ describe("detectScenePhase", () => {
     expect(detectScenePhase(messages)).toBe("afterglow" as ReturnType<typeof detectScenePhase>);
   });
 
+  it("直近数ターンにclimaxがあれば睡眠導線のafterglowを維持する", () => {
+    const messages = [
+      { role: "user", content: "奥まで入れて" },
+      { role: "assistant", content: "..." },
+      { role: "user", content: "イク...もう無理..." },
+      { role: "assistant", content: "..." },
+      { role: "user", content: "水を飲んで少し休もう" },
+      { role: "assistant", content: "..." },
+      { role: "user", content: "隣で眠る前に、もう一回だけ優しく抱き寄せる。おやすみ、みつき" },
+    ];
+
+    expect(detectScenePhase(messages)).toBe("afterglow" as ReturnType<typeof detectScenePhase>);
+  });
+
   it("window=1で前ターンのclimaxキーワードが現在ターンに漏れない", () => {
     const messages = [
       { role: "user", content: "イク..." },

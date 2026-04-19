@@ -237,6 +237,21 @@ describe("runQualityChecks", () => {
     expect(result.failedCheck).not.toBe("within-turn-repetition");
   });
 
+  it("10文字以上の反復が3回でwithin-turn-repetitionを検出する", () => {
+    const repeated = "受け入れてほしい気持ちが溢れて止まらない";
+    const xml = `<response><dialogue>${repeated}。${repeated}。${repeated}。</dialogue><inner>まだ${repeated}まま、言葉がほどけない。</inner></response>`;
+    const result = runQualityChecks(xml, { phase: "conversation" });
+    expect(result.passed).toBe(false);
+    expect(result.failedCheck).toBe("within-turn-repetition");
+  });
+
+  it("turn25相当のafterglow睡眠導線はconversationでも過剰接触扱いしない", () => {
+    const xml =
+      "<response><narration>腕に身体を預けたまま、眠る前の熱が静かにほどけていく。</narration><dialogue>「もう一回だけ、優しく抱き寄せて…？ おやすみなさい、けんちゃん…」</dialogue><inner>おやすみなさいって囁くだけで安心して、寝息に近い呼吸へゆっくり落ち着いていく。</inner></response>";
+    const result = runQualityChecks(xml, { phase: "conversation" });
+    expect(result.passed).toBe(true);
+  });
+
   it("intimateフェーズで<inner>なしはfail", () => {
     // scene-min-lengthをパスするために plainText が80文字以上必要
     const longDialogue =

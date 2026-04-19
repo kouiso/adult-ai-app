@@ -15,7 +15,13 @@ export const AFTERGLOW_CUES = [
   "終わっ",
   "果て",
   "脱力",
+  "おやすみ",
+  "寝息",
+  "眠る",
+  "眠り",
 ] as const;
+
+const AFTERGLOW_LOOKBACK_TURNS = 6;
 
 const PHASE_DETECTION_ORDER: {
   phase: Exclude<ScenePhase, "conversation">;
@@ -101,14 +107,13 @@ export function detectScenePhase(messages: { role: string; content: string }[]):
   // assistantの応答を含めるとモデルの暴走が次ターンのフェーズを不当に昇格させる
   const userMessages = messages.filter((m) => m.role === "user");
   const scanTarget = userMessages.at(-1)?.content ?? "";
-  const previousUserMessage = userMessages.at(-2)?.content ?? "";
-
-  const previousWasClimax = PHASE_DETECTION_ORDER[0].keywords.some((kw) =>
-    previousUserMessage.includes(kw),
+  const recentUserMessages = userMessages.slice(-(AFTERGLOW_LOOKBACK_TURNS + 1), -1);
+  const hadRecentClimax = recentUserMessages.some((message) =>
+    PHASE_DETECTION_ORDER[0].keywords.some((kw) => message.content.includes(kw)),
   );
   const hasAfterglowCue = AFTERGLOW_CUES.some((cue) => scanTarget.includes(cue));
 
-  if (previousWasClimax && hasAfterglowCue) return "afterglow" as ScenePhase;
+  if (hadRecentClimax && hasAfterglowCue) return "afterglow" as ScenePhase;
 
   for (const { phase, keywords } of PHASE_DETECTION_ORDER) {
     if (keywords.some((kw) => scanTarget.includes(kw))) return phase;

@@ -110,6 +110,9 @@ const AFTERGLOW_ESCALATION_ALLOW_PATTERNS = [
   /足元/u,
   /支え/u,
   /甘え/u,
+  /おやすみ/u,
+  /眠(?:る|り|れ)/u,
+  /寝息/u,
 ] as const;
 
 function checkConversationEscalation(plainText: string, phase: ScenePhase): boolean {
@@ -145,16 +148,16 @@ function hasSimilarSentences(sentences: string[]): boolean {
   return false;
 }
 
-// 8文字以上の部分文字列が4回以上出現するか判定
+// 10文字以上の部分文字列が3回以上出現するか判定
 function hasSubstringRepetition(text: string): boolean {
   const phrases = new Map<string, number>();
   const cleaned = text.replace(/[\s…。「」！？]/g, "");
   if (cleaned.length < 60) return false;
-  for (let len = 8; len <= 12; len++) {
+  for (let len = 10; len <= 12; len++) {
     for (let i = 0; i <= cleaned.length - len; i++) {
       const sub = cleaned.slice(i, i + len);
       const count = (phrases.get(sub) ?? 0) + 1;
-      if (count >= 4) return true;
+      if (count >= 3) return true;
       phrases.set(sub, count);
     }
   }
