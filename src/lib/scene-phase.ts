@@ -4,6 +4,19 @@
 export type ScenePhase = "climax" | "erotic" | "intimate" | "conversation";
 export type MaxTokenPhase = ScenePhase | "afterglow";
 
+export const AFTERGLOW_CUES = [
+  "達し",
+  "イッた",
+  "イッて",
+  "余韻",
+  "収ま",
+  "息を整え",
+  "ぐったり",
+  "終わっ",
+  "果て",
+  "脱力",
+] as const;
+
 const PHASE_DETECTION_ORDER: {
   phase: Exclude<ScenePhase, "conversation">;
   keywords: readonly string[];
@@ -45,6 +58,15 @@ const PHASE_DETECTION_ORDER: {
       "腰を動",
       "喘",
       "あえ",
+      "乳首",
+      "胸",
+      "触れ",
+      "舐め",
+      "濡れ",
+      "昂",
+      "熱く",
+      "硬く",
+      "欲しい",
     ],
   },
   {
@@ -53,6 +75,12 @@ const PHASE_DETECTION_ORDER: {
       "キス",
       "唇",
       "抱きしめ",
+      "密着",
+      "肌",
+      "体温",
+      "耳元",
+      "首筋",
+      "愛撫",
       "舐め",
       "揉",
       "乳首",
@@ -71,11 +99,16 @@ const PHASE_DETECTION_ORDER: {
 export function detectScenePhase(messages: { role: string; content: string }[]): ScenePhase {
   // ユーザーメッセージのみでフェーズを判定
   // assistantの応答を含めるとモデルの暴走が次ターンのフェーズを不当に昇格させる
-  const scanTarget = messages
-    .filter((m) => m.role === "user")
-    .slice(-3)
-    .map((m) => m.content)
-    .join("");
+  const userMessages = messages.filter((m) => m.role === "user");
+  const scanTarget = userMessages.at(-1)?.content ?? "";
+  const previousUserMessage = userMessages.at(-2)?.content ?? "";
+
+  const previousWasClimax = PHASE_DETECTION_ORDER[0].keywords.some((kw) =>
+    previousUserMessage.includes(kw),
+  );
+  const hasAfterglowCue = AFTERGLOW_CUES.some((cue) => scanTarget.includes(cue));
+
+  if (previousWasClimax && hasAfterglowCue) return "afterglow" as ScenePhase;
 
   for (const { phase, keywords } of PHASE_DETECTION_ORDER) {
     if (keywords.some((kw) => scanTarget.includes(kw))) return phase;

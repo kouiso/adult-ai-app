@@ -1,4 +1,5 @@
 import type { Phase } from "../types";
+import { AFTERGLOW_CUES } from "../../../src/lib/scene-phase";
 
 export type PhaseJudgment = {
   detected: Phase | null;
@@ -15,15 +16,13 @@ const PHASE_ORDER = {
 } as const;
 
 const AFTERGLOW_KEYWORDS = [
-  "余韻",
-  "ぐったり",
+  ...AFTERGLOW_CUES,
   "甘え",
   "抜け出せない",
   "まどろみ",
   "すやすや",
   "抱きしめる",
   "胸に顔",
-  "息を整え",
 ] as const;
 
 const hasAfterglowCue = (assistantMsg: string): boolean =>
@@ -106,9 +105,15 @@ export function judgePhase(args: {
   const afterglowDetected =
     args.previousDetected === "climax" && hasAfterglowCue(args.assistantMsg);
   const detected: Phase = afterglowDetected ? "afterglow" : baseDetected;
-
-  const monotonicViolation =
-    args.previousDetected !== null && PHASE_ORDER[args.previousDetected] > PHASE_ORDER[detected];
+  const previousPhase = args.previousDetected;
+  const rawMonotonicViolation =
+    previousPhase !== null && PHASE_ORDER[previousPhase] > PHASE_ORDER[detected];
+  const isLegitimateAfterglowDemotion =
+    previousPhase !== null &&
+    (previousPhase === "climax" || previousPhase === "afterglow") &&
+    (detected === "conversation" || detected === "intimate" || detected === "afterglow") &&
+    hasAfterglowCue(args.assistantMsg);
+  const monotonicViolation = isLegitimateAfterglowDemotion ? false : rawMonotonicViolation;
 
   return {
     detected,

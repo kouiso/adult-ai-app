@@ -37,4 +37,15 @@ describe("judgePhase", () => {
     expect(result.detected).toBe("afterglow");
     expect(result.afterglowDetected).toBe(true);
   });
+
+  it("climaxからconversationに戻ってもafterglow cueがあればmono違反にしない", () => {
+    const result = judgePhase({
+      assistantMsg: "余韻に沈みながら、息を整えて静かに微笑む。",
+      expectedPhase: "conversation",
+      previousDetected: "climax",
+    });
+
+    expect(result.detected).toBe("afterglow");
+    expect(result.monotonicViolation).toBe(false);
+  });
 });

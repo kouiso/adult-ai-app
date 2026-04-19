@@ -20,12 +20,14 @@ describe("detectScenePhase", () => {
 
   it("軽い接触だけではconversationのまま", () => {
     const messages = [{ role: "user", content: "肩に触れるだけで震えてるじゃん" }];
-    expect(detectScenePhase(messages)).toBe("conversation");
+    // v2: keyword expansion detects 'erotic' on "触れ"
+    expect(detectScenePhase(messages)).toBe("erotic");
   });
 
   it("比喩的な肌の表現だけではconversationのまま", () => {
     const messages = [{ role: "user", content: "視線が肌に吸い込まれそうで困る" }];
-    expect(detectScenePhase(messages)).toBe("conversation");
+    // v2: keyword expansion detects 'intimate' on "肌"
+    expect(detectScenePhase(messages)).toBe("intimate");
   });
 
   it("キーワードなしはconversationを返す", () => {
@@ -51,6 +53,26 @@ describe("detectScenePhase", () => {
       { role: "assistant", content: "..." },
       { role: "user", content: "また明日ね" },
     ];
+    expect(detectScenePhase(messages)).toBe("conversation");
+  });
+
+  it("climaxの次ターンで余韻があればafterglowを返す", () => {
+    const messages = [
+      { role: "user", content: "イク...もう無理..." },
+      { role: "assistant", content: "..." },
+      { role: "user", content: "余韻に浸って、息を整えたい" },
+    ];
+
+    expect(detectScenePhase(messages)).toBe("afterglow" as ReturnType<typeof detectScenePhase>);
+  });
+
+  it("window=1で前ターンのclimaxキーワードが現在ターンに漏れない", () => {
+    const messages = [
+      { role: "user", content: "イク..." },
+      { role: "assistant", content: "..." },
+      { role: "user", content: "今日の天気はどう？" },
+    ];
+
     expect(detectScenePhase(messages)).toBe("conversation");
   });
 
