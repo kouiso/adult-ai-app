@@ -94,17 +94,30 @@ export function getCallingStyleInstruction(totalMessageCount: number): string {
   return getHonorificStage(totalMessageCount);
 }
 
+function findLineStartMarker(prompt: string, marker: string): number {
+  const atStart = prompt.indexOf(marker);
+  if (atStart === 0) return 0;
+
+  const lineStartMarker = `\n${marker}`;
+  const idx = prompt.indexOf(lineStartMarker);
+  if (idx === -1) return -1;
+
+  // 理由: 呼び出し側がそのままslice開始位置に使えるよう、改行ではなくマーカー自体の位置を返す。
+  return idx + 1;
+}
+
 function extractSection(prompt: string, marker: string, endMarkers: string[]): string {
-  const startIdx = prompt.indexOf(marker);
+  const startIdx = findLineStartMarker(prompt, marker);
   if (startIdx === -1) return "";
 
   const contentStart = startIdx + marker.length;
   let endIdx = prompt.length;
 
   for (const end of endMarkers) {
-    const idx = prompt.indexOf(end, contentStart);
-    if (idx !== -1 && idx < endIdx) {
-      endIdx = idx;
+    const idx = findLineStartMarker(prompt.slice(contentStart), end);
+    const absoluteIdx = idx === -1 ? -1 : contentStart + idx;
+    if (absoluteIdx !== -1 && absoluteIdx < endIdx) {
+      endIdx = absoluteIdx;
     }
   }
 
@@ -178,33 +191,35 @@ export function buildSystemPrompt(fields: PromptFields): string {
 // 自動構築されたプロンプトはセクションマーカーで分割できる
 // 手動で書かれた古い形式のプロンプトはcustomフィールドにフォールバック
 export function parseSystemPrompt(prompt: string): ParsedSystemPrompt {
+  // DB などで改行が `\n` 文字列として保存されたケースを救済する
+  const normalized = prompt.replace(/\\n/g, "\n");
   const hasMarkers =
-    prompt.includes(SECTION_PERSONALITY) ||
-    prompt.includes(SECTION_APPEARANCE) ||
-    prompt.includes(SECTION_RELATIONSHIP) ||
-    prompt.includes(SECTION_SCENARIO) ||
-    prompt.includes(SECTION_CUSTOM);
+    findLineStartMarker(normalized, SECTION_PERSONALITY) !== -1 ||
+    findLineStartMarker(normalized, SECTION_APPEARANCE) !== -1 ||
+    findLineStartMarker(normalized, SECTION_RELATIONSHIP) !== -1 ||
+    findLineStartMarker(normalized, SECTION_SCENARIO) !== -1 ||
+    findLineStartMarker(normalized, SECTION_CUSTOM) !== -1;
 
   if (!hasMarkers) {
-    const stripped = stripBaseRules(prompt);
+    const stripped = stripBaseRules(normalized);
     return { personality: "", scenario: "", custom: stripped };
   }
 
-  const personality = extractSection(prompt, SECTION_PERSONALITY, [
+  const personality = extractSection(normalized, SECTION_PERSONALITY, [
     SECTION_APPEARANCE,
     SECTION_RELATIONSHIP,
     SECTION_SCENARIO,
     SECTION_CUSTOM,
     SECTION_CARD,
   ]);
-  const appearance = extractSection(prompt, SECTION_APPEARANCE, [
+  const appearance = extractSection(normalized, SECTION_APPEARANCE, [
     SECTION_RELATIONSHIP,
     SECTION_SCENARIO,
     SECTION_CUSTOM,
     SECTION_CARD,
   ]);
-  const scenario = extractSection(prompt, SECTION_SCENARIO, [SECTION_CUSTOM, SECTION_CARD]);
-  const custom = extractSection(prompt, SECTION_CUSTOM, [SECTION_CARD]);
+  const scenario = extractSection(normalized, SECTION_SCENARIO, [SECTION_CUSTOM, SECTION_CARD]);
+  const custom = extractSection(normalized, SECTION_CUSTOM, [SECTION_CARD]);
 
   // 「名前: xxx」行はpersonalityから除去（nameフィールドで管理するため）
   const personalityCleaned = personality

@@ -153,8 +153,13 @@ const messageCreateSchema = z.object({
 });
 
 const messageUpdateImageSchema = z.object({
-  imageUrl: z.string().url().optional(),
+  imageUrl: z.string().min(1).max(1_000).optional(),
   imageKey: z.string().max(500).optional(),
+});
+
+const imagePersistSchema = z.object({
+  imageUrl: z.string().url(),
+  messageId: z.string().max(128),
 });
 
 const conversationUpdateTitleSchema = z.object({
@@ -2224,49 +2229,45 @@ const app = new Hono<{ Bindings: Bindings }>()
 
   // ── R2画像永続化 ──
 
-  .post(
-    "/image/persist",
-    zValidator("json", z.object({ imageUrl: z.string().url(), messageId: z.string().max(128) })),
-    async (c) => {
-      const userEmail = getUserEmail(c);
-      if (!userEmail) {
-        return c.json({ error: "unauthorized" }, 401);
-      }
+  .post("/image/persist", zValidator("json", imagePersistSchema), async (c) => {
+    const userEmail = getUserEmail(c);
+    if (!userEmail) {
+      return c.json({ error: "unauthorized" }, 401);
+    }
 
-      const { imageUrl, messageId } = c.req.valid("json");
-      const database = drizzle(c.env.DB);
-      const userId = await ensureUser(database, userEmail);
+    const { imageUrl, messageId } = c.req.valid("json");
+    const database = drizzle(c.env.DB);
+    const userId = await ensureUser(database, userEmail);
 
-      // Novitaドメイン以外からのfetchを拒否（SSRF防御）
-      const parsedUrl = new URL(imageUrl);
-      if (!ALLOWED_IMAGE_HOSTS.includes(parsedUrl.hostname)) {
-        return c.json({ error: "disallowed image source" }, 400);
-      }
+    // Novitaドメイン以外からのfetchを拒否（SSRF防御）
+    const parsedUrl = new URL(imageUrl);
+    if (!ALLOWED_IMAGE_HOSTS.includes(parsedUrl.hostname)) {
+      return c.json({ error: "disallowed image source" }, 400);
+    }
 
-      const imageResponse = await fetch(imageUrl);
-      if (!imageResponse.ok || !imageResponse.body) {
-        return c.json({ error: "failed to fetch image" }, 502);
-      }
+    const imageResponse = await fetch(imageUrl);
+    if (!imageResponse.ok || !imageResponse.body) {
+      return c.json({ error: "failed to fetch image" }, 502);
+    }
 
-      const rawContentType = imageResponse.headers.get("content-type") ?? "";
-      const resolved = resolveImageType(rawContentType, parsedUrl.pathname);
-      if (!resolved) {
-        return c.json({ error: "unsupported content type" }, 400);
-      }
-      const key = `images/${crypto.randomUUID()}.${resolved.ext}`;
+    const rawContentType = imageResponse.headers.get("content-type") ?? "";
+    const resolved = resolveImageType(rawContentType, parsedUrl.pathname);
+    if (!resolved) {
+      return c.json({ error: "unsupported content type" }, 400);
+    }
+    const key = `images/${crypto.randomUUID()}.${resolved.ext}`;
 
-      await c.env.BUCKET.put(key, imageResponse.body, {
-        httpMetadata: { contentType: resolved.contentType },
-      });
+    await c.env.BUCKET.put(key, imageResponse.body, {
+      httpMetadata: { contentType: resolved.contentType },
+    });
 
-      await database
-        .update(messageTable)
-        .set({ imageKey: key })
-        .where(and(eq(messageTable.id, messageId), eq(messageTable.userId, userId)));
+    await database
+      .update(messageTable)
+      .set({ imageKey: key })
+      .where(and(eq(messageTable.id, messageId), eq(messageTable.userId, userId)));
 
-      return c.json({ imageKey: key });
-    },
-  )
+    return c.json({ imageKey: key });
+  })
 
   // ── キャラクター自動生成 ──────────────────────────────────────────────────
   .post("/generate-character", zValidator("json", generateCharacterSchema), async (c) => {

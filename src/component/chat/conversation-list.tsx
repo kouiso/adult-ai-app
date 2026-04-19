@@ -146,6 +146,7 @@ export const ConversationList = memo(
             <div key={conversation.id} className="relative group">
               <button
                 type="button"
+                data-conversation-id={conversation.id}
                 onClick={() => onSelect(conversation.id)}
                 className={cn(
                   "w-full rounded-md border px-3 py-2 text-left transition-colors pr-8",
