@@ -155,20 +155,28 @@ export async function runD1PersistenceJudge(input: {
   conversationId: string;
   renderedMessageCount: number;
   greetingMessageCount?: number;
+  imageMessageCount?: number;
+  persistedCount?: number;
 }): Promise<JudgeVerdict> {
-  const persistedCount = await fetchPersistedCount(input.conversationId);
+  const persistedCount = input.persistedCount ?? (await fetchPersistedCount(input.conversationId));
   const greetingMessageCount = input.greetingMessageCount ?? 0;
+  const imageMessageCount = input.imageMessageCount ?? 0;
   const renderedWithoutGreeting = Math.max(0, input.renderedMessageCount - greetingMessageCount);
+  const expectedPersistedCount = renderedWithoutGreeting + imageMessageCount;
 
-  if (persistedCount !== renderedWithoutGreeting) {
+  if (persistedCount !== expectedPersistedCount) {
     return {
       pass: false,
-      reason: `persistedCount ${persistedCount} != renderedWithoutGreeting ${renderedWithoutGreeting}`,
+      reason:
+        `persistedCount ${persistedCount} != expectedPersistedCount ${expectedPersistedCount} ` +
+        `(renderedWithoutGreeting ${renderedWithoutGreeting} + imageMessageCount ${imageMessageCount})`,
     };
   }
 
   return {
     pass: true,
-    reason: `persistedCount ${persistedCount} matches renderedWithoutGreeting ${renderedWithoutGreeting}`,
+    reason:
+      `persistedCount ${persistedCount} matches expectedPersistedCount ${expectedPersistedCount} ` +
+      `(renderedWithoutGreeting ${renderedWithoutGreeting} + imageMessageCount ${imageMessageCount})`,
   };
 }

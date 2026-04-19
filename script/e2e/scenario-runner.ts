@@ -65,6 +65,7 @@ type ChatResponseEvent = {
 type PersistedMessage = {
   role: "user" | "assistant" | "system";
   content: string;
+  imageUrl?: string | null;
 };
 
 const MESSAGE_GROUP_SELECTOR = ".group\\/message";
@@ -72,6 +73,7 @@ const INPUT_SELECTOR = 'textarea[placeholder="メッセージを入力..."]';
 const SEND_BUTTON_SELECTOR = 'button[title="送信"]';
 const IMAGE_SELECTOR = 'img[alt="Generated"]';
 const TURN_PAD = 2;
+const RECENT_PHASE_WINDOW_TURNS = 7;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -123,12 +125,17 @@ const parsePersistedMessages = (value: unknown): PersistedMessage[] => {
     if (!isRecord(entry)) return [];
     const role = readString(entry.role);
     const content = readString(entry.content);
+    const imageUrl = entry.imageUrl === null ? null : readString(entry.imageUrl);
     if ((role === "user" || role === "assistant" || role === "system") && content !== null) {
-      return [{ role, content }];
+      return [{ role, content, imageUrl }];
     }
     return [];
   });
 };
+
+const countPersistedImageMessages = (messages: PersistedMessage[]): number =>
+  messages.filter((message) => message.role === "assistant" && typeof message.imageUrl === "string")
+    .length;
 
 const listPersistedMessages = async (
   page: Page,
@@ -472,6 +479,7 @@ export async function runScenario(
             turn.turnIndex,
           );
           const persistedMessages = await listPersistedMessages(page, env, scenario.conversationId);
+          const imageMessageCount = countPersistedImageMessages(persistedMessages);
           const phaseJudgment = judgePhase({
             assistantMsg,
             expectedPhase: turn.expectedPhase,
@@ -482,7 +490,7 @@ export async function runScenario(
           const phaseMonotonicViolation = phaseJudgment.monotonicViolation;
           previousDetectedPhase = detectedPhase;
           recentDetectedPhases.push(detectedPhase);
-          if (recentDetectedPhases.length > 2) recentDetectedPhases.shift();
+          if (recentDetectedPhases.length > RECENT_PHASE_WINDOW_TURNS) recentDetectedPhases.shift();
 
           const turnQualityEvents = qualityEvents.slice(qualityStart);
           const turnResponses = chatResponses.slice(responseStart);
@@ -504,6 +512,8 @@ export async function runScenario(
             conversationId: scenario.conversationId,
             renderedMessageCount,
             greetingMessageCount,
+            imageMessageCount,
+            persistedCount: persistedMessages.length,
           });
 
           let turnResult: TurnResult = {

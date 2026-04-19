@@ -1,6 +1,7 @@
 // 品質ガード: LLMの確率的出力をコードで決定的に保証する
 // プロンプトは「お願い」、品質ガードは「保証」
 
+import { AFTERGLOW_CUES } from "./scene-phase";
 import { isXmlResponse, parseXmlResponse, stripXmlTags } from "./xml-response-parser";
 
 import type { ScenePhase } from "./scene-phase";
@@ -100,8 +101,22 @@ const CONVERSATION_ESCALATION_PATTERNS = [
   /奥まで/u,
 ] as const;
 
+const AFTERGLOW_ESCALATION_ALLOW_PATTERNS = [
+  ...AFTERGLOW_CUES.map((cue) => new RegExp(cue, "u")),
+  /胸に顔/u,
+  /寄りかか/u,
+  /立ち上が/u,
+  /ふらつ/u,
+  /足元/u,
+  /支え/u,
+  /甘え/u,
+] as const;
+
 function checkConversationEscalation(plainText: string, phase: ScenePhase): boolean {
   if (phase !== "conversation") return true;
+  if (AFTERGLOW_ESCALATION_ALLOW_PATTERNS.some((pattern) => pattern.test(plainText))) {
+    return true;
+  }
   return !CONVERSATION_ESCALATION_PATTERNS.some((pattern) => pattern.test(plainText));
 }
 
@@ -124,21 +139,22 @@ function jaccardSimilarity(a: string, b: string): number {
 function hasSimilarSentences(sentences: string[]): boolean {
   for (let i = 0; i < sentences.length; i++) {
     for (let j = i + 1; j < sentences.length; j++) {
-      if (jaccardSimilarity(sentences[i], sentences[j]) > 0.6) return true;
+      if (jaccardSimilarity(sentences[i], sentences[j]) > 0.72) return true;
     }
   }
   return false;
 }
 
-// 5文字以上の部分文字列が3回以上出現するか判定
+// 6文字以上の部分文字列が4回以上出現するか判定
 function hasSubstringRepetition(text: string): boolean {
   const phrases = new Map<string, number>();
   const cleaned = text.replace(/[\s…。「」！？]/g, "");
-  for (let len = 5; len <= 10; len++) {
+  if (cleaned.length < 60) return false;
+  for (let len = 6; len <= 12; len++) {
     for (let i = 0; i <= cleaned.length - len; i++) {
       const sub = cleaned.slice(i, i + len);
       const count = (phrases.get(sub) ?? 0) + 1;
-      if (count >= 3) return true;
+      if (count >= 4) return true;
       phrases.set(sub, count);
     }
   }
@@ -147,11 +163,12 @@ function hasSubstringRepetition(text: string): boolean {
 
 // チェック4: ターン内繰り返し検出（デコードループ防止）
 function checkWithinTurnRepetition(response: string): boolean {
+  if (response.length < 60) return true;
   const sentences = response
     .split(/[\n。」！？]/)
     .map((s) => s.replace(/「/g, "").trim())
     .filter((s) => s.length > 5);
-  if (sentences.length >= 3 && hasSimilarSentences(sentences)) return false;
+  if (sentences.length >= 4 && hasSimilarSentences(sentences)) return false;
   if (hasSubstringRepetition(response)) return false;
   return true;
 }
@@ -222,7 +239,9 @@ export function checkWrongFirstPerson(
   if (!wrongFirstPersons || wrongFirstPersons.length === 0) return true;
   return !wrongFirstPersons.some((fp) => {
     if (fp === "自分") return JIBUN_SUBJECT_PATTERN.test(plainText);
-    return plainText.includes(fp);
+    const escaped = fp.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = new RegExp(`(?<![『])${escaped}(?:[はがもをにので]|[、。！？…]|$)`, "u");
+    return pattern.test(plainText);
   });
 }
 

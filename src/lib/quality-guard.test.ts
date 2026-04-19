@@ -18,6 +18,15 @@ describe("checkWrongFirstPerson", () => {
     it("禁止一人称なしならパスする", () => {
       expect(checkWrongFirstPerson("彼女は微笑んだ", WRONG_FPS_WITH_JIBUN)).toBe(true);
     });
+
+    it("他者の引用に出る禁止一人称は誤検出しない", () => {
+      expect(
+        checkWrongFirstPerson("彼が小さく『俺は先に行く』と呟くのを、あたしは黙って見ていた。", [
+          "俺",
+          "僕",
+        ]),
+      ).toBe(true);
+    });
   });
 
   describe("「自分」— 主語用法は検出する", () => {
@@ -175,6 +184,13 @@ describe("runQualityChecks", () => {
     expect(result.failedCheck).toBe("conversation-over-escalation");
   });
 
+  it("conversation判定でもafterglow描写は過剰接触扱いしない", () => {
+    const xml =
+      "<response><narration>火照りの残る身体を預ける。</narration><dialogue>「ちょっと足元がふらつくかも」</dialogue><inner>腕に寄りかかって支えてもらえるのが心地いい。</inner></response>";
+    const result = runQualityChecks(xml, { phase: "conversation" });
+    expect(result.passed).toBe(true);
+  });
+
   it("禁止一人称を検出する", () => {
     const xml = "<response><dialogue>「俺はここにいるよ」</dialogue></response>";
     const result = runQualityChecks(xml, {
@@ -205,6 +221,13 @@ describe("runQualityChecks", () => {
     const result = runQualityChecks(xml, { phase: "conversation" });
     expect(result.passed).toBe(false);
     expect(result.failedCheck).toBe("within-turn-repetition");
+  });
+
+  it("短い応答の軽い反復ではwithin-turn-repetitionにしない", () => {
+    const xml =
+      "<response><dialogue>「うれしい。うれしいけど、まだ少しだけ恥ずかしいの」</dialogue></response>";
+    const result = runQualityChecks(xml, { phase: "conversation" });
+    expect(result.failedCheck).not.toBe("within-turn-repetition");
   });
 
   it("intimateフェーズで<inner>なしはfail", () => {

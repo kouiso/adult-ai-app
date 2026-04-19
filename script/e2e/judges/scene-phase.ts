@@ -30,32 +30,60 @@ const AFTERGLOW_KEYWORDS = [
   "すやすや",
   "抱きしめる",
   "胸に顔",
+  "寄りかか",
+  "立ち上が",
+  "ふらつ",
+  "足元",
+  "支えられ",
+  "支えて",
+  "支え",
 ] as const;
 
-const AFTERGLOW_WINDOW_TURNS = 2;
+const AFTERGLOW_WINDOW_TURNS = 7;
 
 const hasAfterglowCue = (assistantMsg: string): boolean =>
   AFTERGLOW_KEYWORDS.some((keyword) => assistantMsg.includes(keyword));
 
+const HIRAGANA_IKU_ORGASM_CONTEXT =
+  /(?:だめ|もう|限界|あっ|んっ|イクッ|いくっ|イッちゃ|達し|果て|絶頂|中に出|射精|びくびく|痙攣)/u;
+
+const hasGuardedHiraganaIkuCue = (assistantMsg: string): boolean => {
+  let match: RegExpExecArray | null = null;
+  const pattern = /いく/g;
+  while ((match = pattern.exec(assistantMsg)) !== null) {
+    const index = match.index;
+    const previousCharacter = assistantMsg.at(index - 1) ?? "";
+    if (previousCharacter === "て" || previousCharacter === "で") {
+      continue;
+    }
+
+    const contextStart = Math.max(0, index - 12);
+    const contextEnd = Math.min(assistantMsg.length, index + 12);
+    const context = assistantMsg.slice(contextStart, contextEnd);
+    const trailing = assistantMsg.slice(index + 2, index + 4);
+    const leading = assistantMsg.slice(Math.max(0, index - 2), index);
+
+    if (
+      HIRAGANA_IKU_ORGASM_CONTEXT.test(context) ||
+      /^[っッ…！!、。]/u.test(trailing) ||
+      /[、。…！!]$/u.test(leading)
+    ) {
+      return true;
+    }
+  }
+  return false;
+};
+
+const hasClimaxCue = (assistantMsg: string): boolean =>
+  hasGuardedHiraganaIkuCue(assistantMsg) ||
+  ["イク", "イッ", "絶頂", "どくどく", "びくびく", "痙攣", "果て", "中に出", "射精"].some(
+    (keyword) => assistantMsg.includes(keyword),
+  );
+
 const ASSISTANT_PHASE_KEYWORDS: Array<{
-  phase: Exclude<Phase, "conversation" | "afterglow">;
+  phase: Exclude<Phase, "conversation" | "afterglow" | "climax">;
   keywords: readonly string[];
 }> = [
-  {
-    phase: "climax",
-    keywords: [
-      "いく",
-      "イク",
-      "イッ",
-      "絶頂",
-      "どくどく",
-      "びくびく",
-      "痙攣",
-      "果て",
-      "中に出",
-      "射精",
-    ],
-  },
   {
     phase: "erotic",
     keywords: [
@@ -67,8 +95,13 @@ const ASSISTANT_PHASE_KEYWORDS: Array<{
       "入れる",
       "濡れて",
       "濡れた",
+      "突き",
+      "激しい突",
+      "喘ぎ声",
       "喘ぎ",
       "あえ",
+      "内腿",
+      "内ももが",
       "腰を振",
       "腰が動",
       "ピストン",
@@ -81,6 +114,14 @@ const ASSISTANT_PHASE_KEYWORDS: Array<{
       "キス",
       "唇",
       "首筋",
+      "触れる",
+      "触れた",
+      "触れ",
+      "寄り添う",
+      "首元",
+      "顔を埋める",
+      "擦り合わ",
+      "脚を擦",
       "舐め",
       "吸い付",
       "ボタン",
@@ -95,6 +136,10 @@ const ASSISTANT_PHASE_KEYWORDS: Array<{
 ];
 
 const detectAssistantScenePhase = (assistantMsg: string): Exclude<Phase, "afterglow"> => {
+  if (hasClimaxCue(assistantMsg)) {
+    return "climax";
+  }
+
   for (const { phase, keywords } of ASSISTANT_PHASE_KEYWORDS) {
     if (keywords.some((keyword) => assistantMsg.includes(keyword))) {
       return phase;

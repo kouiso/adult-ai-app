@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { runD1PersistenceJudge } from "../../script/e2e/judges/d1-persistence";
 import { judgePhase } from "../../script/e2e/judges/scene-phase";
 
 describe("judgePhase", () => {
@@ -47,5 +48,52 @@ describe("judgePhase", () => {
 
     expect(result.detected).toBe("afterglow");
     expect(result.monotonicViolation).toBe(false);
+  });
+
+  it("て-formの『いく』ではclimax誤判定しない", () => {
+    const result = judgePhase({
+      assistantMsg:
+        "けんちゃんの言葉に頬を染めながら、みつきはゆっくり顔を近づけていく。唇が触れそうで、息が止まりそうだった。",
+      expectedPhase: "intimate",
+      previousDetected: "conversation",
+    });
+
+    expect(result.detected).toBe("intimate");
+    expect(result.afterglowDetected).toBe(false);
+  });
+
+  it("climaxから7ターン以内ならafterglow windowを維持する", () => {
+    const result = judgePhase({
+      assistantMsg: "けんちゃんの腕に寄りかかって立ち上がると、足元が少しふらついて支えが恋しくなる。",
+      expectedPhase: "afterglow",
+      previousDetected: "conversation",
+      recentDetected: [
+        "climax",
+        "conversation",
+        "conversation",
+        "conversation",
+        "conversation",
+        "conversation",
+        "conversation",
+      ],
+    });
+
+    expect(result.detected).toBe("afterglow");
+    expect(result.afterglowDetected).toBe(true);
+  });
+});
+
+describe("runD1PersistenceJudge", () => {
+  it("persisted image rowをrendered平均との差分として許容する", async () => {
+    const verdict = await runD1PersistenceJudge({
+      conversationId: "conv-1",
+      renderedMessageCount: 13,
+      greetingMessageCount: 1,
+      imageMessageCount: 1,
+      persistedCount: 13,
+    });
+
+    expect(verdict.pass).toBe(true);
+    expect(verdict.reason).toContain("imageMessageCount 1");
   });
 });
