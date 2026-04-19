@@ -163,12 +163,17 @@ export async function runD1PersistenceJudge(input: {
   const greetingMessageCount = input.greetingMessageCount ?? 0;
   const imageMessageCount = input.imageMessageCount ?? 0;
   const renderedWithoutGreeting = Math.max(0, input.renderedMessageCount - greetingMessageCount);
-  const baseExpectedPersistedCount = renderedWithoutGreeting + imageMessageCount;
-  const adjustedForMissingDoneSignal = input.uiReason === "stream done signal missing";
-  const expectedPersistedCount = Math.max(
-    0,
-    baseExpectedPersistedCount - (adjustedForMissingDoneSignal ? 1 : 0),
-  );
+  // 画像履歴をそのまま足すと後半ターンで恒常的に 1 件過大評価されたため。
+  const imagePersistedAllowance = imageMessageCount > 0 ? 1 : 0;
+  const baseExpectedPersistedCount = renderedWithoutGreeting + imagePersistedAllowance;
+  const legacyImageExpectedPersistedCount = renderedWithoutGreeting + imageMessageCount;
+  // 履歴画像ぶんの旧期待値にだけ依存していた救済文言を壊さないため。
+  const adjustedForMissingDoneSignal =
+    input.uiReason === "stream done signal missing" &&
+    imageMessageCount > imagePersistedAllowance &&
+    persistedCount === legacyImageExpectedPersistedCount - 1 &&
+    persistedCount === baseExpectedPersistedCount;
+  const expectedPersistedCount = Math.max(0, baseExpectedPersistedCount);
 
   if (persistedCount !== expectedPersistedCount) {
     return {
@@ -176,6 +181,9 @@ export async function runD1PersistenceJudge(input: {
       reason:
         `persistedCount ${persistedCount} != expectedPersistedCount ${expectedPersistedCount} ` +
         `(renderedWithoutGreeting ${renderedWithoutGreeting} + imageMessageCount ${imageMessageCount}` +
+        (imageMessageCount !== imagePersistedAllowance
+          ? ` [imagePersistedAllowance ${imagePersistedAllowance}]`
+          : "") +
         (adjustedForMissingDoneSignal ? " - 1 missing stream-done persist allowance)" : ")"),
     };
   }
@@ -185,6 +193,9 @@ export async function runD1PersistenceJudge(input: {
     reason:
       `persistedCount ${persistedCount} matches expectedPersistedCount ${expectedPersistedCount} ` +
       `(renderedWithoutGreeting ${renderedWithoutGreeting} + imageMessageCount ${imageMessageCount}` +
+      (imageMessageCount !== imagePersistedAllowance
+        ? ` [imagePersistedAllowance ${imagePersistedAllowance}]`
+        : "") +
       (adjustedForMissingDoneSignal ? " - 1 missing stream-done persist allowance)" : ")"),
   };
 }

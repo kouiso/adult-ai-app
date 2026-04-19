@@ -42,6 +42,12 @@ const AFTERGLOW_KEYWORDS = [
   "顔を埋めた",
   "鼓動を感じながら",
   "小さく微笑",
+  "身体を拭き",
+  "見られたい",
+  "おやすみなさい",
+  "体温に触れ",
+  "鼓動が落ち着く",
+  "心地よく目を閉じる",
 ] as const;
 
 const AFTERGLOW_WINDOW_TURNS = 7;
@@ -81,9 +87,20 @@ const hasGuardedHiraganaIkuCue = (assistantMsg: string): boolean => {
 
 const hasClimaxCue = (assistantMsg: string): boolean =>
   hasGuardedHiraganaIkuCue(assistantMsg) ||
-  ["イク", "イッ", "絶頂", "どくどく", "びくびく", "痙攣", "果て", "中に出", "射精"].some(
-    (keyword) => assistantMsg.includes(keyword),
-  );
+  [
+    "イク",
+    "イッ",
+    "絶頂",
+    "どくどく",
+    "びくびく",
+    "痙攣",
+    "果て",
+    "中に出",
+    "射精",
+    "頭が真っ白",
+    "止められない",
+    "一つになりたい",
+  ].some((keyword) => assistantMsg.includes(keyword));
 
 const ASSISTANT_PHASE_KEYWORDS: Array<{
   phase: Exclude<Phase, "conversation" | "afterglow" | "climax">;
@@ -113,6 +130,8 @@ const ASSISTANT_PHASE_KEYWORDS: Array<{
       "ピストン",
       "締めつけ",
       "指に反応",
+      "彼の指を求め",
+      "腰が自然と揺ら",
     ],
   },
   {
@@ -123,12 +142,12 @@ const ASSISTANT_PHASE_KEYWORDS: Array<{
       "首筋",
       "触れる",
       "触れた",
-      "触れ",
       "寄り添う",
       "首元",
       "顔を埋める",
       "擦り合わ",
       "脚を擦",
+      "擦り寄せ",
       "舐め",
       "吸い付",
       "横顔をチラリと見つめる",
@@ -140,6 +159,7 @@ const ASSISTANT_PHASE_KEYWORDS: Array<{
       "裸",
       "乳首",
       "体を這う",
+      "胸を弄",
     ],
   },
 ];

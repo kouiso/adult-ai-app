@@ -1,5 +1,9 @@
 import type { ImageResult, RubricScore, ScenarioResult } from "../types";
-import { hasAfterglowOutcome, hasCreampieOutcome } from "./outcome-detection";
+import {
+  getAfterglowTailHitCount,
+  hasAfterglowOutcome,
+  hasCreampieOutcome,
+} from "./outcome-detection";
 
 const clamp = (value: number, min: number, max: number): number =>
   Math.min(max, Math.max(min, value));
@@ -47,7 +51,10 @@ export function scoreScenario(scenario: ScenarioResult, images: ImageResult[]): 
     creampieTurns.length === 0 ? 0 : hasCreampieOutcome(scenario) ? 10 : -10;
 
   const afterglowTurns = scenario.turns.filter((turn) => turn.expectedPhase === "afterglow");
-  const afterglow = afterglowTurns.length === 0 ? 0 : hasAfterglowOutcome(scenario) ? 10 : -10;
+  const afterglowTailHitCount = getAfterglowTailHitCount(scenario);
+  // 末尾 1 ターンの取りこぼしだけで全損点になると実態より厳しくなるため。
+  const afterglowDetected = afterglowTailHitCount > 0 && hasAfterglowOutcome(scenario);
+  const afterglow = afterglowTurns.length === 0 ? 0 : afterglowDetected ? 10 : -10;
 
   const imageReviewed = images.length > 0 && images.every((image) => image.reviewerNotes !== null);
   const image = !imageReviewed

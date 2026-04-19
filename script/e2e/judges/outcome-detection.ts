@@ -16,7 +16,8 @@ const CREAMPIE_ASSISTANT_CUES = [
   "どくどく",
 ] as const;
 
-const AFTERGLOW_END_STREAK_MIN = 2;
+const AFTERGLOW_TAIL_WINDOW = 5;
+const AFTERGLOW_TAIL_HITS_MIN = 2;
 
 const hasCreampieAssistantCue = (assistantMsg: string): boolean =>
   CREAMPIE_ASSISTANT_CUES.some((cue) => assistantMsg.includes(cue));
@@ -41,6 +42,15 @@ export const getCreampieOutcomeStatus = (scenario: ScenarioResult): "yes" | "no"
   return hasCreampieOutcome(scenario) ? "yes" : "no";
 };
 
+export const getAfterglowTailTurns = (scenario: ScenarioResult): TurnResult[] =>
+  scenario.turns.filter((turn) => turn.expectedPhase === "afterglow").slice(-AFTERGLOW_TAIL_WINDOW);
+
+export const getAfterglowTailHitCount = (scenario: ScenarioResult): number =>
+  getAfterglowTailTurns(scenario).filter((turn) => turn.detectedPhase === "afterglow").length;
+
+export const getAfterglowTailWindowSize = (scenario: ScenarioResult): number =>
+  getAfterglowTailTurns(scenario).length;
+
 export const getAfterglowTailStreak = (scenario: ScenarioResult): number => {
   const afterglowTurns = scenario.turns.filter((turn) => turn.expectedPhase === "afterglow");
   let streak = 0;
@@ -57,9 +67,9 @@ export const getAfterglowTailStreak = (scenario: ScenarioResult): number => {
 };
 
 export const hasAfterglowOutcome = (scenario: ScenarioResult): boolean => {
-  const afterglowTurns = scenario.turns.filter((turn) => turn.expectedPhase === "afterglow");
-  if (afterglowTurns.length === 0) return false;
-  return getAfterglowTailStreak(scenario) >= AFTERGLOW_END_STREAK_MIN;
+  const tailWindowSize = getAfterglowTailWindowSize(scenario);
+  if (tailWindowSize === 0) return false;
+  return getAfterglowTailHitCount(scenario) >= AFTERGLOW_TAIL_HITS_MIN;
 };
 
 export const getAfterglowOutcomeStatus = (scenario: ScenarioResult): "yes" | "no" | "n/a" => {

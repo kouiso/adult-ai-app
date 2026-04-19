@@ -1,5 +1,7 @@
 import { FAILURE_CATEGORIES, type FailureCategory } from "./failure-taxonomy";
 import {
+  getAfterglowTailHitCount,
+  getAfterglowTailWindowSize,
   getAfterglowOutcomeStatus,
   getCreampieOutcomeStatus,
 } from "./judges/outcome-detection";
@@ -178,7 +180,7 @@ const scoreEntriesForScenario = (scenario: ScenarioResult, score: RubricScore): 
       reason:
         afterglowStatus(scenario) === "n/a"
           ? "no afterglow requirement in this scenario"
-          : `afterglow outcome status: ${afterglowStatus(scenario)}`,
+          : `afterglow outcome status: ${afterglowStatus(scenario)} (${getAfterglowTailHitCount(scenario)}/${getAfterglowTailWindowSize(scenario)} tail hits)`,
     },
     {
       label: "bonus.image",
