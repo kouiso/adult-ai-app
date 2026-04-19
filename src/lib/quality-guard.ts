@@ -145,12 +145,12 @@ function hasSimilarSentences(sentences: string[]): boolean {
   return false;
 }
 
-// 6文字以上の部分文字列が4回以上出現するか判定
+// 8文字以上の部分文字列が4回以上出現するか判定
 function hasSubstringRepetition(text: string): boolean {
   const phrases = new Map<string, number>();
   const cleaned = text.replace(/[\s…。「」！？]/g, "");
   if (cleaned.length < 60) return false;
-  for (let len = 6; len <= 12; len++) {
+  for (let len = 8; len <= 12; len++) {
     for (let i = 0; i <= cleaned.length - len; i++) {
       const sub = cleaned.slice(i, i + len);
       const count = (phrases.get(sub) ?? 0) + 1;

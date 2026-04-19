@@ -230,6 +230,13 @@ describe("runQualityChecks", () => {
     expect(result.failedCheck).not.toBe("within-turn-repetition");
   });
 
+  it("短い句の自然な反復だけならwithin-turn-repetitionにしない", () => {
+    const xml =
+      "<response><dialogue>「ふふ、朝のあたしも、今のあたしも、どちらも魅力的よ。でも、今のあたしのほうが特別かな。だって、今のあたしは、君の前で素のままなのだから」</dialogue><inner>朝のあたしも魅力的だけれど、今のあたしのほうが、受け入れてほしい。</inner></response>";
+    const result = runQualityChecks(xml, { phase: "conversation" });
+    expect(result.failedCheck).not.toBe("within-turn-repetition");
+  });
+
   it("intimateフェーズで<inner>なしはfail", () => {
     // scene-min-lengthをパスするために plainText が80文字以上必要
     const longDialogue =

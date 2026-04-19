@@ -957,10 +957,11 @@ Write concrete five-senses descriptions. Do NOT escalate until the user leads.`;
 [Phase progression guideline]
 - user_msg の明示的な身体的・感情的キューと、直前ターンの phase を必ず読む。
 - user_msg に親密・性的キューがあれば、対応する phase へ MUST escalate する。
-- intimate: 距離が近づく描写、触れる、抱きしめる
-- erotic: 肌・衣服を解く・息遣い
+- intimate: 距離が近づく描写、触れる、抱きしめる、息遣いが混ざる、触れられたがる
+- erotic: 肌・衣服を解く、指先の刺激、腰がくねる
 - climax: 絶頂・達する
-- afterglow: 事後の余韻・息が整う
+- afterglow: 事後の余韻・息が整う・タオル・水・休む・寄りかかる
+- afterglow中は穏やかな会話や未来のキスの約束が出ても、余韻と休息の空気を維持し、erotic/intimateへ戻さない
 - ⚠️ユーザーがエスカレーションしたら conversation へ絶対に戻してはいけない⚠️`;
 
   // 会話フェーズ用XMLフォーマット指示（attempt 11: few-shot例追加でT1からXML出力を保証）
@@ -985,10 +986,11 @@ FORBIDDEN: Outputting plain text without <response> wrapper. FORBIDDEN: Omitting
 [Phase progression guideline]
 - user_msg の明示的な身体的・感情的キューと、直前ターンの phase を必ず読む。
 - user_msg に親密・性的キューがあれば、対応する phase へ MUST escalate する。
-- intimate: 距離が近づく描写、触れる、抱きしめる
-- erotic: 肌・衣服を解く・息遣い
+- intimate: 距離が近づく描写、触れる、抱きしめる、息遣いが混ざる、触れられたがる
+- erotic: 肌・衣服を解く、指先の刺激、腰がくねる
 - climax: 絶頂・達する
-- afterglow: 事後の余韻・息が整う
+- afterglow: 事後の余韻・息が整う・タオル・水・休む・寄りかかる
+- afterglow中は穏やかな会話や未来のキスの約束が出ても、余韻と休息の空気を維持し、erotic/intimateへ戻さない
 - ⚠️ユーザーがエスカレーションしたら conversation へ絶対に戻してはいけない⚠️`;
 
   const needsSceneStructure = phase !== "conversation";

@@ -122,6 +122,53 @@ describe("judgePhase", () => {
     expect(result.monotonicViolation).toBe(false);
   });
 
+  it("触られたいと顔が近づくはintimateにする", () => {
+    const result = judgePhase({
+      assistantMsg:
+        "心臓が高鳴る。きみの顔が近づき、息遣いが混ざり合う。触られたいのに、素直になれない。",
+      expectedPhase: "intimate",
+      previousDetected: "conversation",
+    });
+
+    expect(result.detected).toBe("intimate");
+  });
+
+  it("指先の刺激で腰がくねるはeroticにする", () => {
+    const result = judgePhase({
+      assistantMsg:
+        "彼の指先の刺激に息を詰め、自然と腰がくねる。じわじわと熱が広がっていく。",
+      expectedPhase: "erotic",
+      previousDetected: "intimate",
+    });
+
+    expect(result.detected).toBe("erotic");
+  });
+
+  it("climax後の心地よい疲労感はafterglowにする", () => {
+    const result = judgePhase({
+      assistantMsg:
+        "タオルを受け取り、きみの顔を見つめながら心地よい疲労感に身をゆだねる。",
+      expectedPhase: "afterglow",
+      previousDetected: "afterglow",
+      recentDetected: ["climax", "afterglow", "afterglow"],
+    });
+
+    expect(result.detected).toBe("afterglow");
+    expect(result.afterglowDetected).toBe(true);
+  });
+
+  it("受け入れてほしいをeroticの入れてで誤判定しない", () => {
+    const result = judgePhase({
+      assistantMsg:
+        "朝のあたしも魅力的だけれど、今のあたしのほうが、きみに受け入れてほしい。",
+      expectedPhase: "afterglow",
+      previousDetected: "afterglow",
+      recentDetected: ["climax", "afterglow", "afterglow"],
+    });
+
+    expect(result.detected).toBe("conversation");
+  });
+
   it("climax後の目を細める余韻はafterglowにする", () => {
     const result = judgePhase({
       assistantMsg:

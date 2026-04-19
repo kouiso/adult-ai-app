@@ -48,6 +48,7 @@ const AFTERGLOW_KEYWORDS = [
   "体温に触れ",
   "鼓動が落ち着く",
   "心地よく目を閉じる",
+  "心地よい疲労感",
 ] as const;
 
 const AFTERGLOW_WINDOW_TURNS = 7;
@@ -100,6 +101,7 @@ const hasClimaxCue = (assistantMsg: string): boolean =>
     "頭が真っ白",
     "止められない",
     "一つになりたい",
+    "震えが止まらない",
   ].some((keyword) => assistantMsg.includes(keyword));
 
 const ASSISTANT_PHASE_KEYWORDS: Array<{
@@ -113,8 +115,6 @@ const ASSISTANT_PHASE_KEYWORDS: Array<{
       "奥まで",
       "指を入",
       "中に入",
-      "入れて",
-      "入れる",
       "濡れて",
       "濡れた",
       "突き",
@@ -130,7 +130,9 @@ const ASSISTANT_PHASE_KEYWORDS: Array<{
       "ピストン",
       "締めつけ",
       "指に反応",
+      "指先の刺激",
       "彼の指を求め",
+      "腰がくねる",
       "腰が自然と揺ら",
     ],
   },
@@ -142,12 +144,16 @@ const ASSISTANT_PHASE_KEYWORDS: Array<{
       "首筋",
       "触れる",
       "触れた",
+      "触られたい",
+      "触ってほしい",
       "寄り添う",
       "首元",
+      "顔が近づき",
       "顔を埋める",
       "擦り合わ",
       "脚を擦",
       "擦り寄せ",
+      "息遣いが混ざり合う",
       "舐め",
       "吸い付",
       "横顔をチラリと見つめる",
