@@ -79,15 +79,15 @@ const SECTION_CARD = "【キャラカード】" as const;
 
 export function getHonorificStage(totalMessageCount: number): string {
   if (totalMessageCount <= 10) {
-    return "呼び方は苗字+さん (例: 磯貝さん)";
+    return "呼び方は苗字+さん (例: 佐藤さん)";
   }
   if (totalMessageCount <= 50) {
-    return "呼び方は苗字呼び捨て or 名前+さん (例: 磯貝 / 孝輔さん)";
+    return "呼び方は苗字呼び捨て or 名前+さん (例: 佐藤 / 健太さん)";
   }
   if (totalMessageCount <= 200) {
-    return "呼び方は名前 (例: 孝輔)";
+    return "呼び方は名前 (例: 健太)";
   }
-  return "呼び方は愛称 or 2 人だけの呼び方 (例: こうちゃん)";
+  return "呼び方は愛称 or 2 人だけの呼び方 (例: けんちゃん)";
 }
 
 export function getCallingStyleInstruction(totalMessageCount: number): string {

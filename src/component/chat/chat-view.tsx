@@ -610,12 +610,15 @@ export const ChatView = () => {
       };
       addMessage(userMsg);
 
-      void createMessageEntry({
+      const persistUserMessage = createMessageEntry({
         conversationId,
         id: userMsg.id,
         role: userMsg.role,
         content: userMsg.content,
-      }).catch((error) => console.error("failed to persist user message", error));
+      }).catch((error) => {
+        console.error("failed to persist user message", error);
+        throw error;
+      });
 
       const assistantId = crypto.randomUUID();
       addMessage({ id: assistantId, role: "assistant", content: "", isStreaming: true });
@@ -651,12 +654,15 @@ export const ChatView = () => {
         ({ content: finalText, warningLevel }) => {
           updateMessage(assistantId, finalText, false, warningLevel);
           setLoading(false);
-          void createMessageEntry({
-            conversationId,
-            id: assistantId,
-            role: "assistant",
-            content: finalText,
-          })
+          void persistUserMessage
+            .then(async () => {
+              await createMessageEntry({
+                conversationId,
+                id: assistantId,
+                role: "assistant",
+                content: finalText,
+              });
+            })
             .then(() => void tryGenerateTitle(conversationId, text, finalText))
             .catch((error) => console.error("failed to persist assistant message", error));
         },
@@ -679,7 +685,12 @@ export const ChatView = () => {
         },
       );
     },
-    [buildApiMessages, createMessageEntry, setLoading, tryGenerateTitle],
+    [
+      buildApiMessages,
+      createMessageEntry,
+      setLoading,
+      tryGenerateTitle,
+    ],
   );
 
   const handleSend = useCallback(

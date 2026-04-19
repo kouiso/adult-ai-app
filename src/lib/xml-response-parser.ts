@@ -42,6 +42,20 @@ export function stripRememberTags(text: string): string {
   return text.replace(REMEMBER_PATTERN, "").trim();
 }
 
+// ストリーミング表示用: 完全タグと未完了の開始タグを除去して生XML露出を防ぐ
+export function stripXmlTagsStreaming(text: string): string {
+  return text
+    .replace(/<remember>[\S\s]*?<\/remember>/g, "")
+    .replace(/<\/?(?:response|action|dialogue|inner|narration|remember)[^>]*>?/g, "")
+    .replace(/<\/?res(?:p(?:o(?:n(?:s(?:e?)?)?)?)?)?$/g, "")
+    .replace(/<\/?act(?:i(?:o(?:n?)?)?)?$/g, "")
+    .replace(/<\/?dia(?:l(?:o(?:g(?:u(?:e?)?)?)?)?)?$/g, "")
+    .replace(/<\/?inn(?:e(?:r?)?)?$/g, "")
+    .replace(/<\/?nar(?:r(?:a(?:t(?:i(?:o(?:n?)?)?)?)?)?)?$/g, "")
+    .replace(/<\/?rem(?:e(?:m(?:b(?:e(?:r?)?)?)?)?)?$/g, "")
+    .trim();
+}
+
 // シーンフェーズ用: action + dialogue + inner の完全XML
 export function parseXmlResponse(text: string): StructuredResponse | null {
   if (!isXmlResponse(text)) return null;

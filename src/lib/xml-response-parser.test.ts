@@ -4,6 +4,7 @@ import {
   isXmlResponse,
   parseXmlResponse,
   stripRememberTags,
+  stripXmlTagsStreaming,
   stripXmlTags,
   wrapConversationPlainAsXml,
 } from "./xml-response-parser";
@@ -105,6 +106,34 @@ describe("stripRememberTags", () => {
   it("rememberタグだけを除去する", () => {
     const result = stripRememberTags("「了解」<remember>次は海に行きたい</remember>");
     expect(result).toBe("「了解」");
+  });
+});
+
+describe("stripXmlTagsStreaming", () => {
+  it("完全なXMLタグを除去する", () => {
+    expect(stripXmlTagsStreaming("<response><narration>hello</narration></response>")).toBe(
+      "hello",
+    );
+  });
+
+  it("未完了の開始タグを除去する", () => {
+    const result = stripXmlTagsStreaming("<response>\n<narratio");
+    expect(result.trim()).toBe("");
+    expect(result).not.toContain("<narratio");
+  });
+
+  it("タグ内のストリーミング途中コンテンツは保持する", () => {
+    expect(stripXmlTagsStreaming("<response><narration>hel")).toBe("hel");
+  });
+
+  it("rememberタグを除去する", () => {
+    expect(stripXmlTagsStreaming("「了解」<remember>次は海に行きたい</remember>")).toBe(
+      "「了解」",
+    );
+  });
+
+  it("空文字列は空文字列のまま返す", () => {
+    expect(stripXmlTagsStreaming("")).toBe("");
   });
 });
 

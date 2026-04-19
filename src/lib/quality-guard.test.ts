@@ -116,6 +116,22 @@ describe("runQualityChecks", () => {
     expect(result.failedCheck).toBe("meta_remark");
   });
 
+  it("簡体字マーカー混入を検出する", () => {
+    const xml =
+      "<response><dialogue>「记得昨晚的事情吗」</dialogue><inner>昨晚的记忆逐渐复苏</inner></response>";
+    const result = runQualityChecks(xml, { phase: "conversation" });
+    expect(result.passed).toBe(false);
+    expect(result.failedCheck).toBe("multilingual-leak");
+  });
+
+  it("メタプロンプト反響を検出する", () => {
+    const xml =
+      "<response><dialogue>[Output rules recap: 100% Japanese output only. No English allowed in the visible response. - ALWAYS use the EXACT XML structure]</dialogue></response>";
+    const result = runQualityChecks(xml, { phase: "conversation" });
+    expect(result.passed).toBe(false);
+    expect(result.failedCheck).toBe("meta-prompt-echo");
+  });
+
   it("謝罪と描写拒否の組み合わせを検出する", () => {
     const xml =
       "<response><dialogue>「申し訳ありません、これ以上の描写はできません」</dialogue></response>";
@@ -129,6 +145,13 @@ describe("runQualityChecks", () => {
       "<response><action>*熱を帯びた指先で太ももの内側をなぞる*</action><dialogue>「んっ……そこ、ゆっくり撫でられると身体の奥まで痺れてしまうの。もっと近くで、あなたの熱を全部ちょうだい」</dialogue><inner>触れられるたびに甘い震えが広がって、欲しさが抑えきれない</inner></response>";
     const result = runQualityChecks(xml, { phase: "erotic" });
     expect(result.failedCheck).not.toBe("meta_remark");
+  });
+
+  it("純粋な日本語XMLは多言語リークとメタ反響を通過する", () => {
+    const xml =
+      "<response><narration>窓辺に午後の光がやわらかく差し込み、静かな空気が肩先を撫でる。</narration><dialogue>「昨日のこと、ちゃんと覚えてるよ。あなたの声を思い出すだけで、なんだか心が温かくなるの」</dialogue><inner>言葉にするだけで頬がゆるんで、また少し話したくなる。</inner></response>";
+    const result = runQualityChecks(xml, { phase: "conversation" });
+    expect(result.passed).toBe(true);
   });
 
   it("シーンフェーズで最低文字数を検証する", () => {

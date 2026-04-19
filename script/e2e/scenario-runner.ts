@@ -352,6 +352,7 @@ export async function runScenario(
     const qualityEvents: QualityGuardEvent[] = [];
     const chatResponses: ChatResponseEvent[] = [];
     let previousDetectedPhase: Phase | null = null;
+    const recentDetectedPhases: Phase[] = [];
     let page: Page | null = null;
     let context: Awaited<ReturnType<typeof createContext>> | null = null;
 
@@ -475,10 +476,13 @@ export async function runScenario(
             assistantMsg,
             expectedPhase: turn.expectedPhase,
             previousDetected: previousDetectedPhase,
+            recentDetected: recentDetectedPhases,
           });
           const detectedPhase = phaseJudgment.detected;
           const phaseMonotonicViolation = phaseJudgment.monotonicViolation;
           previousDetectedPhase = detectedPhase;
+          recentDetectedPhases.push(detectedPhase);
+          if (recentDetectedPhases.length > 2) recentDetectedPhases.shift();
 
           const turnQualityEvents = qualityEvents.slice(qualityStart);
           const turnResponses = chatResponses.slice(responseStart);

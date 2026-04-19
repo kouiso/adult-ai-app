@@ -33,6 +33,52 @@ function checkNoEnglish(response: string): boolean {
   return !/[A-Za-z]{3,}/.test(response);
 }
 
+const SIMPLIFIED_CHINESE_MARKERS = new Set([
+  "记",
+  "识",
+  "说",
+  "谈",
+  "还",
+  "认",
+  "让",
+  "给",
+  "决",
+  "语",
+  "问",
+  "将",
+  "现",
+  "实",
+  "应",
+  "会",
+  "经",
+  "历",
+  "进",
+  "运",
+  "时",
+]);
+
+const NON_BMP_CJK_PATTERN = /[\u{20000}-\u{2FFFF}]/u;
+
+function checkMultilingualLeak(response: string): boolean {
+  return (
+    !response.split("").some((character) => SIMPLIFIED_CHINESE_MARKERS.has(character)) &&
+    !NON_BMP_CJK_PATTERN.test(response)
+  );
+}
+
+const META_PROMPT_ECHO_PATTERNS = [
+  /Output rules recap/i,
+  /EXACT XML structure/i,
+  /100% Japanese output only/i,
+  /English FORBIDDEN/i,
+  /English is forbidden/i,
+  /ALWAYS use/i,
+] as const;
+
+function checkMetaPromptEcho(response: string): boolean {
+  return !META_PROMPT_ECHO_PATTERNS.some((pattern) => pattern.test(response));
+}
+
 const CONVERSATION_ESCALATION_PATTERNS = [
   /キス/u,
   /唇を[重舐]/u,
@@ -201,6 +247,8 @@ export function runQualityChecks(
   const checks: [boolean, string][] = [
     [checkWrongFirstPerson(plainText, context.wrongFirstPersons), "wrong-first-person"],
     [checkNoMetaRemark(plainText), "meta_remark"],
+    [checkMetaPromptEcho(response), "meta-prompt-echo"],
+    [checkMultilingualLeak(response), "multilingual-leak"],
     [checkNoEnglish(plainText), "no-english"],
     [checkXmlFormat(response), "xml-format-missing"],
     [checkNoUserLeak(plainText), "user-leak"],

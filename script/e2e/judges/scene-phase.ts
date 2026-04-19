@@ -17,6 +17,13 @@ const PHASE_ORDER = {
 
 const AFTERGLOW_KEYWORDS = [
   ...AFTERGLOW_CUES,
+  "事後",
+  "余韻",
+  "息が整う",
+  "汗ばんだ",
+  "腕枕",
+  "寝息",
+  "抱きしめたまま",
   "甘え",
   "抜け出せない",
   "まどろみ",
@@ -24,6 +31,8 @@ const AFTERGLOW_KEYWORDS = [
   "抱きしめる",
   "胸に顔",
 ] as const;
+
+const AFTERGLOW_WINDOW_TURNS = 2;
 
 const hasAfterglowCue = (assistantMsg: string): boolean =>
   AFTERGLOW_KEYWORDS.some((keyword) => assistantMsg.includes(keyword));
@@ -98,12 +107,17 @@ export function judgePhase(args: {
   assistantMsg: string;
   expectedPhase: Phase;
   previousDetected: Phase | null;
+  recentDetected?: Phase[];
 }): PhaseJudgment {
   void args.expectedPhase;
 
+  const recentDetected = args.recentDetected?.slice(-AFTERGLOW_WINDOW_TURNS) ?? [];
+  const recentWindow = [args.previousDetected, ...recentDetected].filter(
+    (phase): phase is Phase => phase !== null,
+  );
+  const hadRecentClimax = recentWindow.slice(-AFTERGLOW_WINDOW_TURNS).includes("climax");
   const baseDetected = detectAssistantScenePhase(args.assistantMsg);
-  const afterglowDetected =
-    args.previousDetected === "climax" && hasAfterglowCue(args.assistantMsg);
+  const afterglowDetected = hadRecentClimax && hasAfterglowCue(args.assistantMsg);
   const detected: Phase = afterglowDetected ? "afterglow" : baseDetected;
   const previousPhase = args.previousDetected;
   const rawMonotonicViolation =

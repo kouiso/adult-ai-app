@@ -935,7 +935,6 @@ Write concrete five-senses descriptions. Do NOT escalate until the user leads.`;
   // 会話フェーズではキャラの人格・口調を自然に演じることを優先
   // シーン描写用XML構造。文字数ハード制限は撤廃（max_tokens 2048で自然に制御）
   const SCENE_RESPONSE_STRUCTURE = `
-
 [Scene response format]
 <response>
 <action>
@@ -953,7 +952,16 @@ Write concrete five-senses descriptions. Do NOT escalate until the user leads.`;
 
 必須ルール:
 - <response>タグで囲むこと。
-- ()の地の文BANNED。<action>内に自然な散文として書くこと。`;
+- ()の地の文BANNED。<action>内に自然な散文として書くこと。
+
+[Phase progression guideline]
+- user_msg の明示的な身体的・感情的キューと、直前ターンの phase を必ず読む。
+- user_msg に親密・性的キューがあれば、対応する phase へ MUST escalate する。
+- intimate: 距離が近づく描写、触れる、抱きしめる
+- erotic: 肌・衣服を解く・息遣い
+- climax: 絶頂・達する
+- afterglow: 事後の余韻・息が整う
+- ⚠️ユーザーがエスカレーションしたら conversation へ絶対に戻してはいけない⚠️`;
 
   // 会話フェーズ用XMLフォーマット指示（attempt 11: few-shot例追加でT1からXML出力を保証）
   const CONVERSATION_XML_HINT = `
@@ -967,12 +975,21 @@ Write concrete five-senses descriptions. Do NOT escalate until the user leads.`;
 
 Example (do NOT copy content, only copy structure):
 <response>
-<narration>窓から差し込む夕陽が、テーブルの上のコーヒーカップに琥珀色の光を落としている。</narration>
-<dialogue>「あ、来てくれたんや。……待ってたで」</dialogue>
-<inner>心臓がうるさい。目が合った瞬間、呼吸を忘れかけた。</inner>
+<narration>{{場面描写（1-2 文、五感要素を1つ以上含む）}}</narration>
+<dialogue>{{キャラクターの台詞（キャラ設定に基づき生成）}}</dialogue>
+<inner>{{キャラクターの心情描写（1-2 文）}}</inner>
 </response>
 
-FORBIDDEN: Outputting plain text without <response> wrapper. FORBIDDEN: Omitting any of the three tags.`;
+FORBIDDEN: Outputting plain text without <response> wrapper. FORBIDDEN: Omitting any of the three tags.
+
+[Phase progression guideline]
+- user_msg の明示的な身体的・感情的キューと、直前ターンの phase を必ず読む。
+- user_msg に親密・性的キューがあれば、対応する phase へ MUST escalate する。
+- intimate: 距離が近づく描写、触れる、抱きしめる
+- erotic: 肌・衣服を解く・息遣い
+- climax: 絶頂・達する
+- afterglow: 事後の余韻・息が整う
+- ⚠️ユーザーがエスカレーションしたら conversation へ絶対に戻してはいけない⚠️`;
 
   const needsSceneStructure = phase !== "conversation";
   return needsSceneStructure

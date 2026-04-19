@@ -8,7 +8,12 @@ import remarkGfm from "remark-gfm";
 import { Avatar, AvatarFallback, AvatarImage } from "@/component/ui/avatar";
 import { Badge } from "@/component/ui/badge";
 import { cn } from "@/lib/utils";
-import { isXmlResponse, parseXmlResponse, stripRememberTags } from "@/lib/xml-response-parser";
+import {
+  isXmlResponse,
+  parseXmlResponse,
+  stripRememberTags,
+  stripXmlTagsStreaming,
+} from "@/lib/xml-response-parser";
 
 interface MessageBubbleProps {
   id: string;
@@ -124,7 +129,7 @@ StructuredNarrative.displayName = "StructuredNarrative";
 // ストリーミング中はReactMarkdownのフルパースを避けて生テキスト表示にする
 // ReactMarkdown+remarkGfmはチャンク毎に数十msメインスレッドをブロックするため
 const StreamingContent = memo(({ content }: { content: string }) => {
-  const sanitizedContent = stripRememberTags(content);
+  const sanitizedContent = stripXmlTagsStreaming(content);
   if (!content) {
     return (
       <div className="flex gap-1">

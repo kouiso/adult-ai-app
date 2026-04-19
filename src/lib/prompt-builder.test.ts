@@ -97,19 +97,19 @@ describe("buildSystemPrompt", () => {
 
 describe("getHonorificStage", () => {
   it("0件では苗字+さんを返す", () => {
-    expect(getHonorificStage(0)).toBe("呼び方は苗字+さん (例: 磯貝さん)");
+    expect(getHonorificStage(0)).toBe("呼び方は苗字+さん (例: 佐藤さん)");
   });
 
   it("10件では苗字+さんを維持する", () => {
-    expect(getHonorificStage(10)).toBe("呼び方は苗字+さん (例: 磯貝さん)");
+    expect(getHonorificStage(10)).toBe("呼び方は苗字+さん (例: 佐藤さん)");
   });
 
   it("50件では2段階目を返す", () => {
-    expect(getHonorificStage(50)).toBe("呼び方は苗字呼び捨て or 名前+さん (例: 磯貝 / 孝輔さん)");
+    expect(getHonorificStage(50)).toBe("呼び方は苗字呼び捨て or 名前+さん (例: 佐藤 / 健太さん)");
   });
 
   it("200件では名前呼びを返す", () => {
-    expect(getHonorificStage(200)).toBe("呼び方は名前 (例: 孝輔)");
+    expect(getHonorificStage(200)).toBe("呼び方は名前 (例: 健太)");
   });
 });
 

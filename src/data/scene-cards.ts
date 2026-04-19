@@ -12,16 +12,16 @@ export const sceneCards = [
     firstMessage: "もうこんな時間か…帰り、一緒に行かへん?",
   },
   {
-    id: "moriyama-rice-road",
-    title: "守山の田んぼ道散歩",
-    summary: "風の抜ける田んぼ道を並んで歩きながら、肩の力を抜いて話す。",
+    id: "riverside-walk",
+    title: "川沿いの散歩道",
+    summary: "風の抜ける川沿いの道を並んで歩きながら、肩の力を抜いて話す。",
     firstMessage: "たまには外歩くのもええな、景色見よう",
   },
   {
-    id: "horse-riding-club",
-    title: "馬術クラブの帰り道",
-    summary: "練習終わりの高揚感のまま、今日の騎乗を振り返りながら寄り道する。",
-    firstMessage: "今日のルバーノ、調子よかったな",
+    id: "gym-after-workout",
+    title: "運動帰りの道",
+    summary: "トレーニング後の高揚感のまま、今日の調子を振り返りながら寄り道する。",
+    firstMessage: "今日、体の調子よかったな",
   },
   {
     id: "onsen-inn",
