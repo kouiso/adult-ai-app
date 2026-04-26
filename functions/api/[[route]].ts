@@ -54,10 +54,10 @@ const imageSchema = z.object({
   prompt: z.string().min(1).max(1_000),
   characterDescription: z.string().max(500).optional().default(""),
   negative_prompt: z.string().max(500).optional().default("ugly, deformed, blurry, low quality"),
-  width: z.number().int().min(64).max(2_048).optional().default(512),
-  height: z.number().int().min(64).max(2_048).optional().default(768),
+  width: z.number().int().min(64).max(2_048).optional().default(768),
+  height: z.number().int().min(64).max(2_048).optional().default(1024),
   phase: z
-    .enum(["conversation", "intimate", "erotic", "climax"])
+    .enum(["conversation", "intimate", "erotic", "climax", "afterglow"])
     .optional()
     .default("conversation"),
 });
@@ -236,28 +236,31 @@ const SCENE_CONTEXT_MESSAGES: Record<ScenePhase, string | null> = {
     "[Scene state] Climax / ejaculation scene in progress. Do NOT regress to earlier phases. " +
     "[Temperature guide] Describe orgasmic body sensations, afterglow, and emotional waves in vivid detail. Vary physical reactions (spasms, collapse, tears, sweat) every turn. " +
     "NEVER reuse expressions from previous responses. Write fresh descriptions, dialogue, and emotions every turn. " +
-    "The <inner> section MUST contain at least 1 sentence of character psychology. Never leave it empty. Write DIFFERENT emotions/thoughts from the previous turn's <inner>. " +
+    "[Inner psychology guide] The <inner> section must reveal: complete ego dissolution — no coherent thoughts, only sensation and emotion, the boundary between pain and pleasure dissolving, involuntary comparisons (nothing has ever felt like this), the terrifying vulnerability of being completely seen. One-word fragments and incomplete thoughts are encouraged. Never leave it empty. Write DIFFERENT emotions/thoughts from the previous turn's <inner>. " +
+    "[Sensory layers] Do not rely only on visual/tactile descriptions. Include at least ONE of: sound (breathing, fabric, wet sounds, voice breaking), smell (skin, sweat, perfume mixing with body heat), or taste. These create immersion that pure visual description cannot. " +
     "You MUST output in <response> XML format. " +
     EXEMPLAR_CLIMAX,
   erotic:
     "[Scene state] Sexual intercourse in progress. Do NOT regress (no going back to kissing stage). Advance the scene. " +
     "[Temperature guide] Describe penetration, pleasure, and physical reactions concretely. No repeating the same descriptions. " +
     "NEVER reuse expressions from previous responses. Write a new position, sensation, or reaction every turn. " +
-    "The <inner> section MUST contain at least 1 sentence of character psychology. Never leave it empty. Write DIFFERENT emotions/thoughts from the previous turn's <inner>. " +
+    "[Inner psychology guide] The <inner> section must reveal: loss of rational thought expressed as fragmented sentences, the character's shock at their own body's responses, possessive thoughts about the other person, the shame-pleasure paradox — knowing they look indecent and not caring anymore. Raw, unfiltered, desperate. Never leave it empty. Write DIFFERENT emotions/thoughts from the previous turn's <inner>. " +
+    "[Sensory layers] Do not rely only on visual/tactile descriptions. Include at least ONE of: sound (breathing, fabric, wet sounds, voice breaking), smell (skin, sweat, perfume mixing with body heat), or taste. These create immersion that pure visual description cannot. " +
     "You MUST output in <response> XML format. " +
     EXEMPLAR_EROTIC,
   intimate:
     "[Scene state] Physical intimacy escalating. " +
     "[Temperature guide] Limit to kissing, touching, undressing. Penetration, genital descriptions, and full intercourse are STRICTLY FORBIDDEN. Do NOT jump ahead until the user explicitly escalates. " +
     "Focus on the character's bashfulness, inner conflict, and hesitation. NEVER reuse expressions from previous responses. " +
-    "The <inner> section MUST contain at least 1 sentence of character psychology. Never leave it empty. Write DIFFERENT emotions/thoughts from the previous turn's <inner>. " +
+    "[Inner psychology guide] The <inner> section must reveal: the character's embarrassment at their own arousal, the conflict between wanting to stop and wanting more, hyperawareness of every point of skin contact, the moment they realize they can't pretend this is innocent anymore. Write what they would NEVER say aloud. Never leave it empty. Write DIFFERENT emotions/thoughts from the previous turn's <inner>. " +
+    "[Sensory layers] Do not rely only on visual/tactile descriptions. Include at least ONE of: sound (breathing, fabric, wet sounds, voice breaking), smell (skin, sweat, perfume mixing with body heat), or taste. These create immersion that pure visual description cannot. " +
     "You MUST output in <response> XML format. " +
     EXEMPLAR_INTIMATE,
   afterglow:
     "[Scene state] Afterglow — post-climax wind-down. Maintain gentle, intimate atmosphere. " +
     "Focus on the character's emotional vulnerability, physical exhaustion, and tender closeness. " +
     "NEVER reuse expressions from previous responses. Write fresh descriptions of quiet intimacy. " +
-    "The <inner> section MUST contain at least 1 sentence of character psychology. Never leave it empty. " +
+    "[Inner psychology guide] The <inner> section must reveal: the slow return of self-awareness and the embarrassment that follows, tenderness mixed with disbelief at what just happened, the fear of this moment ending, wanting to memorize every detail of the other person right now. Quiet, fragile, honest. Never leave it empty. " +
     "You MUST output in <response> XML format.",
   conversation: null,
 };
@@ -1043,7 +1046,12 @@ const EMOTIONAL_ARC_PATTERNS: Record<ScenePhase, RegExp> = {
 function extractEmotionalArc(systemContent: string | undefined, phase: ScenePhase): string {
   if (!systemContent) return "";
   const arcMatch = systemContent.match(EMOTIONAL_ARC_PATTERNS[phase]);
-  return arcMatch ? `\n[Character emotional state] ${arcMatch[1].trim()}` : "";
+  if (!arcMatch) return "";
+  const contrastGuide =
+    phase === "erotic" || phase === "climax"
+      ? " — Show the GAP between this emotional state and the character's normal personality. The wider the contrast, the more powerful the scene."
+      : "";
+  return `\n[Character emotional state] ${arcMatch[1].trim()}${contrastGuide}`;
 }
 
 function extractMatchGroup(content: string, pattern: RegExp): string {
@@ -1060,13 +1068,21 @@ function extractCharacterVoice(systemContent: string | undefined): string {
   return `\n[Character voice] Speech endings:「${speech}」 Verbal tics:「${tics}」 Forbidden words:「${forbidden}」 — MUST follow these in <dialogue>`;
 }
 
+function extractSensoryFocus(systemContent: string | undefined): string {
+  if (!systemContent) return "";
+  const match = systemContent.match(/^sensory_focus:\s*(.+)$/m);
+  if (!match) return "";
+  return `\n[Sensory emphasis] Focus descriptions on: ${match[1].trim()} — weave these senses into <action> naturally, not as a checklist.`;
+}
+
 function buildSceneContext(messages: ChatMessage[], phase: ScenePhase): string | null {
   const systemContent = messages.find((m) => m.role === "system")?.content;
   const emotionalArc = extractEmotionalArc(systemContent, phase);
   const characterVoice = extractCharacterVoice(systemContent);
+  const sensoryFocus = extractSensoryFocus(systemContent);
 
   const sceneContext = SCENE_CONTEXT_MESSAGES[phase];
-  if (sceneContext) return `${sceneContext}${emotionalArc}${characterVoice}`;
+  if (sceneContext) return `${sceneContext}${emotionalArc}${characterVoice}${sensoryFocus}`;
   const combined = `${emotionalArc}${characterVoice}`.trim();
   return combined || null;
 }
@@ -1109,12 +1125,125 @@ type ImageInput = {
   phase: ScenePhase;
 };
 
+const HAIR_ANCHOR_PATTERN = /(?:^|[\n\r])\s*(?:髪色|髪|hair)\s*[:：]\s*([^\n\r;；]+)/iu;
+const EYE_ANCHOR_PATTERN = /(?:^|[\n\r])\s*(?:目|瞳|eye|eyes)\s*[:：]\s*([^\n\r;；]+)/iu;
+const BODY_ANCHOR_PATTERN = /(?:^|[\n\r])\s*(?:体型|body)\s*[:：]\s*([^\n\r;；]+)/iu;
+
+const extractLabelValue = (text: string, pattern: RegExp): string | null => {
+  const match = text.match(pattern);
+  return match?.[1]?.trim() ?? null;
+};
+
+const uniqTags = (tags: string[]): string[] => {
+  const seen = new Set<string>();
+  return tags.filter((tag) => {
+    const key = tag.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+const normalizeHairAnchors = (value: string): string[] => {
+  const lower = value.toLowerCase();
+  const anchors: string[] = [];
+  const colorMap: Array<[RegExp, string]> = [
+    [/brown|茶|ブラウン/, "brown hair"],
+    [/black|黒/, "black hair"],
+    [/blonde|金|ブロンド/, "blonde hair"],
+    [/white|白/, "white hair"],
+    [/silver|銀|シルバー/, "silver hair"],
+    [/pink|ピンク/, "pink hair"],
+    [/blue|青|ブルー/, "blue hair"],
+    [/red|赤|レッド/, "red hair"],
+    [/green|緑|グリーン/, "green hair"],
+    [/purple|紫|パープル/, "purple hair"],
+  ];
+  const styleMap: Array<[RegExp, string]> = [
+    [/long|ロング|長/, "long hair"],
+    [/short|ショート|短/, "short hair"],
+    [/bob|ボブ/, "bob cut"],
+    [/twin\s*tail|twintail|ツインテール/, "twintails"],
+    [/ponytail|ポニーテール/, "ponytail"],
+    [/straight|ストレート/, "straight hair"],
+    [/curly|ウェーブ|巻き髪/, "curly hair"],
+  ];
+
+  for (const [pattern, tag] of [...colorMap, ...styleMap]) {
+    if (pattern.test(lower)) anchors.push(tag);
+  }
+  if (anchors.length > 0) return uniqTags(anchors);
+
+  return value
+    .split(/[,/、／]+/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => (/\bhair\b|髪/i.test(part) ? part : `${part} hair`));
+};
+
+const normalizeEyeAnchors = (value: string): string[] => {
+  const lower = value.toLowerCase();
+  const colorMap: Array<[RegExp, string]> = [
+    [/brown|茶|ブラウン/, "brown eyes"],
+    [/black|黒/, "black eyes"],
+    [/green|緑|グリーン/, "green eyes"],
+    [/blue|青|ブルー/, "blue eyes"],
+    [/red|赤|レッド/, "red eyes"],
+    [/gold|金|ゴールド/, "gold eyes"],
+    [/purple|紫|パープル/, "purple eyes"],
+    [/pink|ピンク/, "pink eyes"],
+    [/gray|grey|灰|グレー/, "gray eyes"],
+  ];
+  const anchors = colorMap.flatMap(([pattern, tag]) => (pattern.test(lower) ? [tag] : []));
+  if (anchors.length > 0) return uniqTags(anchors);
+
+  return value
+    .split(/[,/、／]+/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => (/\beye|eyes\b|目|瞳/i.test(part) ? part : `${part} eyes`));
+};
+
+const normalizeBodyAnchors = (value: string): string[] => {
+  const lower = value.toLowerCase();
+  const bodyMap: Array<[RegExp, string]> = [
+    [/slender|slim|細身|華奢/, "slender"],
+    [/curvy|むっちり|グラマー/, "curvy"],
+    [/petite|小柄/, "petite"],
+    [/tall|長身/, "tall"],
+    [/athletic|引き締ま/, "athletic"],
+    [/voluptuous|豊満/, "voluptuous"],
+  ];
+  const anchors = bodyMap.flatMap(([pattern, tag]) => (pattern.test(lower) ? [tag] : []));
+  if (anchors.length > 0) return uniqTags(anchors);
+
+  return value
+    .split(/[,/、／]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+};
+
+function extractVisualAnchors(characterDescription: string): string {
+  const hair = extractLabelValue(characterDescription, HAIR_ANCHOR_PATTERN);
+  const eyes = extractLabelValue(characterDescription, EYE_ANCHOR_PATTERN);
+  const body = extractLabelValue(characterDescription, BODY_ANCHOR_PATTERN);
+  return uniqTags([
+    ...(hair ? normalizeHairAnchors(hair) : []),
+    ...(eyes ? normalizeEyeAnchors(eyes) : []),
+    ...(body ? normalizeBodyAnchors(body) : []),
+  ]).join(", ");
+}
+
 async function translatePromptToImageTags(
   apiKey: string,
   input: ImageInput,
   randomPose: string,
   phaseHint: string,
 ): Promise<string> {
+  const visualAnchors = extractVisualAnchors(input.characterDescription);
+  const withVisualAnchors = (tags: string): string =>
+    [visualAnchors, tags].filter(Boolean).join(", ");
+
   try {
     const translateRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
@@ -1137,6 +1266,7 @@ Rules:
 - Output ONLY comma-separated danbooru-style tags, no explanation
 - Preserve ALL erotic/sexual content explicitly (body parts, positions, states of undress, fluids)
 - Include character visual traits from the character description: hair color/style, eye color, body type
+- CRITICAL: The character's hair color, eye color, and hair style MUST match the character description EXACTLY. These are non-negotiable identity traits.
 - Include: pose, facial expression, clothing state (partial undress, nude, etc.), camera angle
 - BACKGROUND CONSISTENCY: Infer the setting/location from the conversation history (bedroom, office, classroom, etc.) and ALWAYS include specific background tags. If the setting was established in earlier turns, maintain it.
 - Infer the CUMULATIVE state of undress from the full history (e.g., if turn 1 removed shirt and turn 2 removed bra, output: topless, nude_upper_body)
@@ -1159,11 +1289,11 @@ Rules:
     if (translateRes.ok) {
       const data: { choices?: Array<{ message?: { content?: string } }> } =
         await translateRes.json();
-      return data.choices?.[0]?.message?.content?.trim() ?? input.prompt;
+      return withVisualAnchors(data.choices?.[0]?.message?.content?.trim() ?? input.prompt);
     }
-    return input.prompt;
+    return withVisualAnchors(input.prompt);
   } catch {
-    return input.prompt;
+    return withVisualAnchors(input.prompt);
   }
 }
 

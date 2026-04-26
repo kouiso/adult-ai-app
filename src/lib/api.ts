@@ -410,8 +410,8 @@ export async function generateImage(
         prompt,
         characterDescription: characterDescription ?? "",
         negative_prompt: "ugly, deformed, blurry, low quality, text, watermark",
-        width: 512,
-        height: 768,
+        width: 768,
+        height: 1024,
         phase: phase ?? "conversation",
       }),
     });
