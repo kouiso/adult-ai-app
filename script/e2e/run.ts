@@ -423,11 +423,12 @@ const scoreManifest = (manifest: RunManifest): RunManifest => ({
   scenarios: manifest.scenarios
     .map((scenario) => ({
       ...scenario,
-      rubric: scoreScenario(scenario, scenario.imageResults),
+      rubric: scoreScenario(scenario, scenario.imageResults ?? []),
     }))
     .sort(
       (left, right) =>
-        SCENARIO_IDS.indexOf(left.scenarioId) - SCENARIO_IDS.indexOf(right.scenarioId),
+        SCENARIO_IDS.indexOf(left.scenarioId as ScenarioId) -
+        SCENARIO_IDS.indexOf(right.scenarioId as ScenarioId),
     ),
 });
 

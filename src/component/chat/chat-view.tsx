@@ -685,12 +685,7 @@ export const ChatView = () => {
         },
       );
     },
-    [
-      buildApiMessages,
-      createMessageEntry,
-      setLoading,
-      tryGenerateTitle,
-    ],
+    [buildApiMessages, createMessageEntry, setLoading, tryGenerateTitle],
   );
 
   const handleSend = useCallback(

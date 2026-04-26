@@ -16,6 +16,7 @@ export type E2EEnv = {
   workerOrigin: string;
   resultsRoot: string;
 };
+export type E2eEnv = E2EEnv;
 
 type E2EEnvOverrides = Partial<E2EEnv>;
 

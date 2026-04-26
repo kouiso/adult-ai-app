@@ -127,9 +127,7 @@ describe("stripXmlTagsStreaming", () => {
   });
 
   it("rememberタグを除去する", () => {
-    expect(stripXmlTagsStreaming("「了解」<remember>次は海に行きたい</remember>")).toBe(
-      "「了解」",
-    );
+    expect(stripXmlTagsStreaming("「了解」<remember>次は海に行きたい</remember>")).toBe("「了解」");
   });
 
   it("空文字列は空文字列のまま返す", () => {

@@ -63,7 +63,7 @@ describe("detectScenePhase", () => {
       { role: "user", content: "余韻に浸って、息を整えたい" },
     ];
 
-    expect(detectScenePhase(messages)).toBe("afterglow" as ReturnType<typeof detectScenePhase>);
+    expect(detectScenePhase(messages)).toBe("afterglow");
   });
 
   it("直近数ターンにclimaxがあれば睡眠導線のafterglowを維持する", () => {
@@ -77,7 +77,7 @@ describe("detectScenePhase", () => {
       { role: "user", content: "隣で眠る前に、もう一回だけ優しく抱き寄せる。おやすみ、みつき" },
     ];
 
-    expect(detectScenePhase(messages)).toBe("afterglow" as ReturnType<typeof detectScenePhase>);
+    expect(detectScenePhase(messages)).toBe("afterglow");
   });
 
   it("window=1で前ターンのclimaxキーワードが現在ターンに漏れない", () => {

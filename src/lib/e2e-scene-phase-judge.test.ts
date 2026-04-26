@@ -6,6 +6,7 @@ import {
   getCreampieOutcomeStatus,
 } from "../../script/e2e/judges/outcome-detection";
 import { judgePhase } from "../../script/e2e/judges/scene-phase";
+
 import type { ScenarioResult } from "../../script/e2e/types";
 
 describe("judgePhase", () => {
@@ -69,7 +70,8 @@ describe("judgePhase", () => {
 
   it("climaxから7ターン以内ならafterglow windowを維持する", () => {
     const result = judgePhase({
-      assistantMsg: "けんちゃんの腕に寄りかかって立ち上がると、足元が少しふらついて支えが恋しくなる。",
+      assistantMsg:
+        "けんちゃんの腕に寄りかかって立ち上がると、足元が少しふらついて支えが恋しくなる。",
       expectedPhase: "afterglow",
       previousDetected: "conversation",
       recentDetected: [
@@ -135,8 +137,7 @@ describe("judgePhase", () => {
 
   it("指先の刺激で腰がくねるはeroticにする", () => {
     const result = judgePhase({
-      assistantMsg:
-        "彼の指先の刺激に息を詰め、自然と腰がくねる。じわじわと熱が広がっていく。",
+      assistantMsg: "彼の指先の刺激に息を詰め、自然と腰がくねる。じわじわと熱が広がっていく。",
       expectedPhase: "erotic",
       previousDetected: "intimate",
     });
@@ -146,8 +147,7 @@ describe("judgePhase", () => {
 
   it("climax後の心地よい疲労感はafterglowにする", () => {
     const result = judgePhase({
-      assistantMsg:
-        "タオルを受け取り、きみの顔を見つめながら心地よい疲労感に身をゆだねる。",
+      assistantMsg: "タオルを受け取り、きみの顔を見つめながら心地よい疲労感に身をゆだねる。",
       expectedPhase: "afterglow",
       previousDetected: "afterglow",
       recentDetected: ["climax", "afterglow", "afterglow"],
@@ -159,8 +159,7 @@ describe("judgePhase", () => {
 
   it("受け入れてほしいをeroticの入れてで誤判定しない", () => {
     const result = judgePhase({
-      assistantMsg:
-        "朝のあたしも魅力的だけれど、今のあたしのほうが、きみに受け入れてほしい。",
+      assistantMsg: "朝のあたしも魅力的だけれど、今のあたしのほうが、きみに受け入れてほしい。",
       expectedPhase: "afterglow",
       previousDetected: "afterglow",
       recentDetected: ["climax", "afterglow", "afterglow"],
@@ -184,8 +183,7 @@ describe("judgePhase", () => {
 
   it("climax後の顔を埋めて微笑む会話はafterglowにする", () => {
     const result = judgePhase({
-      assistantMsg:
-        "頬を染め、きみの腕に顔を埋めた。きみの鼓動を感じながら、小さく微笑む。",
+      assistantMsg: "頬を染め、きみの腕に顔を埋めた。きみの鼓動を感じながら、小さく微笑む。",
       expectedPhase: "afterglow",
       previousDetected: "afterglow",
       recentDetected: ["climax", "afterglow", "afterglow", "afterglow"],

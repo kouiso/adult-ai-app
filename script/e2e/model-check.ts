@@ -105,7 +105,7 @@ async function main(): Promise<void> {
   });
 
   try {
-    const setup = await setupFreshConversation(page, env, "S1", options.characterSlug);
+    const setup = await setupFreshConversation(page, env, "S1", options.characterSlug, env.userEmail);
     const baselineCount = await page.locator(".group\\/message").count();
     const chatResponsePromise = page.waitForResponse(
       (response) => response.request().method() === "POST" && response.url().includes("/api/chat"),

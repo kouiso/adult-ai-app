@@ -400,7 +400,7 @@ const generateImageResponseSchema = z.union([
 export async function generateImage(
   prompt: string,
   characterDescription?: string,
-  phase?: "conversation" | "intimate" | "erotic" | "climax",
+  phase?: ScenePhase,
 ): Promise<{ task_id: string } | { error: string }> {
   try {
     const response = await fetch("/api/image", {

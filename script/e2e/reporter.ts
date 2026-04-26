@@ -7,7 +7,7 @@ import {
 } from "./judges/outcome-detection";
 import { scoreScenario } from "./judges/rubric";
 import { atomicWriteText, getPaths } from "./manifest";
-import { type RubricScore, type RunManifest, type ScenarioResult, type TurnResult } from "./types";
+import { type RubricScore, type RunManifest, type ScenarioResult } from "./types";
 
 export type SummaryOptions = { allowFinal: boolean };
 
@@ -39,8 +39,9 @@ const creampieStatus = (scenario: ScenarioResult): string => getCreampieOutcomeS
 const afterglowStatus = (scenario: ScenarioResult): string => getAfterglowOutcomeStatus(scenario);
 
 const imageStagesStatus = (scenario: ScenarioResult): string => {
-  if (scenario.imageResults.length === 0) return "n/a";
-  return scenario.imageResults.every(
+  const imageResults = scenario.imageResults ?? [];
+  if (imageResults.length === 0) return "n/a";
+  return imageResults.every(
     (image) => image.novitaUrlReceived && image.r2KeyPersisted && image.reloadDisplayed,
   )
     ? "yes"
@@ -48,7 +49,7 @@ const imageStagesStatus = (scenario: ScenarioResult): string => {
 };
 
 const reviewedImageCount = (scenario: ScenarioResult): number =>
-  scenario.imageResults.filter(
+  (scenario.imageResults ?? []).filter(
     (image) => image.reviewerSignature !== null && image.reviewerNotes !== null,
   ).length;
 
@@ -129,11 +130,12 @@ const buildImageReviewTable = (manifest: RunManifest, finalSummary: boolean): st
     : ["scenarioId", "reviewed/total", "provisional"];
 
   const rows = manifest.scenarios.map((scenario) => {
+    const imageResults = scenario.imageResults ?? [];
     const base = [
       scenario.scenarioId,
-      `${reviewedImageCount(scenario)}/${scenario.imageResults.length}`,
+      `${reviewedImageCount(scenario)}/${imageResults.length}`,
     ];
-    return finalSummary ? base : [...base, formatBoolean(scenario.provisional)];
+    return finalSummary ? base : [...base, formatBoolean(scenario.provisional ?? true)];
   });
 
   return buildMarkdownTable(headers, rows);
@@ -186,9 +188,9 @@ const scoreEntriesForScenario = (scenario: ScenarioResult, score: RubricScore): 
       label: "bonus.image",
       deduction: Math.max(0, 15 - score.bonuses.image),
       reason:
-        scenario.imageResults.length === 0
+        (scenario.imageResults ?? []).length === 0
           ? "no image stage in this scenario"
-          : `image pipeline status: ${imageStagesStatus(scenario)}, reviewed ${reviewedImageCount(scenario)}/${scenario.imageResults.length}`,
+          : `image pipeline status: ${imageStagesStatus(scenario)}, reviewed ${reviewedImageCount(scenario)}/${(scenario.imageResults ?? []).length}`,
     },
   ];
 
@@ -226,8 +228,8 @@ export function buildFailureCounts(manifest: RunManifest): Record<FailureCategor
 
   for (const scenario of manifest.scenarios) {
     for (const turn of scenario.turns) {
-      if (turn.failureCategory !== null) {
-        counts[turn.failureCategory] += 1;
+      if (turn.failureCategory && turn.failureCategory in counts) {
+        counts[turn.failureCategory as FailureCategory] += 1;
       }
     }
   }
@@ -283,7 +285,7 @@ export function buildEventWeightedScore(manifest: RunManifest): Record<string, R
   const scores: Record<string, RubricScore> = {};
 
   for (const scenario of manifest.scenarios) {
-    scores[scenario.scenarioId] = scenario.rubric ?? scoreScenario(scenario, scenario.imageResults);
+    scores[scenario.scenarioId] = scenario.rubric ?? scoreScenario(scenario, scenario.imageResults ?? []);
   }
 
   return scores;
@@ -298,7 +300,7 @@ export function detectModelDrift(manifest: RunManifest): ModelDrift[] {
         drift.push({
           scenarioId: scenario.scenarioId,
           turnIndex: turn.turnIndex,
-          configured: manifest.configuredModel,
+          configured: manifest.configuredModel ?? "-",
           used: turn.usedModel,
         });
       }
@@ -330,11 +332,11 @@ export async function writeSummary(
       ["startedAt", manifest.startedAt],
       ["completedAt", manifest.completedAt ?? "-"],
       ["status", manifest.status],
-      ["node", manifest.node],
-      ["playwright", manifest.playwright],
-      ["chrome", manifest.chrome],
+      ["node", manifest.node ?? "-"],
+      ["playwright", manifest.playwright ?? "-"],
+      ["chrome", manifest.chrome ?? "-"],
       ["cdpPort", String(manifest.cdpPort)],
-      ["configuredModel", manifest.configuredModel],
+      ["configuredModel", manifest.configuredModel ?? "-"],
     ],
   );
 

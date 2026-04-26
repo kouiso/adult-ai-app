@@ -113,7 +113,7 @@ const scenarioSnapshotPath = (runDir: string, scenarioId: ScenarioId): string =>
   path.join(getScenarioDir(runDir, scenarioId), "scenario.partial.json");
 
 const writeScenarioSnapshot = async (runDir: string, scenario: ScenarioResult): Promise<void> => {
-  await atomicWriteJson(scenarioSnapshotPath(runDir, scenario.scenarioId), scenario);
+  await atomicWriteJson(scenarioSnapshotPath(runDir, scenario.scenarioId as ScenarioId), scenario);
 };
 
 const parsePersistedMessages = (value: unknown): PersistedMessage[] => {
@@ -409,6 +409,7 @@ export async function runScenario(
       const greetingMessageCount = await readRenderedMessageCount(page);
 
       for (const turn of def.turns) {
+        const conversationId = scenario.conversationId ?? "pending";
         if (!(await heartbeat(browser))) {
           scenario = {
             ...scenario,
@@ -469,7 +470,7 @@ export async function runScenario(
           // streaming 後 assistant row 永続化までの race を barrier で吸収 (v2 P0d)
           const d1Barrier = await waitForD1Durability({
             userEmail: env.userEmail,
-            conversationId: scenario.conversationId,
+            conversationId,
             expectedCount: expectedPersistedCount,
           });
           const screenshotPath = await takeTurnScreenshot(
@@ -478,7 +479,7 @@ export async function runScenario(
             def.scenarioId,
             turn.turnIndex,
           );
-          const persistedMessages = await listPersistedMessages(page, env, scenario.conversationId);
+          const persistedMessages = await listPersistedMessages(page, env, conversationId);
           const imageMessageCount = countPersistedImageMessages(persistedMessages);
           const phaseJudgment = judgePhase({
             assistantMsg,
@@ -509,7 +510,7 @@ export async function runScenario(
             firstTokenMs: streamStats.firstTokenMs,
           });
           const d1JudgeVerdict = await runD1PersistenceJudge({
-            conversationId: scenario.conversationId,
+            conversationId,
             renderedMessageCount,
             greetingMessageCount,
             imageMessageCount,
@@ -557,13 +558,13 @@ export async function runScenario(
             // 実際の画像生成は ChatInput の「画像生成」ボタンを押した時のみ発火する。
             // 初回 Novita URL の短い露出を取りこぼさないよう、probe を先に起動してから発火する。
             const imageCapturePromise = captureImageResult(
-              page,
-              env,
-              runDir,
-              def.scenarioId,
-              scenario.conversationId,
-              turn.turnIndex,
-            );
+            page,
+            env,
+            runDir,
+            def.scenarioId,
+            conversationId,
+            turn.turnIndex,
+          );
             await page.locator('button[title="画像生成"]').click({ timeout: 10_000 });
             const image = await withTimeout(
               imageCapturePromise,
@@ -639,7 +640,7 @@ export async function runScenario(
           const persistedMessageCount = await listPersistedMessages(
             page,
             env,
-            scenario.conversationId,
+            conversationId,
           )
             .then((messages) => messages.length)
             .catch(() => 0);

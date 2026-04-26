@@ -42,14 +42,22 @@ const waitForImageUrl = async (
   page
     .waitForFunction(
       ({ selector, serializedPredicate }) => {
-        const querySelectorAll = document.querySelectorAll.bind(document);
+        const documentValue = Reflect.get(globalThis, "document") as {
+          querySelectorAll: (selector: string) => {
+            length: number;
+            item: (index: number) => unknown;
+          };
+        };
+        const querySelectorAll = documentValue.querySelectorAll.bind(documentValue);
         const images = querySelectorAll(selector);
         if (images.length < 1) return null;
 
         const last = images.item(images.length - 1);
-        if (!(last instanceof HTMLImageElement)) return null;
+        if (typeof last !== "object" || last === null) return null;
 
-        const src = last.currentSrc || last.src || "";
+        const currentSrc = Reflect.get(last, "currentSrc");
+        const srcValue = currentSrc || Reflect.get(last, "src") || "";
+        const src = typeof srcValue === "string" ? srcValue : "";
         if (!src) return null;
 
         const predicateFn = new Function(
@@ -64,7 +72,7 @@ const waitForImageUrl = async (
       },
       { timeout: 60_000 },
     )
-    .then((handle) => handle.jsonValue() as Promise<string | null>)
+    .then((handle) => handle.jsonValue())
     .catch(() => null);
 
 const waitForCondition = async (

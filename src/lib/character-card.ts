@@ -27,6 +27,7 @@ const CARD_KEY_PATTERNS: Record<string, RegExp> = {
   arc_intimate: /^arc_intimate:\s*(.+)$/m,
   arc_erotic: /^arc_erotic:\s*(.+)$/m,
   arc_climax: /^arc_climax:\s*(.+)$/m,
+  arc_afterglow: /^arc_afterglow:\s*(.+)$/m,
   sensory_focus: /^sensory_focus:\s*(.+)$/m,
 };
 
@@ -71,6 +72,7 @@ export function parseCharacterCard(systemPrompt: string): CharacterCard | null {
       intimate: getValue("arc_intimate"),
       erotic: getValue("arc_erotic"),
       climax: getValue("arc_climax"),
+      afterglow: getValue("arc_afterglow"),
     },
     sensory_focus: getArray("sensory_focus"),
   };
