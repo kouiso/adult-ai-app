@@ -27,7 +27,7 @@ import {
 import { DEFAULT_SYSTEM_PROMPT } from "@/lib/config";
 import { parseSystemPrompt } from "@/lib/prompt-builder";
 import { queryKey } from "@/lib/query-key";
-import { detectScenePhase } from "@/lib/scene-phase";
+import { detectScenePhase, type ScenePhase } from "@/lib/scene-phase";
 import { parseXmlResponse } from "@/lib/xml-response-parser";
 import type { ChatMessage } from "@/store/chat-store";
 import { useChatStore } from "@/store/chat-store";
@@ -45,6 +45,13 @@ import { SceneCardPicker } from "./scene-card-picker";
 const IMAGE_PROMPT_MAX_LENGTH = 900;
 // exponential backoff: 1s → 2s → 4s → 8s → cap 10s
 const POLL_MAX_DELAY_MS = 10_000;
+const AUTO_IMAGE_RECENT_TURN_LIMIT = 3;
+const AUTO_IMAGE_PHASE_TRANSITIONS = new Set([
+  "conversation:intimate",
+  "intimate:erotic",
+  "erotic:climax",
+  "climax:afterglow",
+]);
 
 type ImagePollingResult =
   | { status: "succeeded"; imageUrl: string }
@@ -101,6 +108,21 @@ const formatMessagePairsForPrompt = (pairs: MessagePair[]): string => {
     return parts.join("\n");
   });
   return historyLines.filter(Boolean).join("\n");
+};
+
+const isAutoImagePhaseTransition = (previousPhase: ScenePhase, currentPhase: ScenePhase): boolean =>
+  AUTO_IMAGE_PHASE_TRANSITIONS.has(`${previousPhase}:${currentPhase}`);
+
+const hasImageInRecentTurns = (msgs: ChatMessage[], maxTurns: number): boolean => {
+  let userTurns = 0;
+  for (const message of [...msgs].reverse()) {
+    if (message.imageUrl) return true;
+    if (message.role === "user") {
+      userTurns++;
+      if (userTurns >= maxTurns) return false;
+    }
+  }
+  return false;
 };
 
 /** 直近N ターンの会話履歴から画像生成用のシーン記述テキストを組み立てる */
@@ -336,6 +358,8 @@ export const ChatView = () => {
   );
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
+  const previousScenePhaseRef = useRef<ScenePhase>("conversation");
+  const pendingAutoImageAssistantIdsRef = useRef<Set<string>>(new Set());
 
   const {
     conversations,
@@ -602,6 +626,12 @@ export const ChatView = () => {
     }) => {
       const { addMessage, updateMessage, markMessageError } = useChatStore.getState();
       const currentModel = useSettingsStore.getState().model;
+      const previousApiMessages = buildApiMessages(
+        useChatStore.getState().messages,
+        systemPrompt,
+        characterName,
+      );
+      previousScenePhaseRef.current = detectScenePhase(previousApiMessages);
 
       const userMsg: ChatMessage = {
         id: crypto.randomUUID(),
@@ -622,6 +652,7 @@ export const ChatView = () => {
 
       const assistantId = crypto.randomUUID();
       addMessage({ id: assistantId, role: "assistant", content: "", isStreaming: true });
+      pendingAutoImageAssistantIdsRef.current.add(assistantId);
       setLoading(true);
 
       const currentMessages = useChatStore.getState().messages;
@@ -667,6 +698,7 @@ export const ChatView = () => {
             .catch((error) => console.error("failed to persist assistant message", error));
         },
         (error) => {
+          pendingAutoImageAssistantIdsRef.current.delete(assistantId);
           markMessageError(assistantId);
           setLoading(false);
           toast.error(`メッセージ送信に失敗しました: ${error}`);
@@ -1031,6 +1063,29 @@ export const ChatView = () => {
     setLoading,
     currentConversation?.characterSystemPrompt,
   ]);
+
+  useEffect(() => {
+    const pendingIds = pendingAutoImageAssistantIdsRef.current;
+    const completedAssistant = messages.find(
+      (message) =>
+        pendingIds.has(message.id) &&
+        message.role === "assistant" &&
+        !message.isStreaming &&
+        message.content.trim().length > 0,
+    );
+    if (!completedAssistant) return;
+
+    pendingIds.delete(completedAssistant.id);
+    const currentPhase = detectScenePhase(messages);
+    const previousPhase = previousScenePhaseRef.current;
+    previousScenePhaseRef.current = currentPhase;
+
+    if (!useSettingsStore.getState().autoGenerateImages) return;
+    if (!isAutoImagePhaseTransition(previousPhase, currentPhase)) return;
+    if (hasImageInRecentTurns(messages, AUTO_IMAGE_RECENT_TURN_LIMIT)) return;
+
+    void handleGenerateImage();
+  }, [handleGenerateImage, messages]);
 
   const stableOnSelectConversation = useCallback(
     (conversationId: string) => void handleSelectConversation(conversationId),

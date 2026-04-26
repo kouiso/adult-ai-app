@@ -54,10 +54,10 @@ const imageSchema = z.object({
   prompt: z.string().min(1).max(1_000),
   characterDescription: z.string().max(500).optional().default(""),
   negative_prompt: z.string().max(500).optional().default("ugly, deformed, blurry, low quality"),
-  width: z.number().int().min(64).max(2_048).optional().default(512),
-  height: z.number().int().min(64).max(2_048).optional().default(768),
+  width: z.number().int().min(64).max(2_048).optional().default(768),
+  height: z.number().int().min(64).max(2_048).optional().default(1024),
   phase: z
-    .enum(["conversation", "intimate", "erotic", "climax"])
+    .enum(["conversation", "intimate", "erotic", "climax", "afterglow"])
     .optional()
     .default("conversation"),
 });
@@ -1109,12 +1109,125 @@ type ImageInput = {
   phase: ScenePhase;
 };
 
+const HAIR_ANCHOR_PATTERN = /(?:^|[\n\r])\s*(?:髪色|髪|hair)\s*[:：]\s*([^\n\r;；]+)/iu;
+const EYE_ANCHOR_PATTERN = /(?:^|[\n\r])\s*(?:目|瞳|eye|eyes)\s*[:：]\s*([^\n\r;；]+)/iu;
+const BODY_ANCHOR_PATTERN = /(?:^|[\n\r])\s*(?:体型|body)\s*[:：]\s*([^\n\r;；]+)/iu;
+
+const extractLabelValue = (text: string, pattern: RegExp): string | null => {
+  const match = text.match(pattern);
+  return match?.[1]?.trim() ?? null;
+};
+
+const uniqTags = (tags: string[]): string[] => {
+  const seen = new Set<string>();
+  return tags.filter((tag) => {
+    const key = tag.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+const normalizeHairAnchors = (value: string): string[] => {
+  const lower = value.toLowerCase();
+  const anchors: string[] = [];
+  const colorMap: Array<[RegExp, string]> = [
+    [/brown|茶|ブラウン/, "brown hair"],
+    [/black|黒/, "black hair"],
+    [/blonde|金|ブロンド/, "blonde hair"],
+    [/white|白/, "white hair"],
+    [/silver|銀|シルバー/, "silver hair"],
+    [/pink|ピンク/, "pink hair"],
+    [/blue|青|ブルー/, "blue hair"],
+    [/red|赤|レッド/, "red hair"],
+    [/green|緑|グリーン/, "green hair"],
+    [/purple|紫|パープル/, "purple hair"],
+  ];
+  const styleMap: Array<[RegExp, string]> = [
+    [/long|ロング|長/, "long hair"],
+    [/short|ショート|短/, "short hair"],
+    [/bob|ボブ/, "bob cut"],
+    [/twin\s*tail|twintail|ツインテール/, "twintails"],
+    [/ponytail|ポニーテール/, "ponytail"],
+    [/straight|ストレート/, "straight hair"],
+    [/curly|ウェーブ|巻き髪/, "curly hair"],
+  ];
+
+  for (const [pattern, tag] of [...colorMap, ...styleMap]) {
+    if (pattern.test(lower)) anchors.push(tag);
+  }
+  if (anchors.length > 0) return uniqTags(anchors);
+
+  return value
+    .split(/[,/、／]+/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => (/\bhair\b|髪/i.test(part) ? part : `${part} hair`));
+};
+
+const normalizeEyeAnchors = (value: string): string[] => {
+  const lower = value.toLowerCase();
+  const colorMap: Array<[RegExp, string]> = [
+    [/brown|茶|ブラウン/, "brown eyes"],
+    [/black|黒/, "black eyes"],
+    [/green|緑|グリーン/, "green eyes"],
+    [/blue|青|ブルー/, "blue eyes"],
+    [/red|赤|レッド/, "red eyes"],
+    [/gold|金|ゴールド/, "gold eyes"],
+    [/purple|紫|パープル/, "purple eyes"],
+    [/pink|ピンク/, "pink eyes"],
+    [/gray|grey|灰|グレー/, "gray eyes"],
+  ];
+  const anchors = colorMap.flatMap(([pattern, tag]) => (pattern.test(lower) ? [tag] : []));
+  if (anchors.length > 0) return uniqTags(anchors);
+
+  return value
+    .split(/[,/、／]+/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => (/\beye|eyes\b|目|瞳/i.test(part) ? part : `${part} eyes`));
+};
+
+const normalizeBodyAnchors = (value: string): string[] => {
+  const lower = value.toLowerCase();
+  const bodyMap: Array<[RegExp, string]> = [
+    [/slender|slim|細身|華奢/, "slender"],
+    [/curvy|むっちり|グラマー/, "curvy"],
+    [/petite|小柄/, "petite"],
+    [/tall|長身/, "tall"],
+    [/athletic|引き締ま/, "athletic"],
+    [/voluptuous|豊満/, "voluptuous"],
+  ];
+  const anchors = bodyMap.flatMap(([pattern, tag]) => (pattern.test(lower) ? [tag] : []));
+  if (anchors.length > 0) return uniqTags(anchors);
+
+  return value
+    .split(/[,/、／]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+};
+
+function extractVisualAnchors(characterDescription: string): string {
+  const hair = extractLabelValue(characterDescription, HAIR_ANCHOR_PATTERN);
+  const eyes = extractLabelValue(characterDescription, EYE_ANCHOR_PATTERN);
+  const body = extractLabelValue(characterDescription, BODY_ANCHOR_PATTERN);
+  return uniqTags([
+    ...(hair ? normalizeHairAnchors(hair) : []),
+    ...(eyes ? normalizeEyeAnchors(eyes) : []),
+    ...(body ? normalizeBodyAnchors(body) : []),
+  ]).join(", ");
+}
+
 async function translatePromptToImageTags(
   apiKey: string,
   input: ImageInput,
   randomPose: string,
   phaseHint: string,
 ): Promise<string> {
+  const visualAnchors = extractVisualAnchors(input.characterDescription);
+  const withVisualAnchors = (tags: string): string =>
+    [visualAnchors, tags].filter(Boolean).join(", ");
+
   try {
     const translateRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
@@ -1137,6 +1250,7 @@ Rules:
 - Output ONLY comma-separated danbooru-style tags, no explanation
 - Preserve ALL erotic/sexual content explicitly (body parts, positions, states of undress, fluids)
 - Include character visual traits from the character description: hair color/style, eye color, body type
+- CRITICAL: The character's hair color, eye color, and hair style MUST match the character description EXACTLY. These are non-negotiable identity traits.
 - Include: pose, facial expression, clothing state (partial undress, nude, etc.), camera angle
 - BACKGROUND CONSISTENCY: Infer the setting/location from the conversation history (bedroom, office, classroom, etc.) and ALWAYS include specific background tags. If the setting was established in earlier turns, maintain it.
 - Infer the CUMULATIVE state of undress from the full history (e.g., if turn 1 removed shirt and turn 2 removed bra, output: topless, nude_upper_body)
@@ -1159,11 +1273,11 @@ Rules:
     if (translateRes.ok) {
       const data: { choices?: Array<{ message?: { content?: string } }> } =
         await translateRes.json();
-      return data.choices?.[0]?.message?.content?.trim() ?? input.prompt;
+      return withVisualAnchors(data.choices?.[0]?.message?.content?.trim() ?? input.prompt);
     }
-    return input.prompt;
+    return withVisualAnchors(input.prompt);
   } catch {
-    return input.prompt;
+    return withVisualAnchors(input.prompt);
   }
 }
 
