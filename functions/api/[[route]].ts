@@ -253,6 +253,12 @@ const SCENE_CONTEXT_MESSAGES: Record<ScenePhase, string | null> = {
     "The <inner> section MUST contain at least 1 sentence of character psychology. Never leave it empty. Write DIFFERENT emotions/thoughts from the previous turn's <inner>. " +
     "You MUST output in <response> XML format. " +
     EXEMPLAR_INTIMATE,
+  afterglow:
+    "[Scene state] Afterglow — post-climax wind-down. Maintain gentle, intimate atmosphere. " +
+    "Focus on the character's emotional vulnerability, physical exhaustion, and tender closeness. " +
+    "NEVER reuse expressions from previous responses. Write fresh descriptions of quiet intimacy. " +
+    "The <inner> section MUST contain at least 1 sentence of character psychology. Never leave it empty. " +
+    "You MUST output in <response> XML format.",
   conversation: null,
 };
 
@@ -1031,6 +1037,7 @@ const EMOTIONAL_ARC_PATTERNS: Record<ScenePhase, RegExp> = {
   intimate: /^arc_intimate:\s*(.+)$/m,
   erotic: /^arc_erotic:\s*(.+)$/m,
   climax: /^arc_climax:\s*(.+)$/m,
+  afterglow: /^arc_afterglow:\s*(.+)$/m,
 };
 
 function extractEmotionalArc(systemContent: string | undefined, phase: ScenePhase): string {
@@ -1913,6 +1920,8 @@ const app = new Hono<{ Bindings: Bindings }>()
         "Focus on: explicit nudity, sexual position, detailed anatomy, aroused expression, bodily contact",
       climax:
         "Focus on: explicit, orgasm, bodily fluids, intense expression, full nudity, climax pose",
+      afterglow:
+        "Focus on: post-climax tenderness, resting together, gentle embrace, peaceful expression, soft lighting",
     };
 
     const poseDiversityPool: Record<ScenePhase, readonly string[]> = {
@@ -1952,6 +1961,15 @@ const app = new Hono<{ Bindings: Bindings }>()
         "on_back, spread_legs, convulsing",
         "face_down, gripping_pillow",
       ],
+      afterglow: [
+        "lying_together, cuddling",
+        "head_on_chest, peaceful",
+        "spooning, eyes_closed",
+        "sitting_up, wrapped_in_sheet",
+        "forehead_touch, gentle_smile",
+        "intertwined_fingers, resting",
+        "back_embrace, sleepy",
+      ],
     };
 
     const posePool = poseDiversityPool[input.phase];
@@ -1962,6 +1980,7 @@ const app = new Hono<{ Bindings: Bindings }>()
       intimate: 7.5,
       erotic: 8.5,
       climax: 9.0,
+      afterglow: 7.0,
     };
 
     const phaseNegativeExtra: Record<ScenePhase, string> = {
@@ -1969,6 +1988,7 @@ const app = new Hono<{ Bindings: Bindings }>()
       intimate: "nsfw, full nudity, penetration",
       erotic: "",
       climax: "",
+      afterglow: "nsfw, penetration, orgasm",
     };
 
     const guidanceScale = cfgByPhase[input.phase];

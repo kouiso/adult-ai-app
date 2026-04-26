@@ -1,8 +1,7 @@
 // サーバー側(functions/api/[[route]].ts)と同じフェーズ検出ロジック
 // クライアント側の品質ガードでフェーズ情報が必要なため移植
 
-export type ScenePhase = "climax" | "erotic" | "intimate" | "conversation";
-export type MaxTokenPhase = ScenePhase | "afterglow";
+export type ScenePhase = "climax" | "erotic" | "intimate" | "conversation" | "afterglow";
 
 export const AFTERGLOW_CUES = [
   "達し",
@@ -24,7 +23,7 @@ export const AFTERGLOW_CUES = [
 const AFTERGLOW_LOOKBACK_TURNS = 6;
 
 const PHASE_DETECTION_ORDER: {
-  phase: Exclude<ScenePhase, "conversation">;
+  phase: Exclude<ScenePhase, "conversation" | "afterglow">;
   keywords: readonly string[];
 }[] = [
   {
@@ -113,7 +112,7 @@ export function detectScenePhase(messages: { role: string; content: string }[]):
   );
   const hasAfterglowCue = AFTERGLOW_CUES.some((cue) => scanTarget.includes(cue));
 
-  if (hadRecentClimax && hasAfterglowCue) return "afterglow" as ScenePhase;
+  if (hadRecentClimax && hasAfterglowCue) return "afterglow";
 
   for (const { phase, keywords } of PHASE_DETECTION_ORDER) {
     if (keywords.some((kw) => scanTarget.includes(kw))) return phase;
@@ -121,7 +120,7 @@ export function detectScenePhase(messages: { role: string; content: string }[]):
   return "conversation";
 }
 
-export const getMaxTokensForPhase = (phase: MaxTokenPhase): number => {
+export const getMaxTokensForPhase = (phase: ScenePhase): number => {
   switch (phase) {
     case "conversation":
       return 1024;

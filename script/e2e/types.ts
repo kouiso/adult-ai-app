@@ -207,6 +207,16 @@ export const scenarioResultSchema = z.object({
 });
 export type ScenarioResult = z.infer<typeof scenarioResultSchema>;
 
+const hasLegacyTurnFields = (
+  turn: TurnManifest | TurnResult,
+): turn is TurnManifest & { scenePhase: NonNullable<TurnManifest["scenePhase"]> } =>
+  "scenePhase" in turn &&
+  turn.scenePhase !== undefined &&
+  "qualityCheck" in turn &&
+  turn.qualityCheck !== undefined &&
+  "timings" in turn &&
+  turn.timings !== undefined;
+
 export const runManifestSchema = z.object({
   runId: z.string().min(1),
   startedAt: z.string(),
@@ -248,47 +258,43 @@ export const normalizeTurnManifest = (turn: TurnManifest): TurnManifest => ({
 export const normalizeScenarioManifest = (
   scenario: ScenarioManifest | ScenarioResult,
 ): ScenarioResult => {
-  const firstTurn = scenario.turns[0];
-  const turns =
-    firstTurn === undefined || "scenePhase" in firstTurn
-      ? scenario.turns.map((turn) =>
-          "scenePhase" in turn
-            ? {
-                turnIndex: turn.turnIndex,
-                userMsg: turn.userMessage,
-                assistantMsg: turn.assistantText,
-                expectedPhase: turn.scenePhase.expected ?? "conversation",
-                detectedPhase: turn.scenePhase.detected,
-                phaseMonotonicViolation: turn.scenePhase.violatedMonotonicity,
-                usedModel: null,
-                qualityRetries: turn.qualityCheck.retries,
-                failedCheck: turn.qualityCheck.failedCheck,
-                renderedMessageCount: 0,
-                persistedMessageCount: 0,
-                // D1 barrier は v2 P0d 以降の optional metadata として保持する
-                d1BarrierSettled: undefined,
-                d1BarrierElapsedMs: undefined,
-                d1BarrierLastCount: undefined,
-                d1BarrierTimeout: undefined,
-                firstTokenMs: turn.timings.firstTokenMs,
-                lastChunkMs: turn.timings.lastChunkMs,
-                hasDoneSignal: false,
-                screenshotPath: "",
-                wallClockMs: turn.timings.wallClockMs,
-                failureCategory: null,
-                failureDetail: null,
-                userMessage: turn.userMessage,
-                assistantText: turn.assistantText,
-                scenePhase: turn.scenePhase,
-                imageUrls: turn.imageUrls,
-                qualityCheck: turn.qualityCheck,
-                timings: turn.timings,
-                failures: turn.failures,
-                judgeVerdicts: turn.judgeVerdicts,
-              }
-            : turn,
-        )
-      : scenario.turns;
+  const turns: TurnResult[] = scenario.turns.map((turn) =>
+    hasLegacyTurnFields(turn)
+      ? {
+          turnIndex: turn.turnIndex,
+          userMsg: turn.userMessage,
+          assistantMsg: turn.assistantText,
+          expectedPhase: turn.scenePhase.expected ?? "conversation",
+          detectedPhase: turn.scenePhase.detected,
+          phaseMonotonicViolation: turn.scenePhase.violatedMonotonicity,
+          usedModel: null,
+          qualityRetries: turn.qualityCheck.retries,
+          failedCheck: turn.qualityCheck.failedCheck,
+          renderedMessageCount: 0,
+          persistedMessageCount: 0,
+          // D1 barrier は v2 P0d 以降の optional metadata として保持する
+          d1BarrierSettled: undefined,
+          d1BarrierElapsedMs: undefined,
+          d1BarrierLastCount: undefined,
+          d1BarrierTimeout: undefined,
+          firstTokenMs: turn.timings.firstTokenMs,
+          lastChunkMs: turn.timings.lastChunkMs,
+          hasDoneSignal: false,
+          screenshotPath: "",
+          wallClockMs: turn.timings.wallClockMs,
+          failureCategory: null,
+          failureDetail: null,
+          userMessage: turn.userMessage,
+          assistantText: turn.assistantText,
+          scenePhase: turn.scenePhase,
+          imageUrls: turn.imageUrls,
+          qualityCheck: turn.qualityCheck,
+          timings: turn.timings,
+          failures: turn.failures,
+          judgeVerdicts: turn.judgeVerdicts,
+        }
+      : turn,
+  );
   const rubricScore =
     "rubricScore" in scenario && scenario.rubricScore !== undefined
       ? scenario.rubricScore

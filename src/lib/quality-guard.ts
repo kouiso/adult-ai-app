@@ -291,9 +291,7 @@ export function runQualityChecks(
   return { passed: true };
 }
 
-type RetryPhase = ScenePhase | "afterglow";
-
-export const getMaxQualityRetries = (phase: RetryPhase): number => {
+export const getMaxQualityRetries = (phase: ScenePhase): number => {
   // 全 phase で 1 retry に固定 (v2 budget protection)
   void phase;
   return 1;

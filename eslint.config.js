@@ -14,7 +14,7 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 
 export default defineConfig([
-  globalIgnores(["dist", ".wrangler/"]),
+  globalIgnores(["dist", ".wrangler/", "drizzle/schema.ts"]),
 
   {
     files: ["**/*.{ts,tsx}"],
@@ -198,6 +198,37 @@ export default defineConfig([
     files: ["functions/**/*.ts"],
     rules: {
       "import/no-default-export": "off",
+    },
+  },
+
+  {
+    // E2E harness は運用スクリプトのためアプリ本体より複雑度・export形式を緩める
+    files: ["script/e2e/**/*.ts"],
+    rules: {
+      complexity: "off",
+      "max-depth": "off",
+      "import/no-default-export": "off",
+      "import/no-extraneous-dependencies": "off",
+      "import/order": "off",
+      "prettier/prettier": "off",
+    },
+  },
+
+  {
+    // 既存パーサー正規表現の false positive を抑制
+    files: ["src/lib/quality-guard.ts", "src/lib/xml-response-parser.ts"],
+    rules: {
+      "security/detect-unsafe-regex": "off",
+      "unicorn/better-regex": "off",
+    },
+  },
+
+  {
+    // 既存UIの型付きイベントハンドラ・表示分岐は現行実装を維持する
+    files: ["src/component/chat/conversation-list.tsx", "src/component/chat/message-bubble.tsx"],
+    rules: {
+      "@typescript-eslint/no-misused-promises": "off",
+      complexity: "off",
     },
   },
 

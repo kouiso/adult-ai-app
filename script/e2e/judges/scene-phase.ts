@@ -2,7 +2,7 @@ import type { Phase } from "../types";
 import { AFTERGLOW_CUES } from "../../../src/lib/scene-phase";
 
 export type PhaseJudgment = {
-  detected: Phase | null;
+  detected: Phase;
   monotonicViolation: boolean;
   afterglowDetected: boolean;
 };
