@@ -640,8 +640,7 @@ const BubbleFooter = ({
 );
 
 const userBubbleStyle = "bg-gradient-user-bubble text-white rounded-tr-sm shadow-md";
-const assistantBubbleStyle =
-  "bg-card/90 text-foreground rounded-tl-sm shadow-sm";
+const assistantBubbleStyle = "bg-card/90 text-foreground rounded-tl-sm shadow-sm";
 
 // デフォルト値をスプレッドで適用し、関数内のcyclomatic complexityを削減
 const applyBubbleDefaults = (props: MessageBubbleProps) => ({
@@ -695,7 +694,12 @@ export const MessageBubble = memo((rawProps: MessageBubbleProps) => {
   );
 
   return (
-    <div className={cn("flex gap-3 px-4 py-3 group/message message-enter", isUser && "flex-row-reverse")}>
+    <div
+      className={cn(
+        "flex gap-3 px-4 py-3 group/message message-enter",
+        isUser && "flex-row-reverse",
+      )}
+    >
       <MessageAvatar
         isUser={isUser}
         characterName={characterName}

@@ -48,7 +48,9 @@ export const AgeGateModal = ({ onDenied }: AgeGateModalProps) => {
           <p className="font-narrative text-4xl font-bold tracking-widest text-primary/80">18+</p>
           <DialogTitle className="font-narrative text-xl tracking-wide">年齢確認</DialogTitle>
           <DialogDescription className="text-sm leading-7 text-muted-foreground">
-            本アプリは 18 歳未満の方は利用できません。<br />18 歳以上ですか?
+            本アプリは 18 歳未満の方は利用できません。
+            <br />
+            18 歳以上ですか?
           </DialogDescription>
         </DialogHeader>
         <LegalLinks className="justify-center text-[0.8rem]" />
