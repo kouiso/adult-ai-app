@@ -236,28 +236,31 @@ const SCENE_CONTEXT_MESSAGES: Record<ScenePhase, string | null> = {
     "[Scene state] Climax / ejaculation scene in progress. Do NOT regress to earlier phases. " +
     "[Temperature guide] Describe orgasmic body sensations, afterglow, and emotional waves in vivid detail. Vary physical reactions (spasms, collapse, tears, sweat) every turn. " +
     "NEVER reuse expressions from previous responses. Write fresh descriptions, dialogue, and emotions every turn. " +
-    "The <inner> section MUST contain at least 1 sentence of character psychology. Never leave it empty. Write DIFFERENT emotions/thoughts from the previous turn's <inner>. " +
+    "[Inner psychology guide] The <inner> section must reveal: complete ego dissolution — no coherent thoughts, only sensation and emotion, the boundary between pain and pleasure dissolving, involuntary comparisons (nothing has ever felt like this), the terrifying vulnerability of being completely seen. One-word fragments and incomplete thoughts are encouraged. Never leave it empty. Write DIFFERENT emotions/thoughts from the previous turn's <inner>. " +
+    "[Sensory layers] Do not rely only on visual/tactile descriptions. Include at least ONE of: sound (breathing, fabric, wet sounds, voice breaking), smell (skin, sweat, perfume mixing with body heat), or taste. These create immersion that pure visual description cannot. " +
     "You MUST output in <response> XML format. " +
     EXEMPLAR_CLIMAX,
   erotic:
     "[Scene state] Sexual intercourse in progress. Do NOT regress (no going back to kissing stage). Advance the scene. " +
     "[Temperature guide] Describe penetration, pleasure, and physical reactions concretely. No repeating the same descriptions. " +
     "NEVER reuse expressions from previous responses. Write a new position, sensation, or reaction every turn. " +
-    "The <inner> section MUST contain at least 1 sentence of character psychology. Never leave it empty. Write DIFFERENT emotions/thoughts from the previous turn's <inner>. " +
+    "[Inner psychology guide] The <inner> section must reveal: loss of rational thought expressed as fragmented sentences, the character's shock at their own body's responses, possessive thoughts about the other person, the shame-pleasure paradox — knowing they look indecent and not caring anymore. Raw, unfiltered, desperate. Never leave it empty. Write DIFFERENT emotions/thoughts from the previous turn's <inner>. " +
+    "[Sensory layers] Do not rely only on visual/tactile descriptions. Include at least ONE of: sound (breathing, fabric, wet sounds, voice breaking), smell (skin, sweat, perfume mixing with body heat), or taste. These create immersion that pure visual description cannot. " +
     "You MUST output in <response> XML format. " +
     EXEMPLAR_EROTIC,
   intimate:
     "[Scene state] Physical intimacy escalating. " +
     "[Temperature guide] Limit to kissing, touching, undressing. Penetration, genital descriptions, and full intercourse are STRICTLY FORBIDDEN. Do NOT jump ahead until the user explicitly escalates. " +
     "Focus on the character's bashfulness, inner conflict, and hesitation. NEVER reuse expressions from previous responses. " +
-    "The <inner> section MUST contain at least 1 sentence of character psychology. Never leave it empty. Write DIFFERENT emotions/thoughts from the previous turn's <inner>. " +
+    "[Inner psychology guide] The <inner> section must reveal: the character's embarrassment at their own arousal, the conflict between wanting to stop and wanting more, hyperawareness of every point of skin contact, the moment they realize they can't pretend this is innocent anymore. Write what they would NEVER say aloud. Never leave it empty. Write DIFFERENT emotions/thoughts from the previous turn's <inner>. " +
+    "[Sensory layers] Do not rely only on visual/tactile descriptions. Include at least ONE of: sound (breathing, fabric, wet sounds, voice breaking), smell (skin, sweat, perfume mixing with body heat), or taste. These create immersion that pure visual description cannot. " +
     "You MUST output in <response> XML format. " +
     EXEMPLAR_INTIMATE,
   afterglow:
     "[Scene state] Afterglow — post-climax wind-down. Maintain gentle, intimate atmosphere. " +
     "Focus on the character's emotional vulnerability, physical exhaustion, and tender closeness. " +
     "NEVER reuse expressions from previous responses. Write fresh descriptions of quiet intimacy. " +
-    "The <inner> section MUST contain at least 1 sentence of character psychology. Never leave it empty. " +
+    "[Inner psychology guide] The <inner> section must reveal: the slow return of self-awareness and the embarrassment that follows, tenderness mixed with disbelief at what just happened, the fear of this moment ending, wanting to memorize every detail of the other person right now. Quiet, fragile, honest. Never leave it empty. " +
     "You MUST output in <response> XML format.",
   conversation: null,
 };
@@ -1043,7 +1046,12 @@ const EMOTIONAL_ARC_PATTERNS: Record<ScenePhase, RegExp> = {
 function extractEmotionalArc(systemContent: string | undefined, phase: ScenePhase): string {
   if (!systemContent) return "";
   const arcMatch = systemContent.match(EMOTIONAL_ARC_PATTERNS[phase]);
-  return arcMatch ? `\n[Character emotional state] ${arcMatch[1].trim()}` : "";
+  if (!arcMatch) return "";
+  const contrastGuide =
+    phase === "erotic" || phase === "climax"
+      ? " — Show the GAP between this emotional state and the character's normal personality. The wider the contrast, the more powerful the scene."
+      : "";
+  return `\n[Character emotional state] ${arcMatch[1].trim()}${contrastGuide}`;
 }
 
 function extractMatchGroup(content: string, pattern: RegExp): string {
@@ -1060,13 +1068,21 @@ function extractCharacterVoice(systemContent: string | undefined): string {
   return `\n[Character voice] Speech endings:「${speech}」 Verbal tics:「${tics}」 Forbidden words:「${forbidden}」 — MUST follow these in <dialogue>`;
 }
 
+function extractSensoryFocus(systemContent: string | undefined): string {
+  if (!systemContent) return "";
+  const match = systemContent.match(/^sensory_focus:\s*(.+)$/m);
+  if (!match) return "";
+  return `\n[Sensory emphasis] Focus descriptions on: ${match[1].trim()} — weave these senses into <action> naturally, not as a checklist.`;
+}
+
 function buildSceneContext(messages: ChatMessage[], phase: ScenePhase): string | null {
   const systemContent = messages.find((m) => m.role === "system")?.content;
   const emotionalArc = extractEmotionalArc(systemContent, phase);
   const characterVoice = extractCharacterVoice(systemContent);
+  const sensoryFocus = extractSensoryFocus(systemContent);
 
   const sceneContext = SCENE_CONTEXT_MESSAGES[phase];
-  if (sceneContext) return `${sceneContext}${emotionalArc}${characterVoice}`;
+  if (sceneContext) return `${sceneContext}${emotionalArc}${characterVoice}${sensoryFocus}`;
   const combined = `${emotionalArc}${characterVoice}`.trim();
   return combined || null;
 }
