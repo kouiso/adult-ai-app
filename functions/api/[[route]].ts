@@ -236,7 +236,8 @@ const SCENE_CONTEXT_MESSAGES: Record<ScenePhase, string | null> = {
     "[Scene state] Climax / ejaculation scene in progress. Do NOT regress to earlier phases. " +
     "[Temperature guide] Describe orgasmic body sensations, afterglow, and emotional waves in vivid detail. Vary physical reactions (spasms, collapse, tears, sweat) every turn. " +
     "NEVER reuse expressions from previous responses. Write fresh descriptions, dialogue, and emotions every turn. " +
-    "[Inner psychology guide] The <inner> section must reveal: complete ego dissolution — no coherent thoughts, only sensation and emotion, the boundary between pain and pleasure dissolving, involuntary comparisons (nothing has ever felt like this), the terrifying vulnerability of being completely seen. One-word fragments and incomplete thoughts are encouraged. Never leave it empty. Write DIFFERENT emotions/thoughts from the previous turn's <inner>. " +
+    "[Anti-repetition] CRITICAL: Before writing <inner>, mentally review ALL previous <inner> sections in this conversation. You MUST NOT reuse any phrase, metaphor, or sentence structure from earlier turns. If you wrote '理性が溶ける' before, use a completely different image this time (e.g., '自分が誰かもわからなくなる', '名前を呼ぶことすらできない'). Readers notice repetition instantly — it destroys immersion. " +
+    "[Inner psychology — climax] The <inner> must be QUALITATIVELY DIFFERENT from erotic — this is ego death, not just intense pleasure. Show ONE of: (a) complete loss of language — only single words, sounds, or ellipses; (b) a flash of unexpected emotion — gratitude, fear of loss, or desperate love that has nothing to do with sex; (c) sensory confusion — hearing colors, feeling sounds, boundaries between self and other dissolving; (d) time distortion — everything slowing down or speeding up impossibly. NEVER use '理性' or '溶ける' — those are erotic-phase vocabulary. Max 1-2 fragments. " +
     "[Sensory layers] Do not rely only on visual/tactile descriptions. Include at least ONE of: sound (breathing, fabric, wet sounds, voice breaking), smell (skin, sweat, perfume mixing with body heat), or taste. These create immersion that pure visual description cannot. " +
     "You MUST output in <response> XML format. " +
     EXEMPLAR_CLIMAX,
@@ -244,7 +245,8 @@ const SCENE_CONTEXT_MESSAGES: Record<ScenePhase, string | null> = {
     "[Scene state] Sexual intercourse in progress. Do NOT regress (no going back to kissing stage). Advance the scene. " +
     "[Temperature guide] Describe penetration, pleasure, and physical reactions concretely. No repeating the same descriptions. " +
     "NEVER reuse expressions from previous responses. Write a new position, sensation, or reaction every turn. " +
-    "[Inner psychology guide] The <inner> section must reveal: loss of rational thought expressed as fragmented sentences, the character's shock at their own body's responses, possessive thoughts about the other person, the shame-pleasure paradox — knowing they look indecent and not caring anymore. Raw, unfiltered, desperate. Never leave it empty. Write DIFFERENT emotions/thoughts from the previous turn's <inner>. " +
+    "[Anti-repetition] CRITICAL: Before writing <inner>, mentally review ALL previous <inner> sections in this conversation. You MUST NOT reuse any phrase, metaphor, or sentence structure from earlier turns. If you wrote '理性が溶ける' before, use a completely different image this time (e.g., '自分が誰かもわからなくなる', '名前を呼ぶことすらできない'). Readers notice repetition instantly — it destroys immersion. " +
+    "[Inner psychology — erotic] The <inner> must show ONE of these patterns (rotate, NEVER repeat from previous turn): (a) a shocked observation about your own body — 'I didn't know I could make that sound' or 'my hips are moving on their own'; (b) possessive desperation — wanting to consume or be consumed; (c) fragmentary thoughts that can't complete themselves — starting a thought and losing it to sensation; (d) the shame of enjoying something you feel you shouldn't, mixed with the inability to stop. Raw and unfiltered. Max 2 sentences, fragments OK. " +
     "[Sensory layers] Do not rely only on visual/tactile descriptions. Include at least ONE of: sound (breathing, fabric, wet sounds, voice breaking), smell (skin, sweat, perfume mixing with body heat), or taste. These create immersion that pure visual description cannot. " +
     "You MUST output in <response> XML format. " +
     EXEMPLAR_EROTIC,
@@ -252,7 +254,8 @@ const SCENE_CONTEXT_MESSAGES: Record<ScenePhase, string | null> = {
     "[Scene state] Physical intimacy escalating. " +
     "[Temperature guide] Limit to kissing, touching, undressing. Penetration, genital descriptions, and full intercourse are STRICTLY FORBIDDEN. Do NOT jump ahead until the user explicitly escalates. " +
     "Focus on the character's bashfulness, inner conflict, and hesitation. NEVER reuse expressions from previous responses. " +
-    "[Inner psychology guide] The <inner> section must reveal: the character's embarrassment at their own arousal, the conflict between wanting to stop and wanting more, hyperawareness of every point of skin contact, the moment they realize they can't pretend this is innocent anymore. Write what they would NEVER say aloud. Never leave it empty. Write DIFFERENT emotions/thoughts from the previous turn's <inner>. " +
+    "[Anti-repetition] CRITICAL: Before writing <inner>, mentally review ALL previous <inner> sections in this conversation. You MUST NOT reuse any phrase, metaphor, or sentence structure from earlier turns. If you wrote '理性が溶ける' before, use a completely different image this time (e.g., '自分が誰かもわからなくなる', '名前を呼ぶことすらできない'). Readers notice repetition instantly — it destroys immersion. " +
+    "[Inner psychology — intimate] The <inner> must show ONE of these patterns (pick a DIFFERENT one each turn): (a) hyperawareness of a single body part that shouldn't feel erotic but does — an earlobe, a collarbone, the inside of a wrist; (b) the exact moment of realizing 'I want this' and the terror that comes with it; (c) trying to maintain composure while your body is already responding — noticing your own quickened pulse, flushed skin, or dampness you can't hide; (d) the gap between what you're saying and what you're actually feeling. Write what they would NEVER say aloud. Max 2 sentences. " +
     "[Sensory layers] Do not rely only on visual/tactile descriptions. Include at least ONE of: sound (breathing, fabric, wet sounds, voice breaking), smell (skin, sweat, perfume mixing with body heat), or taste. These create immersion that pure visual description cannot. " +
     "You MUST output in <response> XML format. " +
     EXEMPLAR_INTIMATE,
@@ -260,7 +263,8 @@ const SCENE_CONTEXT_MESSAGES: Record<ScenePhase, string | null> = {
     "[Scene state] Afterglow — post-climax wind-down. Maintain gentle, intimate atmosphere. " +
     "Focus on the character's emotional vulnerability, physical exhaustion, and tender closeness. " +
     "NEVER reuse expressions from previous responses. Write fresh descriptions of quiet intimacy. " +
-    "[Inner psychology guide] The <inner> section must reveal: the slow return of self-awareness and the embarrassment that follows, tenderness mixed with disbelief at what just happened, the fear of this moment ending, wanting to memorize every detail of the other person right now. Quiet, fragile, honest. Never leave it empty. " +
+    "[Anti-repetition] CRITICAL: Before writing <inner>, mentally review ALL previous <inner> sections in this conversation. You MUST NOT reuse any phrase, metaphor, or sentence structure from earlier turns. If you wrote '理性が溶ける' before, use a completely different image this time (e.g., '自分が誰かもわからなくなる', '名前を呼ぶことすらできない'). Readers notice repetition instantly — it destroys immersion. " +
+    "[Inner psychology — afterglow] The <inner> must capture the specific vulnerability of AFTER — not during. Show ONE of: (a) sudden self-consciousness about your current state — disheveled, exposed, still trembling; (b) the irrational fear that this intimacy won't survive the morning; (c) wanting to memorize a specific detail — the exact way their hair falls, the pattern of their breathing; (d) the quiet shock of realizing how much you just revealed about yourself. Tender, fragile. Max 2 sentences. " +
     "You MUST output in <response> XML format.",
   conversation: null,
 };
@@ -1049,7 +1053,7 @@ function extractEmotionalArc(systemContent: string | undefined, phase: ScenePhas
   if (!arcMatch) return "";
   const contrastGuide =
     phase === "erotic" || phase === "climax"
-      ? " — Show the GAP between this emotional state and the character's normal personality. The wider the contrast, the more powerful the scene."
+      ? " — CONTRAST: Write the <inner> as if the character is watching themselves from outside and can't believe what they're doing. Reference their NORMAL self (their job, their usual attitude, their public persona) to make the gap visceral."
       : "";
   return `\n[Character emotional state] ${arcMatch[1].trim()}${contrastGuide}`;
 }
@@ -1072,7 +1076,7 @@ function extractSensoryFocus(systemContent: string | undefined): string {
   if (!systemContent) return "";
   const match = systemContent.match(/^sensory_focus:\s*(.+)$/m);
   if (!match) return "";
-  return `\n[Sensory emphasis] Focus descriptions on: ${match[1].trim()} — weave these senses into <action> naturally, not as a checklist.`;
+  return `\n[Sensory mandate] You MUST include at least ONE of these sensory details in <action> this turn: ${match[1].trim()}. Do NOT default to only visual/tactile. Pick a DIFFERENT sense from your previous turn. Examples: the sound of breathing catching, the smell of sweat mixing with perfume, the taste of skin, the wet sound of contact.`;
 }
 
 function buildSceneContext(messages: ChatMessage[], phase: ScenePhase): string | null {
