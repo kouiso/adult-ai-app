@@ -43,11 +43,12 @@ export const AgeGateModal = ({ onDenied }: AgeGateModalProps) => {
         }
       }}
     >
-      <DialogContent className="max-w-md gap-5 p-6" showCloseButton={false}>
-        <DialogHeader className="gap-3 text-center">
-          <DialogTitle className="text-xl">年齢確認</DialogTitle>
-          <DialogDescription className="text-sm leading-6">
-            本アプリは 18 歳未満の方は利用できません。18 歳以上ですか?
+      <DialogContent className="max-w-md gap-6 p-8" showCloseButton={false}>
+        <DialogHeader className="gap-4 text-center">
+          <p className="font-narrative text-4xl font-bold tracking-widest text-primary/80">18+</p>
+          <DialogTitle className="font-narrative text-xl tracking-wide">年齢確認</DialogTitle>
+          <DialogDescription className="text-sm leading-7 text-muted-foreground">
+            本アプリは 18 歳未満の方は利用できません。<br />18 歳以上ですか?
           </DialogDescription>
         </DialogHeader>
         <LegalLinks className="justify-center text-[0.8rem]" />

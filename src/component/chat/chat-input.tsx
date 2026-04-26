@@ -45,15 +45,15 @@ export const ChatInput = memo(({ onSend, onGenerateImage, isLoading }: ChatInput
   };
 
   return (
-    <div className="border-t border-border/50 bg-card/80 glass-effect p-4">
-      <div className="mx-auto flex max-w-3xl items-end gap-2">
+    <div className="bg-card/60 glass-effect p-3 pb-4">
+      <div className="input-glow mx-auto flex max-w-3xl items-end gap-2 rounded-2xl border border-border/40 bg-background/80 p-2 transition-shadow">
         <Textarea
           ref={textareaRef}
           value={input}
           onChange={handleInput}
           onKeyDown={handleKeyDown}
           placeholder="メッセージを入力..."
-          className="min-h-[44px] max-h-[200px] resize-none"
+          className="min-h-[44px] max-h-[200px] resize-none border-0 bg-transparent shadow-none focus-visible:ring-0"
           rows={1}
           disabled={isLoading}
         />
