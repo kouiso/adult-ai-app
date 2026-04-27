@@ -989,7 +989,7 @@ export const ChatView = () => {
     ],
   );
 
-  const handleGenerateImage = useCallback(async () => {
+  const handleGenerateImage = useCallback(async (options?: { lockInput?: boolean }) => {
     if (!isOnline) {
       toast.error("オフライン中は画像生成できません");
       return;
@@ -1009,6 +1009,7 @@ export const ChatView = () => {
     const prompt = sceneDescription.slice(0, IMAGE_PROMPT_MAX_LENGTH);
     const imageMessageId = crypto.randomUUID();
     const conversationId = useChatStore.getState().currentConversationId;
+    const lockInput = options?.lockInput ?? true;
 
     if (!conversationId) return;
 
@@ -1017,7 +1018,7 @@ export const ChatView = () => {
       ? parseSystemPrompt(currentConversation.characterSystemPrompt).personality
       : "";
 
-    setLoading(true);
+    if (lockInput) setLoading(true);
     addMessage({
       id: imageMessageId,
       role: "assistant",
@@ -1053,7 +1054,7 @@ export const ChatView = () => {
     } catch (err) {
       updateMessage(imageMessageId, `❌ ネットワークエラー: ${String(err)}`, false);
     } finally {
-      setLoading(false);
+      if (lockInput) setLoading(false);
     }
   }, [
     createMessageEntry,
@@ -1084,7 +1085,7 @@ export const ChatView = () => {
     if (!isAutoImagePhaseTransition(previousPhase, currentPhase)) return;
     if (hasImageInRecentTurns(messages, AUTO_IMAGE_RECENT_TURN_LIMIT)) return;
 
-    void handleGenerateImage();
+    void handleGenerateImage({ lockInput: false });
   }, [handleGenerateImage, messages]);
 
   const stableOnSelectConversation = useCallback(
