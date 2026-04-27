@@ -1227,15 +1227,91 @@ const normalizeBodyAnchors = (value: string): string[] => {
     .filter(Boolean);
 };
 
+function extractVisualAnchorsFromNaturalText(text: string): string {
+  const anchors: string[] = [];
+
+  // 自然文から髪色を抽出する
+  const hairPatterns: Array<[RegExp, string]> = [
+    [/黒髪|黒い髪/, "black hair"],
+    [/茶髪|茶色[いの]髪|ブラウン[なの]髪/, "brown hair"],
+    [/金髪|金色[なの]髪|ブロンド/, "blonde hair"],
+    [/白髪|白い髪|銀髪|銀色/, "silver hair"],
+    [/ピンク[なの]髪|桃色/, "pink hair"],
+    [/赤[いの]髪|赤髪/, "red hair"],
+    [/青[いの]髪|青髪/, "blue hair"],
+  ];
+  const stylePatterns: Array<[RegExp, string]> = [
+    [/ロング|長い髪|長髪/, "long hair"],
+    [/ショート|短い髪|短髪/, "short hair"],
+    [/ボブ/, "bob cut"],
+    [/ツインテール/, "twintails"],
+    [/ポニーテール/, "ponytail"],
+    [/ストレート/, "straight hair"],
+    [/ウェーブ|巻き髪|カール/, "curly hair"],
+  ];
+
+  for (const [pattern, tag] of hairPatterns) {
+    if (pattern.test(text)) {
+      anchors.push(tag);
+      break;
+    }
+  }
+  for (const [pattern, tag] of stylePatterns) {
+    if (pattern.test(text)) {
+      anchors.push(tag);
+      break;
+    }
+  }
+
+  const eyePatterns: Array<[RegExp, string]> = [
+    [/切れ長[なの]目|切れ長/, "narrow eyes"],
+    [/大きな目|丸い目|ぱっちり/, "large eyes"],
+    [/茶色[いの][目瞳]/, "brown eyes"],
+    [/黒い[目瞳]|黒目/, "black eyes"],
+    [/緑[いの][目瞳]|グリーン[なの]目/, "green eyes"],
+    [/青[いの][目瞳]|ブルー[なの]目/, "blue eyes"],
+    [/赤[いの][目瞳]|赤い目/, "red eyes"],
+    [/金[いの][目瞳]|金色[なの]目/, "gold eyes"],
+  ];
+  for (const [pattern, tag] of eyePatterns) {
+    if (pattern.test(text)) {
+      anchors.push(tag);
+      break;
+    }
+  }
+
+  const bodyPatterns: Array<[RegExp, string]> = [
+    [/色白|白い肌/, "pale skin"],
+    [/褐色|日焼け/, "dark skin, tanned"],
+    [/巨乳|大きな胸|豊かな胸/, "large breasts"],
+    [/小柄|華奢/, "petite"],
+    [/長身|すらり/, "tall"],
+    [/スレンダー|細身/, "slender"],
+    [/グラマー|むっちり/, "curvy"],
+  ];
+  for (const [pattern, tag] of bodyPatterns) {
+    if (pattern.test(text)) anchors.push(tag);
+  }
+
+  return anchors.join(", ");
+}
+
 function extractVisualAnchors(characterDescription: string): string {
   const hair = extractLabelValue(characterDescription, HAIR_ANCHOR_PATTERN);
   const eyes = extractLabelValue(characterDescription, EYE_ANCHOR_PATTERN);
   const body = extractLabelValue(characterDescription, BODY_ANCHOR_PATTERN);
-  return uniqTags([
+  const labelBased = uniqTags([
     ...(hair ? normalizeHairAnchors(hair) : []),
     ...(eyes ? normalizeEyeAnchors(eyes) : []),
     ...(body ? normalizeBodyAnchors(body) : []),
   ]).join(", ");
+
+  // ラベル形式で抽出できない場合は、自然文から外見タグを抽出する
+  if (!labelBased) {
+    return extractVisualAnchorsFromNaturalText(characterDescription);
+  }
+
+  return labelBased;
 }
 
 async function translatePromptToImageTags(
@@ -2049,11 +2125,19 @@ const app = new Hono<{ Bindings: Bindings }>()
       conversation:
         "Focus on: clothed, casual pose, safe for work framing, atmosphere, facial expression",
       intimate:
-        "Focus on: partial undress allowed, close-up framing, soft lighting, touching, blushing",
+        "Focus on: partial undress, blushing, embarrassed, looking_away, shy, soft_lighting. " +
+        "MANDATORY expression: blush, shy, embarrassed_nude, covering_breasts OR nervous_smile. " +
+        "Show the character's bashfulness and vulnerability during undressing.",
       erotic:
-        "Focus on: explicit nudity, sexual position, detailed anatomy, aroused expression, bodily contact",
+        "MANDATORY tags: sex, vaginal, penetration, nude, spread_legs or missionary or doggystyle or cowgirl. " +
+        "MANDATORY expression: open_mouth, moaning, blush, heavy_breathing, tears, ahegao_light, half-closed_eyes, pleasure. " +
+        "FORBIDDEN: clothed, annoyed, angry, disinterest, bored, frown. " +
+        "Show active intercourse with visible arousal on the character's face.",
       climax:
-        "Focus on: explicit, orgasm, bodily fluids, intense expression, full nudity, climax pose",
+        "MANDATORY tags: sex, orgasm, cum, trembling, arched_back, clenching, full_body_blush. " +
+        "MANDATORY expression: ahegao, rolling_eyes, tongue_out, crying_with_pleasure, open_mouth, drooling. " +
+        "FORBIDDEN: calm, neutral, clothed, standing, annoyed. " +
+        "Show the peak moment of climax with extreme facial pleasure.",
       afterglow:
         "Focus on: post-climax tenderness, resting together, gentle embrace, peaceful expression, soft lighting",
     };
@@ -2125,8 +2209,26 @@ const app = new Hono<{ Bindings: Bindings }>()
       afterglow: "nsfw, penetration, orgasm",
     };
 
+    const phaseExpressionTags: Record<ScenePhase, string> = {
+      conversation: "",
+      intimate: "blush, shy, embarrassed",
+      erotic: "open_mouth, moaning, blush, heavy_breathing, pleasure, half-closed_eyes",
+      climax: "ahegao, open_mouth, tongue_out, rolling_eyes, tears, drooling, extreme_pleasure",
+      afterglow: "peaceful, closed_eyes, gentle_smile, afterglow, exhausted",
+    };
+
+    const phaseForbiddenExpressions: Record<ScenePhase, string> = {
+      conversation: "",
+      intimate: "angry, annoyed, disinterest, bored",
+      erotic: "angry, annoyed, disinterest, bored, calm, neutral_expression, frown, clothed",
+      climax: "angry, annoyed, calm, neutral_expression, clothed, standing, bored, frown",
+      afterglow: "angry, annoyed, sexual, penetration",
+    };
+
     const guidanceScale = cfgByPhase[input.phase];
     const extraNegative = phaseNegativeExtra[input.phase];
+    const phaseExpression = phaseExpressionTags[input.phase];
+    const forbiddenExpression = phaseForbiddenExpressions[input.phase];
 
     const imagePrompt = await translatePromptToImageTags(
       c.env.OPENROUTER_API_KEY,
@@ -2135,7 +2237,9 @@ const app = new Hono<{ Bindings: Bindings }>()
       phaseTranslationHints[input.phase],
     );
 
-    const fullNegativePrompt = [input.negative_prompt, extraNegative].filter(Boolean).join(", ");
+    const fullNegativePrompt = [input.negative_prompt, extraNegative, forbiddenExpression]
+      .filter(Boolean)
+      .join(", ");
 
     const response = await fetch("https://api.novita.ai/v3/async/txt2img", {
       method: "POST",
@@ -2147,7 +2251,7 @@ const app = new Hono<{ Bindings: Bindings }>()
         extra: { response_image_type: "jpeg" },
         request: {
           model_name: "meinahentai_v4_70340.safetensors",
-          prompt: `masterpiece, best quality, anime style, ${imagePrompt}`,
+          prompt: `masterpiece, best quality, anime style, ${phaseExpression ? `${phaseExpression}, ` : ""}${imagePrompt}`,
           negative_prompt: `${fullNegativePrompt}, realistic, photorealistic, 3d, western, text, watermark, bad anatomy, bad hands, extra fingers, fewer fingers, missing fingers, worst quality, low quality, normal quality, cropped`,
           width: input.width,
           height: input.height,
