@@ -148,15 +148,17 @@ export const SettingsPanel = () => {
         </SheetHeader>
         <div className="mt-6 space-y-6">
           <div>
-            <h3 className="text-sm font-medium mb-3">モデル選択</h3>
+            <h3 className="font-narrative text-sm font-medium mb-3">モデル選択</h3>
             <div className="space-y-2">
               {MODEL_CATALOG.map((m) => (
                 <button
                   key={m.id}
                   type="button"
                   onClick={() => handleSetModel(m.id)}
-                  className={`w-full rounded-lg border p-3 text-left text-sm transition-colors ${
-                    model === m.id ? "border-primary bg-primary/5" : "border-border hover:bg-muted"
+                  className={`w-full rounded-lg border p-3 text-left text-sm transition ${
+                    model === m.id
+                      ? "border-primary bg-primary/6 shadow-[0_0_18px_oklch(0.50_0.18_350_/_10%)]"
+                      : "border-border hover:bg-accent/45 hover:shadow-[0_8px_24px_oklch(0.50_0.18_350_/_8%)]"
                   }`}
                 >
                   <div className="font-medium">{m.name}</div>
@@ -171,15 +173,15 @@ export const SettingsPanel = () => {
           <Separator />
 
           <div>
-            <h3 className="text-sm font-medium mb-3">キャラクター選択</h3>
+            <h3 className="font-narrative text-sm font-medium mb-3">キャラクター選択</h3>
             <div className="space-y-2">
               <button
                 type="button"
                 onClick={() => handleSetCharacter(null)}
-                className={`w-full rounded-lg border p-3 text-left text-sm transition-colors ${
+                className={`w-full rounded-lg border p-3 text-left text-sm transition ${
                   activeCharacterId === null
-                    ? "border-primary bg-primary/5"
-                    : "border-border hover:bg-muted"
+                    ? "border-primary bg-primary/6 shadow-[0_0_18px_oklch(0.50_0.18_350_/_10%)]"
+                    : "border-border hover:bg-accent/45 hover:shadow-[0_8px_24px_oklch(0.50_0.18_350_/_8%)]"
                 }`}
               >
                 <div className="font-medium">デフォルト（Sakura）</div>
@@ -192,10 +194,10 @@ export const SettingsPanel = () => {
                   key={ch.id}
                   type="button"
                   onClick={() => handleSetCharacter(ch.id)}
-                  className={`w-full rounded-lg border p-3 text-left text-sm transition-colors ${
+                  className={`w-full rounded-lg border p-3 text-left text-sm transition ${
                     activeCharacterId === ch.id
-                      ? "border-primary bg-primary/5"
-                      : "border-border hover:bg-muted"
+                      ? "border-primary bg-primary/6 shadow-[0_0_18px_oklch(0.50_0.18_350_/_10%)]"
+                      : "border-border hover:bg-accent/45 hover:shadow-[0_8px_24px_oklch(0.50_0.18_350_/_8%)]"
                   }`}
                 >
                   <div className="font-medium">{ch.name}</div>
@@ -252,7 +254,7 @@ export const SettingsPanel = () => {
           <Separator />
 
           <div>
-            <h3 className="text-sm font-medium mb-3">音声読み上げ（TTS）</h3>
+            <h3 className="font-narrative text-sm font-medium mb-3">音声読み上げ（TTS）</h3>
             {!isSupported ? (
               <p className="text-xs text-muted-foreground">
                 このブラウザは音声合成に対応していません
@@ -311,7 +313,7 @@ export const SettingsPanel = () => {
                         step={0.1}
                         value={ttsRate}
                         onChange={(e) => setTtsRate(Number(e.target.value))}
-                        className="w-full accent-primary"
+                        className="range-warm w-full"
                       />
                     </div>
                     <div>
@@ -326,7 +328,7 @@ export const SettingsPanel = () => {
                         step={0.1}
                         value={ttsPitch}
                         onChange={(e) => setTtsPitch(Number(e.target.value))}
-                        className="w-full accent-primary"
+                        className="range-warm w-full"
                       />
                     </div>
                   </>

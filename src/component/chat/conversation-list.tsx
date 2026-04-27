@@ -74,7 +74,10 @@ export const ConversationList = memo(
   }: ConversationListProps) => (
     <div className="flex h-full w-full flex-col">
       <div className="border-b px-3 py-3 space-y-2">
-        <Button className="w-full" onClick={() => void onCreate()}>
+        <Button
+          className="w-full bg-gradient-to-r from-primary to-[oklch(0.42_0.14_10)] text-primary-foreground shadow-[0_8px_24px_oklch(0.50_0.18_350_/_18%)] transition hover:from-primary/90 hover:to-[oklch(0.42_0.14_10_/_90%)]"
+          onClick={() => void onCreate()}
+        >
           新しい会話
         </Button>
         {conversations.length > 0 && (
@@ -149,14 +152,14 @@ export const ConversationList = memo(
                 data-conversation-id={conversation.id}
                 onClick={() => onSelect(conversation.id)}
                 className={cn(
-                  "w-full rounded-md border px-3 py-2 text-left transition-colors pr-8",
+                  "w-full rounded-md border px-3 py-2 text-left transition pr-8",
                   currentConversationId === conversation.id
-                    ? "border-primary/60 bg-primary/15 shadow-sm"
-                    : "border-transparent hover:bg-accent/70",
+                    ? "border-l-primary border-l-2 border-y-border/70 border-r-border/70 bg-card/85 shadow-[inset_6px_0_14px_-12px_oklch(0.70_0.16_350),0_0_22px_oklch(0.50_0.18_350_/_10%)]"
+                    : "border-transparent hover:bg-accent/60 hover:shadow-[0_8px_24px_oklch(0.50_0.18_350_/_8%)]",
                 )}
               >
                 <p className="line-clamp-1 text-sm font-medium">{conversation.title}</p>
-                <p className="mt-1 text-xs text-muted-foreground">
+                <p className="mt-1 flex items-center text-xs text-muted-foreground">
                   {conversation.characterName !== "AI" && (
                     <span className="mr-1 inline-flex items-center gap-1">
                       {conversation.characterAvatar &&
@@ -165,10 +168,12 @@ export const ConversationList = memo(
                         <img
                           src={conversation.characterAvatar}
                           alt={conversation.characterName ?? ""}
-                          className="inline-block h-4 w-4 rounded-full object-cover"
+                          className="inline-block h-6 w-6 rounded-full border border-primary/20 object-cover shadow-sm"
                         />
                       ) : (
-                        "👤"
+                        <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-primary/20 bg-primary/10 text-[11px] text-primary">
+                          {conversation.characterName.slice(0, 1)}
+                        </span>
                       )}{" "}
                       {conversation.characterName} ·{" "}
                     </span>
@@ -211,7 +216,14 @@ export const ConversationList = memo(
             </div>
           ))}
           {!isLoading && conversations.length === 0 && (
-            <p className="px-2 py-6 text-center text-sm text-muted-foreground">会話がありません</p>
+            <div className="rounded-2xl border border-border/70 bg-card/65 px-4 py-8 text-center shadow-sm">
+              <p className="font-narrative text-sm font-semibold text-foreground">
+                まだ会話がありません
+              </p>
+              <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                シーンを選ぶか、新しい会話から始められます。
+              </p>
+            </div>
           )}
         </div>
       </ScrollArea>

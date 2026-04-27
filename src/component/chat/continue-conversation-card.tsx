@@ -56,12 +56,12 @@ export const ContinueConversationCard = ({
   if (!summary) return null;
 
   return (
-    <section className="rounded-2xl border border-primary/20 bg-primary/6 p-3 shadow-sm">
+    <section className="rounded-2xl border border-l-2 border-border/70 border-l-primary/55 bg-primary/6 p-3 shadow-[0_0_22px_oklch(0.50_0.18_350_/_10%)]">
       <p className="text-xs font-semibold tracking-wide text-primary">昨日の続き</p>
       <button
         type="button"
         onClick={() => onContinue(conversationId)}
-        className="mt-2 w-full rounded-2xl bg-background/80 p-3 text-left transition hover:bg-background"
+        className="group mt-2 w-full rounded-2xl bg-background/80 p-3 text-left transition hover:bg-background"
       >
         <div className="flex items-start gap-3">
           <Avatar size="sm">
@@ -70,7 +70,9 @@ export const ContinueConversationCard = ({
           </Avatar>
           <div className="min-w-0 flex-1">
             <div className="flex items-center justify-between gap-2">
-              <p className="truncate text-sm font-semibold text-foreground">{characterName}</p>
+              <p className="font-narrative truncate text-sm font-semibold text-foreground">
+                {characterName}
+              </p>
               <span className="inline-flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
                 <Clock3 className="h-3 w-3" />
                 {formatRelativeTime(updatedAt)}
@@ -79,7 +81,7 @@ export const ContinueConversationCard = ({
             <p className="mt-2 line-clamp-3 text-xs leading-5 text-muted-foreground">{summary}</p>
             <div className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-primary">
               続きから話す
-              <ArrowRight className="h-3 w-3" />
+              <ArrowRight className="h-3 w-3 transition-transform group-hover:translate-x-1" />
             </div>
           </div>
         </div>

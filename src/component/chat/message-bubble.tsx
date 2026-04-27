@@ -104,22 +104,26 @@ const StructuredNarrative = memo(({ content }: { content: string }) => {
   }
 
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-2.5">
       {parsed.narration && (
         <p className="italic text-muted-foreground/70 leading-relaxed text-sm">
           {parsed.narration}
         </p>
       )}
       {parsed.action && (
-        <p className="italic text-muted-foreground/80 leading-relaxed">{parsed.action}</p>
+        <p className="narrative-action italic text-muted-foreground/80 leading-relaxed text-[0.9em]">
+          {parsed.action}
+        </p>
       )}
       {parsed.dialogue && (
-        <p className="font-medium leading-relaxed">
+        <p className="font-narrative text-[1.05em] font-medium leading-relaxed tracking-wide">
           <StyledNarrative content={parsed.dialogue} />
         </p>
       )}
       {parsed.inner && (
-        <p className="text-xs italic text-muted-foreground/60 leading-relaxed">{parsed.inner}</p>
+        <p className="narrative-inner text-xs italic text-muted-foreground/50 leading-relaxed">
+          {parsed.inner}
+        </p>
       )}
     </div>
   );
@@ -132,10 +136,10 @@ const StreamingContent = memo(({ content }: { content: string }) => {
   const sanitizedContent = stripXmlTagsStreaming(content);
   if (!content) {
     return (
-      <div className="flex gap-1">
-        <span className="animate-bounce text-xs text-primary/60">●</span>
-        <span className="animate-bounce text-xs text-primary/60 [animation-delay:0.2s]">●</span>
-        <span className="animate-bounce text-xs text-primary/60 [animation-delay:0.4s]">●</span>
+      <div className="flex gap-1.5 py-1">
+        <span className="typing-dot h-1.5 w-1.5 rounded-full bg-primary/60" />
+        <span className="typing-dot h-1.5 w-1.5 rounded-full bg-primary/60" />
+        <span className="typing-dot h-1.5 w-1.5 rounded-full bg-primary/60" />
       </div>
     );
   }
@@ -635,9 +639,8 @@ const BubbleFooter = ({
   </>
 );
 
-const userBubbleStyle = "bg-gradient-user-bubble text-white rounded-tr-sm shadow-sm";
-const assistantBubbleStyle =
-  "bg-card text-foreground rounded-tl-sm border border-border/50 shadow-sm";
+const userBubbleStyle = "bg-gradient-user-bubble text-white rounded-tr-sm shadow-md";
+const assistantBubbleStyle = "bg-card/90 text-foreground rounded-tl-sm shadow-sm";
 
 // デフォルト値をスプレッドで適用し、関数内のcyclomatic complexityを削減
 const applyBubbleDefaults = (props: MessageBubbleProps) => ({
@@ -691,7 +694,12 @@ export const MessageBubble = memo((rawProps: MessageBubbleProps) => {
   );
 
   return (
-    <div className={cn("flex gap-3 px-4 py-3 group/message", isUser && "flex-row-reverse")}>
+    <div
+      className={cn(
+        "flex gap-3 px-4 py-3 group/message message-enter",
+        isUser && "flex-row-reverse",
+      )}
+    >
       <MessageAvatar
         isUser={isUser}
         characterName={characterName}

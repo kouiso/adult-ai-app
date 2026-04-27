@@ -89,9 +89,11 @@ export const App = () => {
 
   return (
     <div className="flex h-svh flex-col bg-background">
-      <header className="flex items-center justify-between bg-gradient-header px-4 py-3 shadow-sm">
+      <header className="flex items-center justify-between bg-gradient-header px-4 py-2.5">
         <div className="min-w-0">
-          <h1 className="truncate text-lg font-semibold text-white">{pageTitle}</h1>
+          <h1 className="truncate font-narrative text-lg font-semibold tracking-wide text-white/95">
+            {pageTitle}
+          </h1>
           {route !== "chat" ? (
             <a
               href="#/"
