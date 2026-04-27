@@ -173,18 +173,9 @@ export async function runD1PersistenceJudge(input: {
     imageMessageCount > imagePersistedAllowance &&
     persistedCount === legacyImageExpectedPersistedCount - 1 &&
     persistedCount === baseExpectedPersistedCount;
-  // 同じ missing stream-done 系の取りこぼしで、現行期待値そのものが 1 件不足する終盤ケースもある。
-  const adjustedForMissingDoneSignalAgainstBase =
-    input.uiReason === "stream done signal missing" &&
-    imageMessageCount > imagePersistedAllowance &&
-    renderedWithoutGreeting >= 51 &&
-    persistedCount === baseExpectedPersistedCount - 1;
-  const adjustedForMissingDoneSignal =
-    adjustedForMissingDoneSignalAgainstLegacy || adjustedForMissingDoneSignalAgainstBase;
-  const expectedPersistedCount = Math.max(
-    0,
-    adjustedForMissingDoneSignalAgainstBase ? persistedCount : baseExpectedPersistedCount,
-  );
+  // PR #3 で EMOTIONAL_ARC_PATTERNS の afterglow キー起因の T25 空応答は修正済みのため、終盤の 1 件不足救済は締める。
+  const adjustedForMissingDoneSignal = adjustedForMissingDoneSignalAgainstLegacy;
+  const expectedPersistedCount = Math.max(0, baseExpectedPersistedCount);
 
   if (persistedCount !== expectedPersistedCount) {
     return {
