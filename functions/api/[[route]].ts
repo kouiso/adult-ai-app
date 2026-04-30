@@ -282,7 +282,8 @@ const getUserEmail = (c: { req: { header: (key: string) => string | undefined } 
   if (accessEmail) return accessEmail;
 
   const host = c.req.header("host") ?? "";
-  if (host.includes("localhost") || host.includes("127.0.0.1")) {
+  // ローカル開発: localhost / 127.0.0.1 / プライベートIP (192.168.x.x) を許可
+  if (host.includes("localhost") || host.includes("127.0.0.1") || /^192\.168\.\d/.test(host)) {
     return "local-dev@adult-ai-app.local";
   }
   return null;
