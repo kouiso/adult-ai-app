@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { ChevronDown, ChevronRight, Pencil, Plus, Sparkles, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
@@ -318,6 +318,10 @@ const CharacterListItem = ({
 
 interface CharacterManagerProps {
   onCharacterSelect?: (characterId: string | null) => void;
+  manualCreateSignal?: number;
+  // 親から開閉を制御したい場合のオプション。未指定なら内部状態のみで動く
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 interface CharacterSheetListProps {
@@ -382,7 +386,7 @@ const CharacterSheetList = ({
         <Sparkles className="mr-2 h-4 w-4" />
         AIで作成
       </Button>
-      <Button className="w-full" variant="outline" onClick={onCreateClick}>
+      <Button className="w-full" variant="default" onClick={onCreateClick}>
         <Plus className="mr-2 h-4 w-4" />
         手動で作成
       </Button>
@@ -390,8 +394,19 @@ const CharacterSheetList = ({
   </>
 );
 
-export const CharacterManager = ({ onCharacterSelect }: CharacterManagerProps) => {
-  const [isSheetOpen, setSheetOpen] = useState(false);
+export const CharacterManager = ({
+  onCharacterSelect,
+  manualCreateSignal,
+  open: controlledOpen,
+  onOpenChange: controlledOnOpenChange,
+}: CharacterManagerProps) => {
+  const [internalOpen, setInternalOpen] = useState(false);
+  // 制御モード（親から open を渡された）と非制御モードを両立させる
+  const isSheetOpen = controlledOpen ?? internalOpen;
+  const setSheetOpen = (next: boolean) => {
+    if (controlledOnOpenChange) controlledOnOpenChange(next);
+    if (controlledOpen === undefined) setInternalOpen(next);
+  };
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -412,6 +427,12 @@ export const CharacterManager = ({ onCharacterSelect }: CharacterManagerProps) =
   );
   const currentConversationId = useChatStore((s) => s.currentConversationId);
   const { updateConversationCharacterEntry } = useChatQuery(currentConversationId);
+
+  useEffect(() => {
+    if ((manualCreateSignal ?? 0) > 0) {
+      setDialogMode({ type: "create" });
+    }
+  }, [manualCreateSignal]);
 
   const handleCreate = async (input: CharacterInput) => {
     setIsSaving(true);

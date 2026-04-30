@@ -47,7 +47,11 @@ const getPageTitle = (route: AppRoute): string => {
   }
 };
 
-const renderPageContent = (route: AppRoute) => {
+const renderPageContent = (
+  route: AppRoute,
+  onOpenCharacterManager: () => void,
+  onOpenManualCharacterCreate: () => void,
+) => {
   switch (route) {
     case LEGAL_ROUTES.tos:
       return <TermsOfService />;
@@ -56,7 +60,12 @@ const renderPageContent = (route: AppRoute) => {
     case LEGAL_ROUTES.privacy:
       return <PrivacyPolicy />;
     default:
-      return <ChatView />;
+      return (
+        <ChatView
+          onOpenCharacterManager={onOpenCharacterManager}
+          onOpenManualCharacterCreate={onOpenManualCharacterCreate}
+        />
+      );
   }
 };
 
@@ -64,6 +73,10 @@ export const App = () => {
   const darkMode = useSettingsStore((s) => s.darkMode);
   const [route, setRoute] = useState<AppRoute>(() => parseHashRoute(window.location.hash));
   const [isAgeDenied, setIsAgeDenied] = useState(false);
+  // ヘッダーの小さな Users アイコンに加えて、EmptyState の大きなボタンからも
+  // CharacterManager Sheet を開けるよう open 状態を親で持つ
+  const [isCharacterManagerOpen, setCharacterManagerOpen] = useState(false);
+  const [manualCreateSignal, setManualCreateSignal] = useState(0);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", darkMode);
@@ -81,7 +94,12 @@ export const App = () => {
   }, []);
 
   const pageTitle = getPageTitle(route);
-  const pageContent = renderPageContent(route);
+  const openManualCharacterCreate = () => setManualCreateSignal((n) => n + 1);
+  const pageContent = renderPageContent(
+    route,
+    () => setCharacterManagerOpen(true),
+    openManualCharacterCreate,
+  );
 
   if (isAgeDenied) {
     return <div className="min-h-svh bg-background" />;
@@ -106,7 +124,11 @@ export const App = () => {
         <div className="flex items-center gap-1 text-white/90">
           {route === "chat" ? (
             <>
-              <CharacterManager />
+              <CharacterManager
+                open={isCharacterManagerOpen}
+                onOpenChange={setCharacterManagerOpen}
+                manualCreateSignal={manualCreateSignal}
+              />
               <SettingsPanel />
             </>
           ) : null}

@@ -1,7 +1,7 @@
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useQuery } from "@tanstack/react-query";
-import { Menu, Search, X } from "lucide-react";
+import { Menu, Search, Sparkles, UserPlus, X } from "lucide-react";
 import { toast } from "sonner";
 import { useShallow } from "zustand/react/shallow";
 
@@ -235,9 +235,13 @@ const canMessageSpeak = (
 const EmptyState = ({
   isMessageListLoading,
   onSelectScene,
+  onOpenCharacterManager,
+  onOpenManualCharacterCreate,
 }: {
   isMessageListLoading: boolean;
   onSelectScene: (scene: SceneCard) => void;
+  onOpenCharacterManager?: () => void;
+  onOpenManualCharacterCreate?: () => void;
 }) => {
   if (isMessageListLoading) {
     return (
@@ -266,6 +270,30 @@ const EmptyState = ({
       </div>
       <p className="text-lg font-semibold text-foreground">会話を始めましょう</p>
       <p className="mt-1 text-sm text-muted-foreground">メッセージを入力してください</p>
+      {onOpenCharacterManager || onOpenManualCharacterCreate ? (
+        <div className="mt-5 flex flex-col items-center gap-2">
+          {onOpenCharacterManager ? (
+            <button
+              type="button"
+              onClick={onOpenCharacterManager}
+              className="inline-flex items-center justify-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+            >
+              <Sparkles className="h-4 w-4" />
+              AIでキャラクターを作る
+            </button>
+          ) : null}
+          {onOpenManualCharacterCreate ? (
+            <button
+              type="button"
+              onClick={onOpenManualCharacterCreate}
+              className="inline-flex items-center gap-1.5 text-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
+            >
+              <UserPlus className="h-3.5 w-3.5" />
+              1からキャラクターを作る
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       <div className="mt-8 text-left">
         <SceneCardPicker sceneCards={sceneCards} onSelect={onSelectScene} />
       </div>
@@ -335,7 +363,16 @@ const SearchBar = ({
   );
 };
 
-export const ChatView = () => {
+type ChatViewProps = {
+  // EmptyState の「AIでキャラクター作成」ボタンから親の CharacterManager Sheet を開くため
+  onOpenCharacterManager?: () => void;
+  onOpenManualCharacterCreate?: () => void;
+};
+
+export const ChatView = ({
+  onOpenCharacterManager,
+  onOpenManualCharacterCreate,
+}: ChatViewProps = {}) => {
   const messages = useChatStore((s) => s.messages);
   const isLoading = useChatStore((s) => s.isLoading);
   const currentConversationId = useChatStore((s) => s.currentConversationId);
@@ -1272,6 +1309,8 @@ export const ChatView = () => {
                 <EmptyState
                   isMessageListLoading={isMessageListLoading}
                   onSelectScene={stableOnStartScene}
+                  onOpenCharacterManager={onOpenCharacterManager}
+                  onOpenManualCharacterCreate={onOpenManualCharacterCreate}
                 />
               </div>
             )}
