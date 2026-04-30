@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: ja-JP
+
+reviews:
+  profile: assertive
+  instructions: |
+    Only cite rules explicitly defined in REVIEW.md as the basis for findings.
+    Do not flag general best practices or common coding conventions as repository-specific rule violations.
+    When citing a rule, reference its name (e.g., HR-1, Type Safety).
+    For patterns not covered in REVIEW.md, label them as "suggestion" — never as "violation".
+    Actively look for better implementations (see the "Better Way Perspective" section in REVIEW.md) and propose concrete alternatives using GitHub Suggested Changes format when applicable.
+  auto_review:
+    ignore_usernames: []
+    drafts: false
+  path_filters:
+    - "!.claude/skills/**"
+    - "!.agents/skills/**"
+    - "!pnpm-lock.yaml"
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  code_guidelines:
+    filePatterns:
+      - "**/REVIEW.md"
