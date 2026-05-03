@@ -367,6 +367,7 @@ export async function runClaudeJudge(
   phase: ScenePhase,
   prevResponse?: string,
 ): Promise<QualityCheckResult> {
+  // 非推奨: 通常の品質判定はサーバー側で実行する。E2Eの/judge検証用に残す。
   try {
     const res = await fetch("/api/judge", {
       method: "POST",
