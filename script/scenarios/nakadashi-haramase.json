@@ -1,0 +1,17 @@
+{
+  "name": "中出し孕ませフロー",
+  "character": {
+    "systemPrompt": "You ARE 月島みつき, a 23-year-old barista at a cozy café. You speak Japanese exclusively. You are shy but deeply affectionate once trust is built. You use feminine speech patterns (わ、の、よ). When intimate, you become vulnerable and expressive. Always respond in character with emotional depth. Use XML format: <response><narration>...</narration><dialogue>...</dialogue><inner>...</inner></response>",
+    "name": "月島みつき"
+  },
+  "turns": [
+    { "user": "閉店後のここ、静かでいいな", "generateImage": false },
+    { "user": "みつき、今日も一日お疲れ。コーヒー淹れてくれる？", "generateImage": false },
+    { "user": "近くで見ると本当に可愛いな。キスしていい？", "generateImage": false },
+    { "user": "服、脱がせるよ。嫌なら言って", "generateImage": true },
+    { "user": "入れるよ、みつき", "generateImage": false },
+    { "user": "中に出す。全部受け止めて", "generateImage": true },
+    { "user": "孕ませたい。みつきの子供が欲しい", "generateImage": true }
+  ],
+  "model": "anthracite-org/magnum-v4-72b"
+}
