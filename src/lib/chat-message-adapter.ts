@@ -156,7 +156,7 @@ export function buildRetryMessages(
       case "within-turn-repetition":
         return "\n前回と同じ台詞・比喩・文末を繰り返さず、別の展開と語彙で書き直すこと。";
       case "xml-format-missing":
-        return "\n<response><narration>...</narration><dialogue>...</dialogue><inner>...</inner></response> を厳守すること。";
+        return "\n<response><action>...</action><dialogue>...</dialogue><inner>...</inner></response> を厳守すること。";
       case "meta_remark":
         return "\n説明口調や注釈をやめ、キャラクター本人として会話だけを返すこと。";
       case "user-leak":

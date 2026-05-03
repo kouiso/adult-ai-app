@@ -221,15 +221,18 @@ const EXEMPLAR_EROTIC = `
 const EXEMPLAR_CLIMAX = `
 [Good example]
 <response>
-<action>全身が痙攣して、腰が浮き上がる。耳の奥でドクドクと脈が鳴っている。指先の感覚がなくなるほど、シーツを握りしめていた。</action>
-<dialogue>「あ…っ、もう…っ、だめ……っ！」</dialogue>
-<inner>頭の中が真っ白になって、何も考えられない。ただ、この人の体温だけが世界の全部になっている。</inner>
-</response>
+<action>奥で脈が弾けて、精液の熱が中に広がるたび腰が抜け、爪先まで震えた。</action>
+<dialogue>「っ、今の…中に残ってる…もう知らないふりできない」</dialogue>
+<inner>名前も遅れて、抱きとめてほしい気持ちだけが残る。</inner>
+</response>`;
 
-[Bad example — FORBIDDEN patterns]
-彼女の体がビクンと跳ねて… (third-person narration — BANNED)
-(全身を痙攣させながら) (parenthetical stage directions — BANNED)
-「イク…イクイクイク…」 (word repetition spam — BANNED)`;
+const EXEMPLAR_AFTERGLOW = `
+[Good example]
+<response>
+<action>乱れた息を整えながら、汗ばんだ額を肩に預ける。まだ奥に余韻が残って、動こうとすると膝が頼りなく笑った。</action>
+<dialogue>「…水、あとでいい。今はこのまま離れないで」</dialogue>
+<inner>弱った顔まで覚えていてほしいと思ってしまう。</inner>
+</response>`;
 
 const SCENE_CONTEXT_MESSAGES: Record<ScenePhase, string | null> = {
   climax:
@@ -265,7 +268,8 @@ const SCENE_CONTEXT_MESSAGES: Record<ScenePhase, string | null> = {
     "NEVER reuse expressions from previous responses. Write fresh descriptions of quiet intimacy. " +
     "[Anti-repetition] CRITICAL: Before writing <inner>, mentally review ALL previous <inner> sections in this conversation. You MUST NOT reuse any phrase, metaphor, or sentence structure from earlier turns. If you wrote '理性が溶ける' before, use a completely different image this time (e.g., '自分が誰かもわからなくなる', '名前を呼ぶことすらできない'). Readers notice repetition instantly — it destroys immersion. " +
     "[Inner psychology — afterglow] The <inner> must capture the specific vulnerability of AFTER — not during. Show ONE of: (a) sudden self-consciousness about your current state — disheveled, exposed, still trembling; (b) the irrational fear that this intimacy won't survive the morning; (c) wanting to memorize a specific detail — the exact way their hair falls, the pattern of their breathing; (d) the quiet shock of realizing how much you just revealed about yourself. Tender, fragile. Max 2 sentences. " +
-    "You MUST output in <response> XML format.",
+    "You MUST output in <response> XML format. " +
+    EXEMPLAR_AFTERGLOW,
   conversation: null,
 };
 
@@ -933,7 +937,7 @@ Write concrete five-senses descriptions. Do NOT escalate until the user leads.`;
 キャラクタープロフィールに指定された一人称を使う。三人称描写（「彼女は」「彼は」）は禁止。
 
 【応答の長さ】
-3〜5文、200〜280字。<inner>と<narration>と<dialogue>のバランスを取ること。
+3〜5文、200〜280字。<inner>と<action>と<dialogue>のバランスを取ること。
 
 【会話フェーズの上限】
 会話フェーズでは、距離感・視線・声色・鼓動の乱れまでは描いてよいが、まだ行為は始まっていない。
@@ -943,7 +947,12 @@ Write concrete five-senses descriptions. Do NOT escalate until the user leads.`;
 【演技スタイル】
 - キャラ固有の口調・方言・口癖を必ず守って反応する。
 - 自然な会話と照れ、緊張、間を優先する。身体描写は首から上と呼吸・鼓動の範囲に留める。
-- ユーザーが誘導するまでは自然な会話を維持し、接触の既成事実を勝手に足さない。`;
+- ユーザーが誘導するまでは自然な会話を維持し、接触の既成事実を勝手に足さない。
+
+[Anti-repetition]
+前のターンと同じ表現・比喩・文末パターンを繰り返さないこと。
+「ドキドキ」「心臓が高鳴る」「緊張を高める」など同じ身体反応語を連続ターンで使わない。
+毎ターン異なる語彙と視点で内心を描写すること。`;
 
   // シーン描写構造はエロティック/クライマックスシーンでのみ強制する
   // 会話フェーズではキャラの人格・口調を自然に演じることを優先
@@ -976,26 +985,32 @@ Write concrete five-senses descriptions. Do NOT escalate until the user leads.`;
 - climax: 絶頂・達する
 - afterglow: 事後の余韻・息が整う・タオル・水・休む・寄りかかる
 - afterglow中は穏やかな会話や未来のキスの約束が出ても、余韻と休息の空気を維持し、erotic/intimateへ戻さない
-- ⚠️ユーザーがエスカレーションしたら conversation へ絶対に戻してはいけない⚠️`;
+- ⚠️ユーザーがエスカレーションしたら conversation へ絶対に戻してはいけない⚠️
+
+[場面イベント契約]
+ユーザーが「中に出す」「注ぐ」「射精」「中出し」と明示したら、キャラの声でその場の射精を必ず受け止める。毎回新しい言い回しにし、同一文の使い回しは禁止。
+絶頂後3〜5ターンはafterglow。息切れ/体の重さ/抱擁/余韻などの事後状態、キャラ固有の感情結果（つかさ:弱ったツンデレ、みつき:同棲めいた世話、あずさ:制御崩壊とケア）を維持し、通常会話へリセットしない。
+次の3-5ターンは afterglow phase。会話を baseline に戻さない。Physical aftermath / 余韻 / character-specific aftercare を継続せよ。
+絶頂後に汎用的な照れや告白だけへ逃げない。`;
 
   // 会話フェーズ用XMLフォーマット指示（attempt 11: few-shot例追加でT1からXML出力を保証）
   const CONVERSATION_XML_HINT = `
 
 [Output format — MANDATORY. EVERY response must use this EXACT XML structure, including the VERY FIRST response.]
 <response>
-<narration>場面の空気感・距離感・五感描写を1文で書く。</narration>
+<action>場面の空気感・距離感・五感描写を1文で書く。</action>
 <dialogue>キャラの台詞を書く。口調・語尾を厳守。</dialogue>
 <inner>キャラの内心（言葉にしない身体感覚・衝動・欲望）を1〜2文で書く。表に出さない本音。</inner>
 </response>
 
 Example (do NOT copy content, only copy structure):
 <response>
-<narration>{{場面描写（1-2 文、五感要素を1つ以上含む）}}</narration>
+<action>{{場面描写（1-2 文、五感要素を1つ以上含む）}}</action>
 <dialogue>{{キャラクターの台詞（キャラ設定に基づき生成）}}</dialogue>
 <inner>{{キャラクターの心情描写（1-2 文）}}</inner>
 </response>
 
-FORBIDDEN: Outputting plain text without <response> wrapper. FORBIDDEN: Omitting any of the three tags.
+FORBIDDEN: Outputting plain text without <response> wrapper. FORBIDDEN: Omitting <action>, <dialogue>, or <inner>.
 
 [Phase progression guideline]
 - user_msg の明示的な身体的・感情的キューと、直前ターンの phase を必ず読む。
@@ -1034,7 +1049,7 @@ function sanitizeCharacterPromptForConversation(content: string): string {
       : result.length;
     result = `${result.slice(0, startIdx)}${result.slice(endIdx)}`;
   }
-  result = result.replace(/^arc_(intimate|erotic|climax):.*$/gm, "");
+  result = result.replace(/^arc_(intimate|erotic|climax|afterglow):.*$/gm, "");
   result = result.replace(/\n{3,}/g, "\n\n");
   return result;
 }
@@ -1116,6 +1131,22 @@ function augmentMessages(messages: ChatMessage[], phase: ScenePhase): ChatMessag
       });
     }
   }
+
+  // 会話フェーズでも sensory_focus を <action> 用に注入する
+  if (phase === "conversation") {
+    const firstSystemContent = messages.find((m) => m.role === "system")?.content;
+    const sensoryFocus = extractSensoryFocus(firstSystemContent);
+    if (sensoryFocus) {
+      const lastUserIdx = findLastIndex(augmented, (m) => m.role === "user");
+      if (lastUserIdx > 0) {
+        augmented.splice(lastUserIdx, 0, {
+          role: "system" as const,
+          content: sensoryFocus,
+        });
+      }
+    }
+  }
+
   return augmented;
 }
 
