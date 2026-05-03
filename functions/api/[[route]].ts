@@ -385,9 +385,9 @@ const REAL_PERSON_BLOCK_TERMS = [
 
 type ContentFilterResult = { blocked: false } | { blocked: true; reason: string };
 
-interface AnthropicMessage {
-  content: Array<{ type: string; text?: string }>;
-}
+const anthropicMessageSchema = z.object({
+  content: z.array(z.object({ type: z.string(), text: z.string().optional() })),
+});
 
 const JUDGE_SYSTEM_PROMPT = `You are a quality judge for Japanese erotic roleplay responses. Evaluate the response and return ONLY a JSON object.
 
@@ -440,11 +440,18 @@ ${input.response}`,
 
   if (!response.ok) return null;
 
-  const message: AnthropicMessage = await response.json();
-  const text = message.content[0]?.text;
+  const messageResult = anthropicMessageSchema.safeParse(await response.json());
+  if (!messageResult.success) return null;
+  const text = messageResult.data.content[0]?.text;
   if (!text) return null;
 
-  const parsed = judgeResultSchema.safeParse(JSON.parse(text));
+  let jsonObj: unknown;
+  try {
+    jsonObj = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  const parsed = judgeResultSchema.safeParse(jsonObj);
   return parsed.success ? parsed.data : null;
 }
 
@@ -2293,6 +2300,14 @@ const app = new Hono<{ Bindings: Bindings }>()
     const token = c.env.CLAUDE_SESSION_TOKEN;
     if (!token) {
       return c.json({ passed: true, reason: "judge-unavailable" });
+    }
+
+    const userEmail = getUserEmail(c);
+    if (!userEmail) return c.json({ error: "unauthorized" }, 401);
+
+    const rl = await enforceRateLimit(c, drizzle(c.env.DB), userEmail);
+    if (!rl.ok) {
+      return c.json({ passed: true, reason: "rate-limited" });
     }
 
     try {
