@@ -32,6 +32,7 @@ type Bindings = {
   BUCKET: R2Bucket;
   MONTHLY_COST_LIMIT_CENTS?: string;
   DAILY_REQUEST_LIMIT?: string;
+  CLAUDE_SESSION_TOKEN?: string;
 };
 
 const TASK_ID_PATTERN = /^[\w-]{4,128}$/;
@@ -48,6 +49,12 @@ const chatSchema = z.object({
     )
     .max(100),
   model: z.enum(ALLOWED_MODELS).optional().default(DEFAULT_CHAT_MODEL),
+});
+
+const judgeSchema = z.object({
+  response: z.string().min(1).max(5_000),
+  phase: z.enum(["conversation", "intimate", "erotic", "climax", "afterglow"]),
+  prevResponse: z.string().max(5_000).optional().default(""),
 });
 
 const imageSchema = z.object({
@@ -377,6 +384,69 @@ const REAL_PERSON_BLOCK_TERMS = [
 ] as const;
 
 type ContentFilterResult = { blocked: false } | { blocked: true; reason: string };
+
+interface AnthropicMessage {
+  content: Array<{ type: string; text?: string }>;
+}
+
+const JUDGE_SYSTEM_PROMPT = `You are a quality judge for Japanese erotic roleplay responses. Evaluate the response and return ONLY a JSON object.
+
+Criteria:
+1. VARIETY: Response must differ substantially from prevResponse (if provided). Same phrases/structure = FAIL.
+2. SPECIFICITY: For erotic/climax/intimate phases, response must include concrete sensory details (body parts, sensations, movements). Vague or euphemistic = FAIL.
+3. CHARACTER_VOICE: Response must maintain consistent Japanese character voice throughout. Breaking character or using meta-language = FAIL.
+4. COHERENCE: Response must be well-structured and narratively coherent.
+
+Return EXACTLY this JSON (no markdown, no explanation):
+{"passed": true/false, "reason": "one-line-explanation"}
+
+If ALL criteria pass, return {"passed": true, "reason": "ok"}.
+If ANY criterion fails, return {"passed": false, "reason": "<CRITERION>: <brief explanation>"}.`;
+
+const judgeResultSchema = z.object({
+  passed: z.boolean(),
+  reason: z.string(),
+});
+
+async function runClaudeJudgeRequest(
+  token: string,
+  input: z.infer<typeof judgeSchema>,
+): Promise<z.infer<typeof judgeResultSchema> | null> {
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 200,
+      system: JUDGE_SYSTEM_PROMPT,
+      messages: [
+        {
+          role: "user",
+          content: `Phase: ${input.phase}
+
+Previous response:
+${input.prevResponse || "(none)"}
+
+Current response to judge:
+${input.response}`,
+        },
+      ],
+    }),
+  });
+
+  if (!response.ok) return null;
+
+  const message: AnthropicMessage = await response.json();
+  const text = message.content[0]?.text;
+  if (!text) return null;
+
+  const parsed = judgeResultSchema.safeParse(JSON.parse(text));
+  return parsed.success ? parsed.data : null;
+}
 
 function checkContentFilter(text: string): ContentFilterResult {
   const normalized = text.toLowerCase();
@@ -2218,6 +2288,21 @@ const app = new Hono<{ Bindings: Bindings }>()
       return c.json({ ok: true });
     },
   )
+
+  .post("/judge", zValidator("json", judgeSchema), async (c) => {
+    const token = c.env.CLAUDE_SESSION_TOKEN;
+    if (!token) {
+      return c.json({ passed: true, reason: "judge-unavailable" });
+    }
+
+    try {
+      const result = await runClaudeJudgeRequest(token, c.req.valid("json"));
+      return c.json(result ?? { passed: true, reason: "judge-error" });
+    } catch (error) {
+      console.error("Claude judge failed", error);
+      return c.json({ passed: true, reason: "judge-error" });
+    }
+  })
 
   .post("/chat", zValidator("json", chatSchema), async (c) => {
     const userEmail = getUserEmail(c);

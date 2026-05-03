@@ -218,7 +218,7 @@ export async function streamChat(
 // 応答完了後に品質チェックを行い、不合格なら自動再生成する
 import { buildRetryMessages } from "@/lib/chat-message-adapter";
 import type { QualityCheckContext, QualityCheckResult } from "@/lib/quality-guard";
-import { getMaxQualityRetries, runQualityChecks } from "@/lib/quality-guard";
+import { getMaxQualityRetries, runClaudeJudge, runQualityChecks } from "@/lib/quality-guard";
 import type { ScenePhase } from "@/lib/scene-phase";
 import { isXmlResponse, stripXmlTags, wrapConversationPlainAsXml } from "@/lib/xml-response-parser";
 
@@ -371,6 +371,36 @@ type QualityAttemptResult =
   | { status: "soft-fail"; response: string; failedCheck: string; isRetry: boolean }
   | { status: "error"; message: string };
 
+async function getClaudeJudgeRetry(
+  response: string,
+  qualityContext: QualityCheckContext,
+  attempt: number,
+  maxRetries: number,
+): Promise<QualityAttemptResult | null> {
+  // Claude judge - only for scene phases, not conversation
+  if (qualityContext.phase === "conversation") return null;
+
+  const judgeResult = await runClaudeJudge(
+    response,
+    qualityContext.phase,
+    qualityContext.prevAssistantResponse,
+  );
+  if (judgeResult.passed) return null;
+
+  console.info(`[claude-judge] FAIL: ${judgeResult.failedCheck}`);
+  if (attempt >= maxRetries) {
+    // Last attempt: pass anyway (don't block user)
+    console.info("[claude-judge] last attempt, passing despite judge failure");
+    return null;
+  }
+
+  return {
+    status: "retry",
+    response,
+    failedCheck: judgeResult.failedCheck ?? "claude-judge",
+  };
+}
+
 async function executeQualityAttempt(
   messages: { role: "system" | "user" | "assistant"; content: string }[],
   model: string,
@@ -399,7 +429,13 @@ async function executeQualityAttempt(
     );
 
     if (checkResult.passed) {
-      return { status: "pass", response: fallbackApplied, isRetry: attempt > 0 };
+      return (
+        (await getClaudeJudgeRetry(fallbackApplied, qualityContext, attempt, maxRetries)) ?? {
+          status: "pass",
+          response: fallbackApplied,
+          isRetry: attempt > 0,
+        }
+      );
     }
     const failedCheck = checkResult.failedCheck ?? "unknown";
     if (attempt >= maxRetries) {
