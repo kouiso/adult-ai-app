@@ -10,6 +10,16 @@ export const MODEL_FALLBACKS: Readonly<Record<string, readonly string[]>> = {
   [DEFAULT_CHAT_MODEL]: DEFAULT_CHAT_MODEL_FALLBACKS,
   "qwen/qwen-2.5-72b-instruct": [DEFAULT_CHAT_MODEL, "deepseek/deepseek-chat"],
   "deepseek/deepseek-chat": [DEFAULT_CHAT_MODEL, "qwen/qwen-2.5-72b-instruct"],
+  "anthropic/claude-sonnet-4": [
+    DEFAULT_CHAT_MODEL,
+    "qwen/qwen-2.5-72b-instruct",
+    "deepseek/deepseek-chat",
+  ],
+  "anthropic/claude-opus-4": [
+    "anthropic/claude-sonnet-4",
+    DEFAULT_CHAT_MODEL,
+    "qwen/qwen-2.5-72b-instruct",
+  ],
 };
 
 export const DEFAULT_FALLBACK_MODELS = [
@@ -98,6 +108,19 @@ export const MODEL_CATALOG = [
     name: "Hermes 3 70B",
     tier: "プレミアム",
     desc: "アンセンサード・汎用",
+  },
+  // ── ハイエンド ──────────────────────────────────────────────────────────
+  {
+    id: "anthropic/claude-sonnet-4",
+    name: "Claude Sonnet 4",
+    tier: "ハイエンド",
+    desc: "Anthropic最新・高品質日本語・バランス型",
+  },
+  {
+    id: "anthropic/claude-opus-4",
+    name: "Claude Opus 4",
+    tier: "ハイエンド",
+    desc: "Anthropic最上位・最高品質・コスト高",
   },
 ] as const;
 
