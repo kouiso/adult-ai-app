@@ -138,6 +138,19 @@ const characterUpdateSchema = z.object({
   greeting: z.string().max(2_000).optional(),
   tags: z.array(z.string().max(50)).max(20).optional(),
 });
+type CharacterUpdatePayload = z.infer<typeof characterUpdateSchema>;
+
+function buildCharacterUpdates(
+  payload: CharacterUpdatePayload,
+): Partial<typeof characterTable.$inferInsert> {
+  const updates: Partial<typeof characterTable.$inferInsert> = {};
+  if (payload.name !== undefined) updates.name = payload.name;
+  if (payload.avatar !== undefined) updates.avatar = payload.avatar;
+  if (payload.systemPrompt !== undefined) updates.systemPrompt = payload.systemPrompt;
+  if (payload.greeting !== undefined) updates.greeting = payload.greeting;
+  if (payload.tags !== undefined) updates.tags = payload.tags;
+  return updates;
+}
 
 const conversationCreateSchema = z.object({
   title: z.string().min(1).max(200).optional(),
@@ -167,7 +180,7 @@ const conversationUpdateTitleSchema = z.object({
 });
 
 const conversationUpdateCharacterSchema = z.object({
-  characterId: z.string().min(1).max(128),
+  characterId: z.string().min(1).max(128).nullable(),
 });
 
 const generateTitleSchema = z.object({
@@ -1828,22 +1841,23 @@ const app = new Hono<{ Bindings: Bindings }>()
       }
 
       const { characterId } = c.req.valid("json");
+      const resolvedCharacterId = characterId ?? DEFAULT_CHARACTER_ID;
       const database = drizzle(c.env.DB);
       const userId = await ensureUser(database, userEmail);
 
       const charExists = await database
         .select({ id: characterTable.id })
         .from(characterTable)
-        .where(and(eq(characterTable.id, characterId), eq(characterTable.userId, userId)))
+        .where(and(eq(characterTable.id, resolvedCharacterId), eq(characterTable.userId, userId)))
         .limit(1);
 
-      if (charExists.length === 0 && characterId !== DEFAULT_CHARACTER_ID) {
+      if (charExists.length === 0 && resolvedCharacterId !== DEFAULT_CHARACTER_ID) {
         return c.json({ error: "character not found" }, 404);
       }
 
       await database
         .update(conversationTable)
-        .set({ characterId, updatedAt: Date.now() })
+        .set({ characterId: resolvedCharacterId, updatedAt: Date.now() })
         .where(and(eq(conversationTable.id, conversationId), eq(conversationTable.userId, userId)));
 
       return c.json({ ok: true });
@@ -2380,8 +2394,8 @@ const app = new Hono<{ Bindings: Bindings }>()
         extra: { response_image_type: "jpeg" },
         request: {
           model_name: "meinahentai_v4_70340.safetensors",
-          prompt: `masterpiece, best quality, anime style, ${phaseExpression ? `${phaseExpression}, ` : ""}${imagePrompt}`,
-          negative_prompt: `${fullNegativePrompt}, realistic, photorealistic, 3d, western, text, watermark, bad anatomy, bad hands, extra fingers, fewer fingers, missing fingers, worst quality, low quality, normal quality, cropped`,
+          prompt: `masterpiece, best quality, 1girl, solo, anime style, ${phaseExpression ? `${phaseExpression}, ` : ""}${imagePrompt}`,
+          negative_prompt: `${fullNegativePrompt}, multiple girls, multiple boys, 2girls, 2boys, male, man, boy, group, crowd, realistic, photorealistic, 3d, western, text, watermark, bad anatomy, bad hands, extra fingers, fewer fingers, missing fingers, worst quality, low quality, normal quality, cropped`,
           width: input.width,
           height: input.height,
           sampler_name: "DPM++ 2M Karras",
@@ -2579,11 +2593,7 @@ const app = new Hono<{ Bindings: Bindings }>()
       return c.json({ error: "character not found" }, 404);
     }
 
-    const updates: Partial<typeof characterTable.$inferInsert> = {};
-    if (payload.name !== undefined) updates.name = payload.name;
-    if (payload.systemPrompt !== undefined) updates.systemPrompt = payload.systemPrompt;
-    if (payload.greeting !== undefined) updates.greeting = payload.greeting;
-    if (payload.tags !== undefined) updates.tags = payload.tags;
+    const updates = buildCharacterUpdates(payload);
 
     if (Object.keys(updates).length > 0) {
       await database

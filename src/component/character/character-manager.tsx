@@ -18,6 +18,7 @@ import { useSettingsStore } from "@/store/settings-store";
 
 const FIELD_CLASS =
   "w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-primary";
+const DEFAULT_CHARACTER_ID = "default-character";
 
 interface AdvancedPromptSectionProps {
   value: string;
@@ -483,9 +484,9 @@ export const CharacterManager = ({
     setActiveCharacterId(id);
     onCharacterSelect?.(id);
     setSheetOpen(false);
-    if (currentConversationId && id) {
+    if (currentConversationId) {
       try {
-        await updateConversationCharacterEntry(currentConversationId, id);
+        await updateConversationCharacterEntry(currentConversationId, id ?? DEFAULT_CHARACTER_ID);
       } catch {
         toast.error("会話へのキャラクター反映に失敗しました");
       }

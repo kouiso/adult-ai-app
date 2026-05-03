@@ -23,9 +23,11 @@ import {
   ALL_FIRST_PERSONS,
   buildMessagesForApi,
   extractFirstPerson,
+  type ApiMessage,
 } from "@/lib/chat-message-adapter";
 import { DEFAULT_SYSTEM_PROMPT } from "@/lib/config";
 import { parseSystemPrompt } from "@/lib/prompt-builder";
+import type { QualityCheckContext } from "@/lib/quality-guard";
 import { queryKey } from "@/lib/query-key";
 import { detectScenePhase, type ScenePhase } from "@/lib/scene-phase";
 import { parseXmlResponse } from "@/lib/xml-response-parser";
@@ -46,6 +48,7 @@ const IMAGE_PROMPT_MAX_LENGTH = 900;
 // exponential backoff: 1s → 2s → 4s → 8s → cap 10s
 const POLL_MAX_DELAY_MS = 10_000;
 const AUTO_IMAGE_RECENT_TURN_LIMIT = 3;
+const AUTO_IMAGE_START_DELAY_MS = 700;
 const AUTO_IMAGE_PHASE_TRANSITIONS = new Set([
   "conversation:intimate",
   "intimate:erotic",
@@ -146,6 +149,62 @@ type ImageResultHandlerDeps = {
     imageKey?: string;
   }) => Promise<unknown>;
   updateMessageContentEntry: (id: string, content: string) => Promise<unknown>;
+};
+
+type ImageGenerationSetup = Pick<
+  ReturnType<typeof useChatStore.getState>,
+  "addMessage" | "updateMessage" | "updateMessageImage"
+> & {
+  msgs: ChatMessage[];
+};
+
+const getImageGenerationSetup = (isOnline: boolean): ImageGenerationSetup | null => {
+  if (!isOnline) {
+    toast.error("オフライン中は画像生成できません");
+    return null;
+  }
+
+  const { messages: msgs, addMessage, updateMessage, updateMessageImage } = useChatStore.getState();
+  const hasAssistantMessage = msgs.some((m) => m.role === "assistant" && m.content);
+  if (!hasAssistantMessage) return null;
+
+  return {
+    msgs,
+    addMessage,
+    updateMessage,
+    updateMessageImage,
+  };
+};
+
+const getCharacterImageDescription = (characterSystemPrompt?: string): string => {
+  if (!characterSystemPrompt) return "";
+  return parseSystemPrompt(characterSystemPrompt).personality;
+};
+
+const mergeStreamChunk = (accumulated: string, chunk: string): string =>
+  chunk.length > accumulated.length + 100 ? chunk : accumulated + chunk;
+
+const buildQualityContext = (
+  sourceMessages: ChatMessage[],
+  apiMessages: ApiMessage[],
+  systemPrompt: string,
+): QualityCheckContext => {
+  const assistantMessages = sourceMessages.filter(
+    (message) => message.role === "assistant" && !message.isStreaming,
+  );
+  const firstPerson = extractFirstPerson(systemPrompt);
+  return {
+    phase: detectScenePhase(apiMessages),
+    prevAssistantResponse: assistantMessages.at(-1)?.content,
+    firstPerson: firstPerson ?? undefined,
+    wrongFirstPersons: firstPerson
+      ? ALL_FIRST_PERSONS.filter((candidate) => candidate !== firstPerson)
+      : undefined,
+    prevInnerTexts: assistantMessages
+      .slice(-5)
+      .map((message) => parseXmlResponse(message.content)?.inner ?? "")
+      .filter((inner) => inner.length >= 5),
+  };
 };
 
 /** ポーリング結果に応じてメッセージを更新する。処理完了なら true を返す */
@@ -817,24 +876,25 @@ export const ChatView = ({
       // 対象メッセージより前のメッセージだけを使ってAPIを呼ぶ
       const prevMsgs = currentMsgs.slice(0, msgIndex);
       const apiMessages = buildApiMessages(prevMsgs, currentSystemPrompt, currentCharacterName);
+      const qualityContext = buildQualityContext(prevMsgs, apiMessages, currentSystemPrompt);
 
       updateMessage(messageId, "", true);
       setLoading(true);
 
       let accumulated = "";
-      await streamChat(
+      await streamChatWithQualityGuard(
         apiMessages,
         currentModel,
         (chunk) => {
-          accumulated += chunk;
+          accumulated = mergeStreamChunk(accumulated, chunk);
           startTransition(() => {
             updateMessage(messageId, accumulated, true);
           });
         },
-        () => {
-          updateMessage(messageId, accumulated, false);
+        ({ content: finalText, warningLevel }) => {
+          updateMessage(messageId, finalText, false, warningLevel);
           setLoading(false);
-          void updateMessageContentEntry(messageId, accumulated).catch((error) =>
+          void updateMessageContentEntry(messageId, finalText).catch((error) =>
             console.error("failed to update message content", error),
           );
         },
@@ -843,6 +903,7 @@ export const ChatView = ({
           setLoading(false);
           toast.error(`再生成に失敗しました: ${error}`);
         },
+        qualityContext,
       );
     },
     [
@@ -906,25 +967,26 @@ export const ChatView = ({
 
       const latestMsgs = useChatStore.getState().messages;
       const apiMessages = buildApiMessages(latestMsgs, currentSystemPrompt, currentCharacterName);
+      const qualityContext = buildQualityContext(latestMsgs, apiMessages, currentSystemPrompt);
 
       let accumulated = "";
-      await streamChat(
+      await streamChatWithQualityGuard(
         apiMessages,
         currentModel,
         (chunk) => {
-          accumulated += chunk;
+          accumulated = mergeStreamChunk(accumulated, chunk);
           startTransition(() => {
             updateMessage(assistantId, accumulated, true);
           });
         },
-        () => {
-          updateMessage(assistantId, accumulated, false);
+        ({ content: finalText, warningLevel }) => {
+          updateMessage(assistantId, finalText, false, warningLevel);
           setLoading(false);
           void createMessageEntry({
             conversationId,
             id: assistantId,
             role: "assistant",
-            content: accumulated,
+            content: finalText,
           }).catch((error) => console.error("failed to persist regenerated message", error));
         },
         (error) => {
@@ -932,6 +994,7 @@ export const ChatView = ({
           setLoading(false);
           toast.error(`編集後の送信に失敗しました: ${error}`);
         },
+        qualityContext,
       );
     },
     [
@@ -1026,81 +1089,72 @@ export const ChatView = ({
     ],
   );
 
-  const handleGenerateImage = useCallback(async (options?: { lockInput?: boolean }) => {
-    if (!isOnline) {
-      toast.error("オフライン中は画像生成できません");
-      return;
-    }
+  const handleGenerateImage = useCallback(
+    async (options?: { lockInput?: boolean }) => {
+      const setup = getImageGenerationSetup(isOnline);
+      if (!setup) return;
 
-    const {
-      messages: msgs,
-      addMessage,
-      updateMessage,
-      updateMessageImage,
-    } = useChatStore.getState();
-    const hasAssistantMessage = msgs.some((m) => m.role === "assistant" && m.content);
-    if (!hasAssistantMessage) return;
+      const { msgs, addMessage, updateMessage, updateMessageImage } = setup;
+      const sceneDescription = buildImagePromptFromHistory(msgs);
+      const phase = detectScenePhase(msgs);
+      const prompt = sceneDescription.slice(0, IMAGE_PROMPT_MAX_LENGTH);
+      const imageMessageId = crypto.randomUUID();
+      const conversationId = useChatStore.getState().currentConversationId;
+      const lockInput = options?.lockInput ?? true;
 
-    const sceneDescription = buildImagePromptFromHistory(msgs);
-    const phase = detectScenePhase(msgs);
-    const prompt = sceneDescription.slice(0, IMAGE_PROMPT_MAX_LENGTH);
-    const imageMessageId = crypto.randomUUID();
-    const conversationId = useChatStore.getState().currentConversationId;
-    const lockInput = options?.lockInput ?? true;
+      if (!conversationId) return;
 
-    if (!conversationId) return;
+      // キャラの見た目情報を抽出して画像プロンプトに渡す
+      const charDesc = getCharacterImageDescription(currentConversation?.characterSystemPrompt);
 
-    // キャラの見た目情報を抽出して画像プロンプトに渡す
-    const charDesc = currentConversation?.characterSystemPrompt
-      ? parseSystemPrompt(currentConversation.characterSystemPrompt).personality
-      : "";
+      if (lockInput) setLoading(true);
+      addMessage({
+        id: imageMessageId,
+        role: "assistant",
+        content: "🖼️ 画像を生成中...",
+        isStreaming: true,
+      });
+      // D1にメッセージを先に永続化する（後続のPATCH /messages/:id/imageがレコード不在で空振りするのを防ぐ）
+      await createMessageEntry({
+        conversationId,
+        id: imageMessageId,
+        role: "assistant",
+        content: "🖼️ 画像を生成中...",
+      }).catch((error) => console.error("failed to persist image message", error));
 
-    if (lockInput) setLoading(true);
-    addMessage({
-      id: imageMessageId,
-      role: "assistant",
-      content: "🖼️ 画像を生成中...",
-      isStreaming: true,
-    });
-    // D1にメッセージを先に永続化する（後続のPATCH /messages/:id/imageがレコード不在で空振りするのを防ぐ）
-    await createMessageEntry({
-      conversationId,
-      id: imageMessageId,
-      role: "assistant",
-      content: "🖼️ 画像を生成中...",
-    }).catch((error) => console.error("failed to persist image message", error));
+      try {
+        const result = await generateImage(prompt, charDesc, phase);
+        if ("error" in result) {
+          updateMessage(imageMessageId, `❌ 画像生成エラー: ${result.error}`, false);
+          return;
+        }
 
-    try {
-      const result = await generateImage(prompt, charDesc, phase);
-      if ("error" in result) {
-        updateMessage(imageMessageId, `❌ 画像生成エラー: ${result.error}`, false);
-        return;
+        const imageResult = await pollGeneratedImage(result.task_id, (attempt, maxAttempts) => {
+          updateMessage(imageMessageId, `🖼️ 画像を生成中... (${attempt}/${maxAttempts})`, true);
+        });
+
+        processImageResult(imageResult, {
+          imageMessageId,
+          updateMessage,
+          updateMessageImage,
+          persistMessageImageEntry,
+          updateMessageContentEntry,
+        });
+      } catch (err) {
+        updateMessage(imageMessageId, `❌ ネットワークエラー: ${String(err)}`, false);
+      } finally {
+        if (lockInput) setLoading(false);
       }
-
-      const imageResult = await pollGeneratedImage(result.task_id, (attempt, maxAttempts) => {
-        updateMessage(imageMessageId, `🖼️ 画像を生成中... (${attempt}/${maxAttempts})`, true);
-      });
-
-      processImageResult(imageResult, {
-        imageMessageId,
-        updateMessage,
-        updateMessageImage,
-        persistMessageImageEntry,
-        updateMessageContentEntry,
-      });
-    } catch (err) {
-      updateMessage(imageMessageId, `❌ ネットワークエラー: ${String(err)}`, false);
-    } finally {
-      if (lockInput) setLoading(false);
-    }
-  }, [
-    createMessageEntry,
-    persistMessageImageEntry,
-    updateMessageContentEntry,
-    isOnline,
-    setLoading,
-    currentConversation?.characterSystemPrompt,
-  ]);
+    },
+    [
+      createMessageEntry,
+      persistMessageImageEntry,
+      updateMessageContentEntry,
+      isOnline,
+      setLoading,
+      currentConversation?.characterSystemPrompt,
+    ],
+  );
 
   useEffect(() => {
     const pendingIds = pendingAutoImageAssistantIdsRef.current;
@@ -1122,7 +1176,11 @@ export const ChatView = ({
     if (!isAutoImagePhaseTransition(previousPhase, currentPhase)) return;
     if (hasImageInRecentTurns(messages, AUTO_IMAGE_RECENT_TURN_LIMIT)) return;
 
-    void handleGenerateImage({ lockInput: false });
+    const timeoutId = window.setTimeout(() => {
+      void handleGenerateImage({ lockInput: false });
+    }, AUTO_IMAGE_START_DELAY_MS);
+
+    return () => window.clearTimeout(timeoutId);
   }, [handleGenerateImage, messages]);
 
   const stableOnSelectConversation = useCallback(

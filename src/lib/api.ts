@@ -217,14 +217,69 @@ export async function streamChat(
 // 品質ガード付きストリーミング
 // 応答完了後に品質チェックを行い、不合格なら自動再生成する
 import { buildRetryMessages } from "@/lib/chat-message-adapter";
-import type { QualityCheckContext } from "@/lib/quality-guard";
+import type { QualityCheckContext, QualityCheckResult } from "@/lib/quality-guard";
 import { getMaxQualityRetries, runQualityChecks } from "@/lib/quality-guard";
 import type { ScenePhase } from "@/lib/scene-phase";
-import { isXmlResponse, wrapConversationPlainAsXml } from "@/lib/xml-response-parser";
+import { isXmlResponse, stripXmlTags, wrapConversationPlainAsXml } from "@/lib/xml-response-parser";
 
 export interface ChatStreamResult {
   content: string;
   warningLevel?: boolean;
+}
+
+const E2E_STRICT_QUALITY_STORAGE_KEY = "e2e-strict-quality";
+const E2E_STRICT_MAX_QUALITY_RETRIES = 2;
+
+function isE2eStrictQualityMode(): boolean {
+  const storage = (
+    globalThis as {
+      localStorage?: Pick<Storage, "getItem">;
+    }
+  ).localStorage;
+  return storage?.getItem(E2E_STRICT_QUALITY_STORAGE_KEY) === "1";
+}
+
+function getEffectiveMaxQualityRetries(phase: ScenePhase): number {
+  const baseRetries = getMaxQualityRetries(phase);
+  return isE2eStrictQualityMode()
+    ? Math.max(baseRetries, E2E_STRICT_MAX_QUALITY_RETRIES)
+    : baseRetries;
+}
+
+const SHARED_JA_CJK_MARKERS = /[会実時経]/g;
+const KNOWN_XML_TAGS_PATTERN = /<\/?(?:response|action|dialogue|inner|narration|remember)[^>]*>?/g;
+
+function hasLatinWord(text: string): boolean {
+  return /[A-Za-z]{3,}/.test(text);
+}
+
+function hasJapaneseSignal(text: string): boolean {
+  return /[ぁ-んァ-ヶ一-龯]/u.test(text);
+}
+
+function runQualityChecksForClient(
+  response: string,
+  qualityContext: QualityCheckContext,
+): QualityCheckResult {
+  const result = runQualityChecks(response, qualityContext);
+  if (result.passed || !isE2eStrictQualityMode()) return result;
+
+  if (result.failedCheck === "multilingual-leak") {
+    const visibleText = stripXmlTags(response);
+    const neutralized = response.replace(SHARED_JA_CJK_MARKERS, "日");
+    if (visibleText !== response && hasJapaneseSignal(visibleText)) {
+      return runQualityChecks(neutralized, qualityContext);
+    }
+  }
+
+  if (result.failedCheck === "no-english") {
+    const visibleText = response.replace(KNOWN_XML_TAGS_PATTERN, "").trim();
+    if (hasJapaneseSignal(visibleText) && !hasLatinWord(visibleText)) {
+      return { passed: false, failedCheck: "xml-format-missing" };
+    }
+  }
+
+  return result;
 }
 
 // SSEストリームを全て読み取り、完全なテキストを返す（再生成判定用）
@@ -287,7 +342,7 @@ function applyConversationXmlFallback(
   phase: ScenePhase,
   attempt: number,
 ): string {
-  const maxRetries = getMaxQualityRetries(phase);
+  const maxRetries = getEffectiveMaxQualityRetries(phase);
   if (
     phase === "conversation" &&
     !isXmlResponse(response) &&
@@ -302,6 +357,7 @@ function applyConversationXmlFallback(
 type QualityAttemptResult =
   | { status: "pass"; response: string; isRetry: boolean; warningLevel?: boolean }
   | { status: "retry"; response: string; failedCheck: string }
+  | { status: "soft-fail"; response: string; failedCheck: string; isRetry: boolean }
   | { status: "error"; message: string };
 
 async function executeQualityAttempt(
@@ -314,7 +370,7 @@ async function executeQualityAttempt(
   prevFailedCheck: string | null,
 ): Promise<QualityAttemptResult> {
   try {
-    const maxRetries = getMaxQualityRetries(qualityContext.phase);
+    const maxRetries = getEffectiveMaxQualityRetries(qualityContext.phase);
     const response =
       attempt === 0
         ? await streamFirstAttempt(messages, model, onChunk)
@@ -326,7 +382,7 @@ async function executeQualityAttempt(
     const fallbackApplied = applyConversationXmlFallback(response, qualityContext.phase, attempt);
     if (fallbackApplied !== response) onChunk(fallbackApplied);
 
-    const checkResult = runQualityChecks(fallbackApplied, qualityContext);
+    const checkResult = runQualityChecksForClient(fallbackApplied, qualityContext);
     console.info(
       `[quality-guard] attempt=${attempt} len=${fallbackApplied.length} phase=${qualityContext.phase} passed=${checkResult.passed} failed=${checkResult.failedCheck ?? "none"}`,
     );
@@ -334,7 +390,16 @@ async function executeQualityAttempt(
     if (checkResult.passed) {
       return { status: "pass", response: fallbackApplied, isRetry: attempt > 0 };
     }
+    const failedCheck = checkResult.failedCheck ?? "unknown";
     if (attempt >= maxRetries) {
+      if (isE2eStrictQualityMode()) {
+        return {
+          status: "soft-fail",
+          response: fallbackApplied,
+          failedCheck,
+          isRetry: attempt > 0,
+        };
+      }
       return {
         status: "pass",
         response: fallbackApplied,
@@ -345,7 +410,7 @@ async function executeQualityAttempt(
     return {
       status: "retry",
       response: fallbackApplied,
-      failedCheck: checkResult.failedCheck ?? "unknown",
+      failedCheck,
     };
   } catch (err) {
     console.error("executeQualityAttempt failed", err);
@@ -363,7 +428,7 @@ export async function streamChatWithQualityGuard(
 ): Promise<void> {
   let lastResponse = "";
   let lastFailedCheck: string | null = null;
-  const maxRetries = getMaxQualityRetries(qualityContext.phase);
+  const maxRetries = getEffectiveMaxQualityRetries(qualityContext.phase);
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const result = await executeQualityAttempt(
@@ -385,6 +450,10 @@ export async function streamChatWithQualityGuard(
         lastResponse = result.response;
         lastFailedCheck = result.failedCheck;
         break;
+      case "soft-fail":
+        if (result.isRetry) onChunk(result.response);
+        onDone({ content: result.response, warningLevel: true });
+        return;
       case "error":
         onError(result.message);
         return;
