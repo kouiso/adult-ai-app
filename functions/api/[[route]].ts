@@ -2298,6 +2298,11 @@ const app = new Hono<{ Bindings: Bindings }>()
   )
 
   .post("/judge", zValidator("json", judgeSchema), async (c) => {
+    const input = c.req.valid("json");
+    if (input.phase === "conversation") {
+      return c.json({ passed: true, reason: "conversation-skipped" });
+    }
+
     const token = c.env.CLAUDE_SESSION_TOKEN;
     if (!token) {
       return c.json({ passed: true, reason: "judge-unavailable" });
@@ -2310,9 +2315,11 @@ const app = new Hono<{ Bindings: Bindings }>()
     if (!rl.ok) {
       return c.json({ passed: true, reason: "rate-limited" });
     }
+    const { database, userId } = rl.ctx;
 
     try {
-      const result = await runClaudeJudgeRequest(token, c.req.valid("json"));
+      const result = await runClaudeJudgeRequest(token, input);
+      c.executionCtx.waitUntil(logUsage(database, userId, "judge", "claude-haiku-4-5"));
       return c.json(result ?? { passed: true, reason: "judge-error" });
     } catch (error) {
       console.error("Claude judge failed", error);
