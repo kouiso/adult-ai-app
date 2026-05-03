@@ -9,32 +9,40 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-// ── 型定義 ────────────────────────────────────────────────────────────────
+import { z } from "zod/v4";
 
-type ScenarioTurn = {
-  user: string;
-  generateImage: boolean;
-};
+// ── 型定義 + スキーマ ──────────────────────────────────────────────────────
 
-type ScenarioFile = {
-  name: string;
-  character: {
-    systemPrompt: string;
-    name: string;
-  };
-  turns: ScenarioTurn[];
-  model: string;
-};
+const FETCH_TIMEOUT_MS = 60_000;
+
+const scenarioSchema = z.object({
+  name: z.string(),
+  character: z.object({
+    systemPrompt: z.string(),
+    name: z.string(),
+  }),
+  turns: z.array(
+    z.object({
+      user: z.string(),
+      generateImage: z.boolean(),
+    }),
+  ),
+  model: z.string(),
+});
+
+type ScenarioFile = z.infer<typeof scenarioSchema>;
 
 type ChatMessage = {
   role: "system" | "user" | "assistant";
   content: string;
 };
 
-type JudgeResult = {
-  pass: boolean;
-  reason?: string;
-};
+const judgeResultSchema = z.object({
+  pass: z.boolean(),
+  reason: z.string().optional(),
+});
+
+type JudgeResult = z.infer<typeof judgeResultSchema>;
 
 type ImageTaskStatus =
   | "TASK_STATUS_QUEUED"
@@ -103,6 +111,7 @@ async function streamChatApi(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ messages, model }),
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
 
   if (!response.ok || !response.body) {
@@ -142,13 +151,19 @@ async function callJudge(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ response, previousResponse, phase }),
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
 
   if (!res.ok) {
     return { pass: false, reason: `judge API error: ${res.status}` };
   }
 
-  return (await res.json()) as JudgeResult;
+  const json: unknown = await res.json();
+  const parsed = judgeResultSchema.safeParse(json);
+  if (!parsed.success) {
+    return { pass: false, reason: `invalid judge response` };
+  }
+  return parsed.data;
 }
 
 // ── Image API ────────────────────────────────────────────────────────
@@ -170,6 +185,7 @@ async function requestImageGeneration(
       height: 1024,
       phase,
     }),
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
 
   if (!res.ok) return { error: `image API error: ${res.status}` };
@@ -183,13 +199,17 @@ async function pollImageTask(
 ): Promise<{ url?: string; error?: string }> {
   const start = Date.now();
   while (Date.now() - start < maxWaitMs) {
-    const res = await fetch(`${baseUrl}/api/image/task/${encodeURIComponent(taskId)}`);
+    const res = await fetch(`${baseUrl}/api/image/task/${encodeURIComponent(taskId)}`, {
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
     if (!res.ok) return { error: `task poll failed: ${res.status}` };
 
     const data = (await res.json()) as {
-      task: { status: ImageTaskStatus };
+      task?: { status: ImageTaskStatus };
       images?: Array<{ image_url: string }>;
     };
+
+    if (!data.task) return { error: "invalid task response" };
 
     if (data.task.status === "TASK_STATUS_SUCCEED") {
       return { url: data.images?.[0]?.image_url };
@@ -204,7 +224,7 @@ async function pollImageTask(
 }
 
 async function downloadImage(url: string, outputPath: string): Promise<void> {
-  const res = await fetch(url);
+  const res = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
   if (!res.ok) throw new Error(`image download failed: ${res.status}`);
   const buffer = Buffer.from(await res.arrayBuffer());
   writeFileSync(outputPath, buffer);
@@ -432,7 +452,13 @@ async function run() {
     process.exit(1);
   }
 
-  const scenario: ScenarioFile = JSON.parse(readFileSync(scenarioPath, "utf-8"));
+  const raw: unknown = JSON.parse(readFileSync(scenarioPath, "utf-8"));
+  const parseResult = scenarioSchema.safeParse(raw);
+  if (!parseResult.success) {
+    console.error(`Invalid scenario file: ${parseResult.error.message}`);
+    process.exit(1);
+  }
+  const scenario = parseResult.data;
   const devVars = loadDevVars();
   const baseUrl =
     process.env.QUALITY_TEST_BASE_URL ?? devVars.QUALITY_TEST_BASE_URL ?? "http://localhost:8788";
