@@ -949,10 +949,13 @@ Write concrete five-senses descriptions. Do NOT escalate until the user leads.`;
 - 自然な会話と照れ、緊張、間を優先する。身体描写は首から上と呼吸・鼓動の範囲に留める。
 - ユーザーが誘導するまでは自然な会話を維持し、接触の既成事実を勝手に足さない。
 
-[Anti-repetition]
-前のターンと同じ表現・比喩・文末パターンを繰り返さないこと。
-「ドキドキ」「心臓が高鳴る」「緊張を高める」など同じ身体反応語を連続ターンで使わない。
-毎ターン異なる語彙と視点で内心を描写すること。`;
+[Anti-repetition — CRITICAL]
+直前のあなたの応答と同じ表現・比喩・文構造を使うことは禁止。
+具体的な禁止例:
+- 同じ身体反応語の連続使用（「ドキドキ」→次も「ドキドキ」）
+- 同じ文型の繰り返し（「〜に、自分の〜も〜していくのを感じた」を毎ターン使う）
+- 同じ sensory 描写の繰り返し（「キーボードの音」を3ターン連続で使う）
+直前の応答で使った表現が system message で提示される場合、それらは全て回避対象。`;
 
   // シーン描写構造はエロティック/クライマックスシーンでのみ強制する
   // 会話フェーズではキャラの人格・口調を自然に演じることを優先
@@ -1092,7 +1095,7 @@ function extractSensoryFocus(systemContent: string | undefined): string {
   if (!systemContent) return "";
   const match = systemContent.match(/^sensory_focus:\s*(.+)$/m);
   if (!match) return "";
-  return `\n[Sensory mandate] You MUST include at least ONE of these sensory details in <action> this turn: ${match[1].trim()}. Do NOT default to only visual/tactile. Pick a DIFFERENT sense from your previous turn. Examples: the sound of breathing catching, the smell of sweat mixing with perfume, the taste of skin, the wet sound of contact.`;
+  return `\n[Sensory mandate] ROTATE through these sensory details across turns: ${match[1].trim()}. Each turn, use a DIFFERENT item from this list than you used in your previous response. If you used the same item two turns in a row, you are FAILING this rule. Do NOT default to visual/tactile only. Weave the chosen sense naturally into <action>, not as a mechanical insertion.`;
 }
 
 function buildSceneContext(messages: ChatMessage[], phase: ScenePhase): string | null {
@@ -1105,6 +1108,27 @@ function buildSceneContext(messages: ChatMessage[], phase: ScenePhase): string |
   if (sceneContext) return `${sceneContext}${emotionalArc}${characterVoice}${sensoryFocus}`;
   const combined = `${emotionalArc}${characterVoice}`.trim();
   return combined || null;
+}
+
+function injectCrossTurnAntiRepetition(augmented: ChatMessage[]): void {
+  // 直前応答を注入し、同じ表現の再利用を避けさせる
+  let lastAssistantMsg: ChatMessage | undefined;
+  for (let i = augmented.length - 1; i >= 0; i--) {
+    if (augmented[i].role === "assistant") {
+      lastAssistantMsg = augmented[i];
+      break;
+    }
+  }
+  if (!lastAssistantMsg?.content) return;
+
+  const prevContent = lastAssistantMsg.content.slice(0, 300);
+  const lastUserIdx = findLastIndex(augmented, (m) => m.role === "user");
+  if (lastUserIdx <= 0) return;
+
+  augmented.splice(lastUserIdx, 0, {
+    role: "system" as const,
+    content: `[Cross-turn anti-repetition] Your previous response was:\n${prevContent}\n\nYou MUST NOT reuse ANY phrase, metaphor, or sentence structure from the above. Write completely fresh descriptions, using different vocabulary, different sentence patterns, and different sensory details. If your previous <action> mentioned キーボードの音, do NOT mention it again — pick a different sense. If your previous <inner> said 胸が高鳴る, use a completely different image.`,
+  });
 }
 
 function augmentMessages(messages: ChatMessage[], phase: ScenePhase): ChatMessage[] {
@@ -1120,6 +1144,8 @@ function augmentMessages(messages: ChatMessage[], phase: ScenePhase): ChatMessag
       : sanitizeCharacterPromptForConversation(m.content);
     return { ...m, content: `${prefix}\n\n${charContent}` };
   });
+
+  injectCrossTurnAntiRepetition(augmented);
 
   const sceneContextWithArc = buildSceneContext(messages, phase);
   if (sceneContextWithArc) {
