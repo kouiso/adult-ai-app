@@ -177,7 +177,7 @@ function checkWithinTurnRepetition(response: string): boolean {
 }
 
 const CROSS_TURN_MIN_PHRASE_LENGTH = 8;
-const CROSS_TURN_REPETITION_THRESHOLD = 2;
+const CROSS_TURN_REPETITION_THRESHOLD = 1;
 
 function extractActionContent(response: string): string {
   return response.match(/<action>([\s\S]*?)<\/action>/)?.[1] || "";
@@ -185,6 +185,10 @@ function extractActionContent(response: string): string {
 
 function extractInnerContent(response: string): string {
   return response.match(/<inner>([\s\S]*?)<\/inner>/)?.[1] || "";
+}
+
+function extractDialogueContent(response: string): string {
+  return response.match(/<dialogue>([\s\S]*?)<\/dialogue>/)?.[1] || "";
 }
 
 function splitComparablePhrases(text: string): string[] {
@@ -207,11 +211,15 @@ function checkCrossTurnRepetition(
 ): boolean {
   if (!previousAssistantContent || previousAssistantContent.length < 20) return true;
 
-  // 前ターンと現ターンの<action>/<inner>だけを比較し、本文XML構造には手を入れない
+  // 前ターンと現ターンの<action>/<dialogue>/<inner>だけを比較し、本文XML構造には手を入れない
   const repeatedCount =
     countRepeatedPhrases(
       extractActionContent(previousAssistantContent),
       extractActionContent(currentResponse),
+    ) +
+    countRepeatedPhrases(
+      extractDialogueContent(previousAssistantContent),
+      extractDialogueContent(currentResponse),
     ) +
     countRepeatedPhrases(
       extractInnerContent(previousAssistantContent),
