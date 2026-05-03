@@ -97,17 +97,37 @@ const generateCharacterResultSchema = z.object({
   tags: z.array(z.string()),
 });
 
-const generateCharacterSchema = z.object({
-  selections: z.object({
+// キャラクター生成はJSON追従性を優先し、動作確認済みのInstructモデルに固定する
+const DEFAULT_CHARACTER_GENERATION_MODEL = "qwen/qwen-2.5-72b-instruct" as const;
+
+const generateCharacterSelectionsSchema = z.preprocess(
+  (value) => {
+    // 検証用curlなどの旧形式では selections が配列で送られるため、サーバー側で吸収する
+    if (Array.isArray(value)) {
+      return {
+        types: value,
+        relations: [],
+        personalities: [],
+        bodyTypes: [],
+        freeText: "",
+      };
+    }
+    return value;
+  },
+  z.object({
     types: z.array(z.string().max(50)).max(20),
     relations: z.array(z.string().max(50)).max(20),
     personalities: z.array(z.string().max(50)).max(20),
     bodyTypes: z.array(z.string().max(50)).max(20),
     freeText: z.string().max(500).default(""),
   }),
+);
+
+const generateCharacterSchema = z.object({
+  selections: generateCharacterSelectionsSchema,
   situation: z.string().max(500).default(""),
   details: z.string().max(1000).default(""),
-  model: z.enum(ALLOWED_MODELS).optional().default(DEFAULT_CHAT_MODEL),
+  model: z.enum(ALLOWED_MODELS).optional().default(DEFAULT_CHARACTER_GENERATION_MODEL),
   previousResult: generateCharacterResultSchema.optional(),
   feedback: z.string().max(500).optional(),
 });
@@ -2700,7 +2720,7 @@ const app = new Hono<{ Bindings: Bindings }>()
     }
     const { database: genCharDb, userId: genCharUserId } = genRl.ctx;
 
-    const { selections, situation, details, model, previousResult, feedback } = c.req.valid("json");
+    const { selections, situation, details, previousResult, feedback } = c.req.valid("json");
     const userPrompt = buildGenerateCharacterPrompt(
       selections,
       situation,
@@ -2739,7 +2759,7 @@ const app = new Hono<{ Bindings: Bindings }>()
         "X-Title": "Adult Fiction Roleplay",
       },
       body: JSON.stringify({
-        model,
+        model: DEFAULT_CHARACTER_GENERATION_MODEL,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
@@ -2748,9 +2768,9 @@ const app = new Hono<{ Bindings: Bindings }>()
         temperature: 0.9,
         top_p: 0.95,
         max_tokens: 1500,
+        response_format: { type: "json_object" },
         provider: {
-          order: ["Featherless", "DeepInfra", "Together", "Fireworks"],
-          allow_fallbacks: false,
+          allow_fallbacks: true,
         },
       }),
     });
@@ -2768,7 +2788,9 @@ const app = new Hono<{ Bindings: Bindings }>()
       return c.json({ error: "failed to parse character JSON from model response" }, 502);
     }
 
-    c.executionCtx.waitUntil(logUsage(genCharDb, genCharUserId, "generate-character", model));
+    c.executionCtx.waitUntil(
+      logUsage(genCharDb, genCharUserId, "generate-character", DEFAULT_CHARACTER_GENERATION_MODEL),
+    );
     return c.json(characterResult);
   })
 
