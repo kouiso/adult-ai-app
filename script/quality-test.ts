@@ -5,7 +5,8 @@
  * Usage: npx tsx script/quality-test.ts <scenario.json>
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 // ── 型定義 ────────────────────────────────────────────────────────────────
@@ -211,13 +212,17 @@ async function downloadImage(url: string, outputPath: string): Promise<void> {
 
 // ── フェーズ推定 ─────────────────────────────────────────────────────
 
-function estimatePhase(turnIndex: number, totalTurns: number): string {
-  const ratio = turnIndex / totalTurns;
-  if (ratio < 0.3) return "conversation";
-  if (ratio < 0.5) return "intimate";
-  if (ratio < 0.8) return "erotic";
-  if (ratio < 0.95) return "climax";
+function estimatePhase(zeroBasedIndex: number, totalTurns: number): string {
+  const ratio = (zeroBasedIndex + 1) / totalTurns;
+  if (ratio <= 0.3) return "conversation";
+  if (ratio <= 0.5) return "intimate";
+  if (ratio <= 0.8) return "erotic";
+  if (ratio <= 0.95) return "climax";
   return "afterglow";
+}
+
+function stripXmlTags(text: string): string {
+  return text.replace(/<\/?[^>]+>/g, "").trim();
 }
 
 // ── ターン処理 ──────────────────────────────────────────────────────────
@@ -261,9 +266,10 @@ async function handleImageGeneration(
   turnIndex: number,
 ): Promise<TurnResult["image"]> {
   console.info(`  Generating image...`);
+  const cleanedResponse = stripXmlTags(assistantResponse);
   const imgResult = await requestImageGeneration(
     baseUrl,
-    assistantResponse.slice(0, 500),
+    cleanedResponse.slice(0, 500),
     characterName,
     phase,
   );
@@ -364,7 +370,7 @@ async function runTurns(
     const turn = scenario.turns[i];
     if (!turn) continue;
     const turnIndex = i + 1;
-    const phase = estimatePhase(turnIndex, scenario.turns.length);
+    const phase = estimatePhase(i, scenario.turns.length);
     const startTime = Date.now();
 
     console.info(
@@ -378,6 +384,7 @@ async function runTurns(
       assistantResponse = await streamChatApi(baseUrl, messages, scenario.model);
     } catch (err) {
       console.error(`  ERROR: ${err}`);
+      messages.pop();
       results.push({
         turnIndex,
         userMessage: turn.user,
@@ -435,8 +442,9 @@ async function run() {
   console.info(`Turns: ${scenario.turns.length}`);
   console.info(`Target: ${baseUrl}\n`);
 
-  const outputDir = "/tmp/quality-test-images";
-  const reportPath = "/tmp/quality-test-report.md";
+  const outputDir = path.join(tmpdir(), "quality-test-images");
+  const reportPath = path.join(tmpdir(), "quality-test-report.md");
+  rmSync(outputDir, { recursive: true, force: true });
   mkdirSync(outputDir, { recursive: true });
 
   const { results, counters } = await runTurns(scenario, baseUrl, outputDir);
