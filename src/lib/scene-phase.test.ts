@@ -13,6 +13,36 @@ describe("detectScenePhase", () => {
     expect(detectScenePhase(messages)).toBe("erotic");
   });
 
+  it("脱衣要求はintimate以上へ進める", () => {
+    const messages = [{ role: "user", content: "服脱がせたい。全部見せて" }];
+    expect(detectScenePhase(messages)).toBe("intimate");
+  });
+
+  it("挿入許可と我慢できない表現はeroticを返す", () => {
+    const messages = [{ role: "user", content: "入れていい？もう我慢できへん" }];
+    expect(detectScenePhase(messages)).toBe("erotic");
+  });
+
+  it("我慢できない表現だけでもeroticを返す", () => {
+    const messages = [{ role: "user", content: "もう我慢できへん" }];
+    expect(detectScenePhase(messages)).toBe("erotic");
+  });
+
+  it("気持ちいいだけでもeroticを返す", () => {
+    const messages = [{ role: "user", content: "気持ちいい？" }];
+    expect(detectScenePhase(messages)).toBe("erotic");
+  });
+
+  it("中に出すはclimaxを返す", () => {
+    const messages = [{ role: "user", content: "中に出す" }];
+    expect(detectScenePhase(messages)).toBe("climax");
+  });
+
+  it("イキそうはclimaxを返す", () => {
+    const messages = [{ role: "user", content: "イキそう" }];
+    expect(detectScenePhase(messages)).toBe("climax");
+  });
+
   it("intimateキーワードを含むとintimateを返す", () => {
     const messages = [{ role: "user", content: "キスして" }];
     expect(detectScenePhase(messages)).toBe("intimate");
@@ -41,6 +71,29 @@ describe("detectScenePhase", () => {
       { role: "user", content: "ありがとう" },
     ];
     expect(detectScenePhase(messages)).toBe("conversation");
+  });
+
+  it("品質ガードの再生成指示はスキャン対象外", () => {
+    const messages = [
+      { role: "system", content: "profile" },
+      { role: "user", content: "入れていい？もう我慢できへん" },
+      { role: "assistant", content: "短すぎる応答" },
+      {
+        role: "user",
+        content:
+          "品質チェックに不合格でした。別の展開で最初から書き直してください。<response>XMLフォーマットで出力すること。",
+      },
+    ];
+    expect(detectScenePhase(messages)).toBe("erotic");
+  });
+
+  it("品質ガードの再生成指示でもclimaxを維持する", () => {
+    const messages = [
+      { role: "user", content: "中に出す" },
+      { role: "assistant", content: "短すぎる応答" },
+      { role: "user", content: "品質チェックに不合格でした。別の展開で書き直してください。" },
+    ];
+    expect(detectScenePhase(messages)).toBe("climax");
   });
 
   it("直近3件のuserメッセージのみをスキャンする", () => {
