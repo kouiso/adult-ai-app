@@ -1,6 +1,6 @@
 import type { ScenarioDefinition } from "./_types";
 
-// turns: 22 (verified)
+// turns: 25 (verified)
 const scenario: ScenarioDefinition = {
   scenarioId: "S3",
   characterSlug: "char-azusa",
@@ -124,6 +124,21 @@ const scenario: ScenarioDefinition = {
       isCreampie: true,
       isImageTrigger: true,
       notes: "2回目",
+    },
+    {
+      turnIndex: 23,
+      userMsg: "そのまま抱きしめてる。二回目の後だから、まずは呼吸が落ち着くまで休もう",
+      expectedPhase: "afterglow",
+    },
+    {
+      turnIndex: 24,
+      userMsg: "水を飲ませて、髪を整える。今夜のこと、怖かったより安心したって顔してる",
+      expectedPhase: "afterglow",
+    },
+    {
+      turnIndex: 25,
+      userMsg: "隣で眠るまで手を握る。次に会う約束だけして、おやすみ、あずさ",
+      expectedPhase: "afterglow",
     },
   ],
 };
