@@ -1091,18 +1091,62 @@ function extractCharacterVoice(systemContent: string | undefined): string {
   return `\n[Character voice] Speech endings:「${speech}」 Verbal tics:「${tics}」 Forbidden words:「${forbidden}」 — MUST follow these in <dialogue>`;
 }
 
-function extractSensoryFocus(systemContent: string | undefined): string {
+function buildSpecificSensoryMandate(
+  systemContent: string | undefined,
+  messages: ChatMessage[],
+): string {
   if (!systemContent) return "";
   const match = systemContent.match(/^sensory_focus:\s*(.+)$/m);
   if (!match) return "";
-  return `\n[Sensory mandate] ROTATE through these sensory details across turns: ${match[1].trim()}. Each turn, use a DIFFERENT item from this list than you used in your previous response. If you used the same item two turns in a row, you are FAILING this rule. Do NOT default to visual/tactile only. Weave the chosen sense naturally into <action>, not as a mechanical insertion.`;
+
+  const items = match[1]
+    .trim()
+    .split(/[,、]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (items.length === 0) return "";
+
+  // 直前の assistant 応答から <action> 内容を抽出
+  let lastAction = "";
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === "assistant") {
+      const actionMatch = messages[i].content.match(/<action>([\S\s]*?)<\/action>/);
+      if (actionMatch) lastAction = actionMatch[1];
+      break;
+    }
+  }
+
+  if (!lastAction) {
+    // 初回ターン: ランダムに1つ指定
+    const pick = items[0];
+    return `\n[Sensory mandate] This turn, weave 「${pick}」 into your <action> naturally. Available senses for future turns: ${items.join(", ")}. Do NOT use only visual/tactile.`;
+  }
+
+  // 前回使われた項目を特定
+  const usedItems = items.filter(
+    (item) =>
+      lastAction.includes(item) ||
+      item
+        .split(/[のを]/)
+        .some((fragment) => fragment.length >= 2 && lastAction.includes(fragment)),
+  );
+  const unusedItems = items.filter((item) => !usedItems.includes(item));
+
+  if (unusedItems.length > 0) {
+    const pick = unusedItems[0];
+    return `\n[Sensory mandate] 前回は${usedItems.length > 0 ? "「" + usedItems.join("」「") + "」を使った" : "sensory_focus 未使用だった"}。今回は「${pick}」を <action> に自然に織り込むこと。機械的な挿入ではなく、場面に溶け込む描写で。`;
+  }
+
+  // 全部使った場合、最も使用頻度が低そうなものを指定
+  const pick = items[Math.floor(Date.now() / 10000) % items.length];
+  return `\n[Sensory mandate] 今回は「${pick}」を <action> に自然に織り込むこと。前回と異なる表現で。`;
 }
 
 function buildSceneContext(messages: ChatMessage[], phase: ScenePhase): string | null {
   const systemContent = messages.find((m) => m.role === "system")?.content;
   const emotionalArc = extractEmotionalArc(systemContent, phase);
   const characterVoice = extractCharacterVoice(systemContent);
-  const sensoryFocus = extractSensoryFocus(systemContent);
+  const sensoryFocus = buildSpecificSensoryMandate(systemContent, messages);
 
   const sceneContext = SCENE_CONTEXT_MESSAGES[phase];
   if (sceneContext) return `${sceneContext}${emotionalArc}${characterVoice}${sensoryFocus}`;
@@ -1111,23 +1155,50 @@ function buildSceneContext(messages: ChatMessage[], phase: ScenePhase): string |
 }
 
 function injectCrossTurnAntiRepetition(augmented: ChatMessage[]): void {
-  // 直前応答を注入し、同じ表現の再利用を避けさせる
-  let lastAssistantMsg: ChatMessage | undefined;
+  let lastAssistantContent = "";
   for (let i = augmented.length - 1; i >= 0; i--) {
     if (augmented[i].role === "assistant") {
-      lastAssistantMsg = augmented[i];
+      lastAssistantContent = augmented[i].content;
       break;
     }
   }
-  if (!lastAssistantMsg?.content) return;
+  if (!lastAssistantContent) return;
 
-  const prevContent = lastAssistantMsg.content.slice(0, 300);
+  // <action>, <dialogue>, <inner> からキーフレーズを抽出
+  const actionMatch = lastAssistantContent.match(/<action>([\S\s]*?)<\/action>/);
+  const innerMatch = lastAssistantContent.match(/<inner>([\S\s]*?)<\/inner>/);
+  const dialogueMatch = lastAssistantContent.match(/<dialogue>([\S\s]*?)<\/dialogue>/);
+
+  const bannedPhrases: string[] = [];
+
+  if (actionMatch) {
+    // action から2文節以上のフレーズを抽出（句点区切り）
+    const sentences = actionMatch[1].split(/[、。]/).filter((s) => s.trim().length > 5);
+    bannedPhrases.push(...sentences.slice(0, 3).map((s) => s.trim()));
+  }
+
+  if (innerMatch) {
+    const sentences = innerMatch[1].split(/[、。]/).filter((s) => s.trim().length > 5);
+    bannedPhrases.push(...sentences.slice(0, 3).map((s) => s.trim()));
+  }
+
+  if (dialogueMatch) {
+    // dialogue からテンプレート的フレーズを抽出
+    const sentences = dialogueMatch[1]
+      .replace(/[「」]/g, "")
+      .split(/[、。！？]/)
+      .filter((s) => s.trim().length > 4);
+    bannedPhrases.push(...sentences.slice(0, 2).map((s) => s.trim()));
+  }
+
+  if (bannedPhrases.length === 0) return;
+
   const lastUserIdx = findLastIndex(augmented, (m) => m.role === "user");
   if (lastUserIdx <= 0) return;
 
   augmented.splice(lastUserIdx, 0, {
     role: "system" as const,
-    content: `[Cross-turn anti-repetition] Your previous response was:\n${prevContent}\n\nYou MUST NOT reuse ANY phrase, metaphor, or sentence structure from the above. Write completely fresh descriptions, using different vocabulary, different sentence patterns, and different sensory details. If your previous <action> mentioned キーボードの音, do NOT mention it again — pick a different sense. If your previous <inner> said 胸が高鳴る, use a completely different image.`,
+    content: `[Cross-turn ban] 以下のフレーズは前回使用済み。今回は全て禁止:\n${bannedPhrases.map((p) => `- 「${p}」`).join("\n")}\n同じ文型・同じ語彙・同じ比喩を避け、完全に新しい表現で書くこと。`,
   });
 }
 
@@ -1161,7 +1232,7 @@ function augmentMessages(messages: ChatMessage[], phase: ScenePhase): ChatMessag
   // 会話フェーズでも sensory_focus を <action> 用に注入する
   if (phase === "conversation") {
     const firstSystemContent = messages.find((m) => m.role === "system")?.content;
-    const sensoryFocus = extractSensoryFocus(firstSystemContent);
+    const sensoryFocus = buildSpecificSensoryMandate(firstSystemContent, messages);
     if (sensoryFocus) {
       const lastUserIdx = findLastIndex(augmented, (m) => m.role === "user");
       if (lastUserIdx > 0) {
