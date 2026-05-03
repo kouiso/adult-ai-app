@@ -127,43 +127,6 @@ export const ALL_FIRST_PERSONS = [
   "オレ",
 ] as const;
 
-const FAILURE_HINTS: ReadonlyMap<string, string> = new Map([
-  [
-    "no-english",
-    "\n英単語・アルファベットは本文に一切含めないこと。日本語だけで自然に書き直すこと。",
-  ],
-  [
-    "within-turn-repetition",
-    "\n前回と同じ台詞・比喩・文末を繰り返さず、別の展開と語彙で書き直すこと。",
-  ],
-  [
-    "cross-turn-repetition",
-    "\n前回と同じ文・比喩・身体反応語を繰り返している。完全に異なる表現・語彙・文構造で書き直すこと。",
-  ],
-  [
-    "xml-format-missing",
-    "\n<response><action>...</action><dialogue>...</dialogue><inner>...</inner></response> を厳守すること。",
-  ],
-  ["meta_remark", "\n説明口調や注釈をやめ、キャラクター本人として会話だけを返すこと。"],
-  ["user-leak", "\n「ユーザー」という単語を使わず、相手を先輩として自然に呼ぶこと。"],
-  ["wrong-first-person", "\n一人称の逸脱を絶対に繰り返さないこと。"],
-  [
-    "conversation-over-escalation",
-    "\n会話フェーズです。キス・抱擁・脱衣・性的接触を既成事実として書かず、視線・間・鼓動の乱れだけで書き直すこと。",
-  ],
-]);
-
-const CLAUDE_JUDGE_HINT =
-  "\n「待って」「ダメ」「やめて」等の受動的な拒否反応は禁止。キャラクターは積極的に快楽を求め、具体的な身体描写（触れる部位、感触、体液、動き）を含めること。曖昧な比喩やフェードアウトは禁止。";
-
-function getFailureHint(failedCheck: string | null | undefined): string {
-  if (!failedCheck) return "";
-  return (
-    FAILURE_HINTS.get(failedCheck) ??
-    (failedCheck.startsWith("claude-judge:") ? CLAUDE_JUDGE_HINT : "")
-  );
-}
-
 /**
  * 品質ガードリトライ用のメッセージ配列を構築する。
  * banList（前ターンフレーズ禁止）は廃止済み — 語彙空間縮小の根本原因だったため。
@@ -186,7 +149,30 @@ export function buildRetryMessages(
   const fpHint = qualityContext.firstPerson
     ? `\n一人称は「${qualityContext.firstPerson}」を使うこと。${banned.map((b) => `「${b}」`).join("")}は禁止。`
     : "";
-  const failureHint = getFailureHint(failedCheck);
+  const failureHint = (() => {
+    switch (failedCheck) {
+      case "no-english":
+        return "\n英単語・アルファベットは本文に一切含めないこと。日本語だけで自然に書き直すこと。";
+      case "within-turn-repetition":
+        return "\n前回と同じ台詞・比喩・文末を繰り返さず、別の展開と語彙で書き直すこと。";
+      case "cross-turn-repetition":
+        return "\n前回と同じ文・比喩・身体反応語を繰り返している。完全に異なる表現・語彙・文構造で書き直すこと。";
+      case "claude-judge-fail":
+        return "\n「待って」「ダメ」「やめて」等の受動的な拒否反応は禁止。キャラクターは積極的に快楽を求め、具体的な身体描写（触れる部位、感触、体液、動き）を含めること。曖昧な比喩やフェードアウトは禁止。";
+      case "xml-format-missing":
+        return "\n<response><action>...</action><dialogue>...</dialogue><inner>...</inner></response> を厳守すること。";
+      case "meta_remark":
+        return "\n説明口調や注釈をやめ、キャラクター本人として会話だけを返すこと。";
+      case "user-leak":
+        return "\n「ユーザー」という単語を使わず、相手を先輩として自然に呼ぶこと。";
+      case "wrong-first-person":
+        return "\n一人称の逸脱を絶対に繰り返さないこと。";
+      case "conversation-over-escalation":
+        return "\n会話フェーズです。キス・抱擁・脱衣・性的接触を既成事実として書かず、視線・間・鼓動の乱れだけで書き直すこと。";
+      default:
+        return "";
+    }
+  })();
 
   return [
     ...originalMessages,

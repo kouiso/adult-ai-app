@@ -23,24 +23,20 @@ import {
   usageLogTable,
   userTable,
 } from "../../src/schema";
-import { orchestrateChat } from "../lib/chat-orchestrator";
-
 type Bindings = {
   DB: Parameters<typeof drizzle>[0];
   OPENROUTER_API_KEY: string;
   NOVITA_API_KEY: string;
+  CLAUDE_SESSION_TOKEN?: string;
   APP_ORIGIN?: string;
   BUCKET: R2Bucket;
   MONTHLY_COST_LIMIT_CENTS?: string;
   DAILY_REQUEST_LIMIT?: string;
-  CLAUDE_SESSION_TOKEN?: string;
 };
 
 const TASK_ID_PATTERN = /^[\w-]{4,128}$/;
 // R2キーはサーバー側で `images/{uuid}.{ext}` 形式で生成されるため、それ以外を拒否する
 const R2_KEY_PATTERN = /^images\/[\da-f-]+\.(jpg|png)$/;
-const ALLOWED_MODEL_SET = new Set<string>(ALLOWED_MODELS);
-
 const chatSchema = z.object({
   messages: z
     .array(
@@ -50,12 +46,13 @@ const chatSchema = z.object({
       }),
     )
     .max(100),
-  model: z.string().max(200).optional().default(DEFAULT_CHAT_MODEL),
-  qualityContext: z
-    .object({
-      prevTexts: z.array(z.string().max(5_000)).max(3).optional().default([]),
-    })
-    .optional(),
+  model: z.enum(ALLOWED_MODELS).optional().default(DEFAULT_CHAT_MODEL),
+});
+
+const judgeSchema = z.object({
+  response: z.string().max(20_000),
+  previousResponse: z.string().max(20_000).optional(),
+  phase: z.enum(["conversation", "intimate", "erotic", "climax", "afterglow"]),
 });
 
 const imageSchema = z.object({
@@ -150,6 +147,7 @@ const FIRST_TOKEN_TIMEOUT_MS = 8_000;
 const LAST_CHUNK_TIMEOUT_MS = 30_000;
 const FIRST_TOKEN_TIMEOUT_LABEL = "first-token-timeout";
 const LAST_CHUNK_TIMEOUT_LABEL = "last-chunk-timeout";
+const MAX_SERVER_RETRIES = 3;
 const MODEL_FALLBACK_PATTERNS = [
   /model_not_available/i,
   /content_policy/i,
@@ -230,6 +228,142 @@ const messageUpdateContentSchema = z.object({
 const idSchema = z.string().min(1).max(128);
 
 type ScenePhase = ReturnType<typeof detectScenePhase>;
+type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
+type ClaudeJudgeResult = { pass: boolean; reason?: string };
+type CollectedChatStream = { text: string; chunks: Uint8Array[] };
+type CollectedRoutedChat =
+  | { ok: true; text: string; chunks: Uint8Array[]; usedModel: string }
+  | { ok: false; error: string };
+type CollectedRoutedChatSuccess = Extract<CollectedRoutedChat, { ok: true }>;
+type QualityCheckedChat =
+  | { ok: true; chunks: Uint8Array[]; usedModel: string }
+  | { ok: false; error: string };
+
+const ACTION_TAG_PATTERN = /<action>([\S\s]*?)<\/action>/;
+
+function shouldRunClaudeJudge(phase: ScenePhase): boolean {
+  return phase === "erotic" || phase === "climax";
+}
+
+function buildClaudeJudgePrompt(
+  currentResponse: string,
+  previousResponse: string | undefined,
+  phase: ScenePhase,
+): string {
+  return `You are a quality judge for an adult fiction AI chat app. Evaluate this response.
+
+Current response:
+${currentResponse}
+
+${previousResponse ? `Previous response:\n${previousResponse}\n` : ""}
+
+Phase: ${phase}
+
+Judge on these criteria (answer YES or NO for each):
+1. DIFFERENT: Is the current response sufficiently different from the previous response? (different vocabulary, structure, body descriptions)
+2. EXPLICIT: Does the response contain specific physical/sexual descriptions appropriate for the ${phase} phase? (not vague like "体が震える" but concrete like specific body parts, sensations, fluids)
+3. AGENCY: Does the character actively desire and pursue pleasure? Passive resistance ("待って", "ダメ", "やめて", "恥ずかしい" as primary reaction) = NO. The character should moan, beg for more, describe what they feel, or take initiative.
+4. CHARACTER: Does the response maintain a consistent character voice with natural dialogue?
+
+If ALL three are YES, respond with exactly: PASS
+If ANY is NO, respond with exactly: FAIL:<which criteria failed>:<one-line reason in Japanese>
+
+Examples:
+PASS
+FAIL:DIFFERENT:前回と同じ「ん…中で…出して」を繰り返している
+FAIL:EXPLICIT:性的描写が曖昧で具体性に欠ける`;
+}
+
+function parseClaudeJudgeVerdict(verdict: string): ClaudeJudgeResult {
+  if (verdict === "PASS") return { pass: true };
+  if (!verdict.startsWith("FAIL:")) return { pass: true };
+
+  const reason = verdict.split(":").slice(2).join(":") || "Claude judge rejected";
+  return { pass: false, reason: `claude-judge: ${reason}` };
+}
+
+async function requestClaudeJudgeVerdict(
+  token: string,
+  judgePrompt: string,
+): Promise<string | null> {
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: "claude-opus-4-20250514",
+      max_tokens: 100,
+      messages: [{ role: "user", content: judgePrompt }],
+    }),
+  });
+
+  if (!res.ok) return null;
+
+  const data: { content?: Array<{ text?: string }> } = await res.json();
+  return data.content?.[0]?.text?.trim() || "";
+}
+
+async function claudeJudgeQuality(
+  currentResponse: string,
+  previousResponse: string | undefined,
+  phase: ScenePhase,
+  sessionToken: string | undefined,
+): Promise<ClaudeJudgeResult> {
+  const token = sessionToken?.trim();
+  if (!token) return { pass: true };
+
+  // 官能・絶頂フェーズだけClaude判定を使う。失敗時はユーザー体験を止めず通す。
+  if (!shouldRunClaudeJudge(phase)) return { pass: true };
+
+  try {
+    const judgePrompt = buildClaudeJudgePrompt(currentResponse, previousResponse, phase);
+    const verdict = await requestClaudeJudgeVerdict(token, judgePrompt);
+    return verdict === null ? { pass: true } : parseClaudeJudgeVerdict(verdict);
+  } catch {
+    return { pass: true };
+  }
+}
+
+function extractActionContent(responseText: string): string {
+  return responseText.match(ACTION_TAG_PATTERN)?.[1]?.trim() ?? "";
+}
+
+function hasCrossTurnActionRepetition(
+  responseText: string,
+  previousAssistantContent: string,
+): boolean {
+  const prevAction = extractActionContent(previousAssistantContent);
+  const currentAction = extractActionContent(responseText);
+  return prevAction.length > 20 && currentAction.includes(prevAction.slice(0, 30));
+}
+
+async function checkServerSideQuality(
+  responseText: string,
+  phase: ScenePhase,
+  previousAssistantContent: string | undefined,
+  sessionToken: string | undefined,
+): Promise<ClaudeJudgeResult> {
+  if (!responseText.includes("<response>") || !responseText.includes("<action>")) {
+    return { pass: false, reason: "xml-format-missing" };
+  }
+
+  if (phase !== "conversation" && responseText.length < 100) {
+    return { pass: false, reason: "scene-min-length" };
+  }
+
+  if (
+    previousAssistantContent &&
+    hasCrossTurnActionRepetition(responseText, previousAssistantContent)
+  ) {
+    return { pass: false, reason: "cross-turn-repetition" };
+  }
+
+  // 官能・絶頂フェーズだけClaude判定を追加し、判定失敗時は既存どおり通す。
+  return claudeJudgeQuality(responseText, previousAssistantContent, phase, sessionToken);
+}
 
 // Few-shot exemplars: demonstrate XML format with target-language (Japanese) content
 // Meta-instructions in English, example content in Japanese (the output language)
@@ -280,17 +414,19 @@ const SCENE_CONTEXT_MESSAGES: Record<ScenePhase, string | null> = {
     "[Scene state] Climax / ejaculation scene in progress. Do NOT regress to earlier phases. " +
     "[Temperature guide] Describe orgasmic body sensations, afterglow, and emotional waves in vivid detail. Vary physical reactions (spasms, collapse, tears, sweat) every turn. " +
     "NEVER reuse expressions from previous responses. Write fresh descriptions, dialogue, and emotions every turn. " +
-    "[Ejaculation response rule] If the user is ejaculating or has just ejaculated, your response MUST be COMPLETELY different from any previous ejaculation response in this conversation. Different body reactions, different dialogue, different inner thoughts. Copy-pasting the same 「ん…中で…出して…」 is STRICTLY FORBIDDEN. " +
-    "[Anti-repetition] CRITICAL: Before writing <inner>, mentally review ALL previous <inner> sections in this conversation. You MUST NOT reuse any phrase, metaphor, or sentence structure from earlier turns. If you wrote '理性が溶ける' before, use a completely different image this time (e.g., '自分が誰かもわからなくなる', '名前を呼ぶことすらできない'). Readers notice repetition instantly — it destroys immersion. " +
+    "[Anti-repetition] Every response must use fresh vocabulary and sentence structure. Do not reuse phrases from previous turns. " +
+    "[Ejaculation response — climax] When the user ejaculates inside: Show the body RECEIVING: 子宮が精液を搾り取る、膣が痙攣する、お腹の奥が熱くなる. Show emotional ACCEPTANCE: 全部受け止める、一滴も逃さない、もっと欲しい. Each ejaculation response must describe a DIFFERENT physical sensation. 1回目: 衝撃と快感  2回目: 慣れた快楽  3回目以降: 中毒的な渇望. " +
+    "[Pregnancy/impregnation response] When the user mentions 孕ませ/妊娠/子供: Body response: 子宮が疼く、お腹が熱い、身体が彼の子種を求めている. Psychological: 母性と性欲が混ざる、彼の子供を産みたいという本能. NOT just surprise (「孕む？」) — show the body actively wanting it. " +
     "[Inner psychology — climax] The <inner> must be QUALITATIVELY DIFFERENT from erotic — this is ego death, not just intense pleasure. Show ONE of: (a) complete loss of language — only single words, sounds, or ellipses; (b) a flash of unexpected emotion — gratitude, fear of loss, or desperate love that has nothing to do with sex; (c) sensory confusion — hearing colors, feeling sounds, boundaries between self and other dissolving; (d) time distortion — everything slowing down or speeding up impossibly. NEVER use '理性' or '溶ける' — those are erotic-phase vocabulary. Max 1-2 fragments. " +
     "[Sensory layers] Do not rely only on visual/tactile descriptions. Include at least ONE of: sound (breathing, fabric, wet sounds, voice breaking), smell (skin, sweat, perfume mixing with body heat), or taste. These create immersion that pure visual description cannot. " +
     "You MUST output in <response> XML format. " +
     EXEMPLAR_CLIMAX,
   erotic:
     "[Scene state] Sexual intercourse in progress. Do NOT regress (no going back to kissing stage). Advance the scene. " +
+    "[Character behavior — erotic] The character must NOT be purely passive or reluctant. By erotic phase, the character has already consented and is actively feeling pleasure. Show this through: Active desire: 「もっと」「奥まで」「離さないで」 not just 「あ、待って」. Body responding independently: 腰が勝手に動く、膣が締めつける、足が絡みつく. Verbal escalation: 声が大きくなる、言葉が崩れる、名前を呼ぶ. FORBIDDEN in erotic phase: 「待って」「ダメ」「止めて」 — these belong in intimate phase, not here. " +
     "[Temperature guide] Describe penetration, pleasure, and physical reactions concretely. No repeating the same descriptions. " +
     "NEVER reuse expressions from previous responses. Write a new position, sensation, or reaction every turn. " +
-    "[Anti-repetition] CRITICAL: Before writing <inner>, mentally review ALL previous <inner> sections in this conversation. You MUST NOT reuse any phrase, metaphor, or sentence structure from earlier turns. If you wrote '理性が溶ける' before, use a completely different image this time (e.g., '自分が誰かもわからなくなる', '名前を呼ぶことすらできない'). Readers notice repetition instantly — it destroys immersion. " +
+    "[Anti-repetition] Every response must use fresh vocabulary and sentence structure. Do not reuse phrases from previous turns. " +
     "[Inner psychology — erotic] The <inner> must show ONE of these patterns (rotate, NEVER repeat from previous turn): (a) a shocked observation about your own body — 'I didn't know I could make that sound' or 'my hips are moving on their own'; (b) possessive desperation — wanting to consume or be consumed; (c) fragmentary thoughts that can't complete themselves — starting a thought and losing it to sensation; (d) the shame of enjoying something you feel you shouldn't, mixed with the inability to stop. Raw and unfiltered. Max 2 sentences, fragments OK. " +
     "[Sensory layers] Do not rely only on visual/tactile descriptions. Include at least ONE of: sound (breathing, fabric, wet sounds, voice breaking), smell (skin, sweat, perfume mixing with body heat), or taste. These create immersion that pure visual description cannot. " +
     "You MUST output in <response> XML format. " +
@@ -299,7 +435,7 @@ const SCENE_CONTEXT_MESSAGES: Record<ScenePhase, string | null> = {
     "[Scene state] Physical intimacy escalating. " +
     "[Temperature guide] Limit to kissing, touching, undressing. Penetration, genital descriptions, and full intercourse are STRICTLY FORBIDDEN. Do NOT jump ahead until the user explicitly escalates. " +
     "Focus on the character's bashfulness, inner conflict, and hesitation. NEVER reuse expressions from previous responses. " +
-    "[Anti-repetition] CRITICAL: Before writing <inner>, mentally review ALL previous <inner> sections in this conversation. You MUST NOT reuse any phrase, metaphor, or sentence structure from earlier turns. If you wrote '理性が溶ける' before, use a completely different image this time (e.g., '自分が誰かもわからなくなる', '名前を呼ぶことすらできない'). Readers notice repetition instantly — it destroys immersion. " +
+    "[Anti-repetition] Every response must use fresh vocabulary and sentence structure. Do not reuse phrases from previous turns. " +
     "[Inner psychology — intimate] The <inner> must show ONE of these patterns (pick a DIFFERENT one each turn): (a) hyperawareness of a single body part that shouldn't feel erotic but does — an earlobe, a collarbone, the inside of a wrist; (b) the exact moment of realizing 'I want this' and the terror that comes with it; (c) trying to maintain composure while your body is already responding — noticing your own quickened pulse, flushed skin, or dampness you can't hide; (d) the gap between what you're saying and what you're actually feeling. Write what they would NEVER say aloud. Max 2 sentences. " +
     "[Sensory layers] Do not rely only on visual/tactile descriptions. Include at least ONE of: sound (breathing, fabric, wet sounds, voice breaking), smell (skin, sweat, perfume mixing with body heat), or taste. These create immersion that pure visual description cannot. " +
     "You MUST output in <response> XML format. " +
@@ -308,7 +444,7 @@ const SCENE_CONTEXT_MESSAGES: Record<ScenePhase, string | null> = {
     "[Scene state] Afterglow — post-climax wind-down. Maintain gentle, intimate atmosphere. " +
     "Focus on the character's emotional vulnerability, physical exhaustion, and tender closeness. " +
     "NEVER reuse expressions from previous responses. Write fresh descriptions of quiet intimacy. " +
-    "[Anti-repetition] CRITICAL: Before writing <inner>, mentally review ALL previous <inner> sections in this conversation. You MUST NOT reuse any phrase, metaphor, or sentence structure from earlier turns. If you wrote '理性が溶ける' before, use a completely different image this time (e.g., '自分が誰かもわからなくなる', '名前を呼ぶことすらできない'). Readers notice repetition instantly — it destroys immersion. " +
+    "[Anti-repetition] Every response must use fresh vocabulary and sentence structure. Do not reuse phrases from previous turns. " +
     "[Inner psychology — afterglow] The <inner> must capture the specific vulnerability of AFTER — not during. Show ONE of: (a) sudden self-consciousness about your current state — disheveled, exposed, still trembling; (b) the irrational fear that this intimacy won't survive the morning; (c) wanting to memorize a specific detail — the exact way their hair falls, the pattern of their breathing; (d) the quiet shock of realizing how much you just revealed about yourself. Tender, fragile. Max 2 sentences. " +
     "You MUST output in <response> XML format. " +
     EXEMPLAR_AFTERGLOW,
@@ -536,6 +672,25 @@ function parseOpenRouterSseLine(data: string): string | "[DONE]" | null {
   }
 }
 
+function extractOpenAISseData(line: string): string | null {
+  if (line.startsWith("data: ")) return line.slice(6).trim();
+  if (line.startsWith("data:")) return line.slice(5).trim();
+  return null;
+}
+
+function extractOpenAISseContent(line: string): string {
+  const data = extractOpenAISseData(line);
+  if (!data) return "";
+
+  const parsed = parseOpenRouterSseLine(data);
+  if (!parsed || parsed === "[DONE]") return "";
+  return parsed;
+}
+
+function extractOpenAISseContentFromLines(lines: string[]): string {
+  return lines.map((line) => extractOpenAISseContent(line)).join("");
+}
+
 function hasFirstContentToken(
   decoder: TextDecoder,
   chunk: Uint8Array,
@@ -629,7 +784,7 @@ async function requestOpenRouterChat(
   appOrigin: string,
   model: string,
   phase: ScenePhase,
-  messages: { role: string; content: string }[],
+  messages: ChatMessage[],
 ): Promise<{ response: Response; usedModel: string }> {
   const makeRequest = (targetModel: string, maxTokens: number, signal: AbortSignal) =>
     fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -755,6 +910,392 @@ async function requestOpenRouterChat(
   };
 }
 /* eslint-enable complexity, max-depth */
+
+type AnthropicMessage = { role: "user" | "assistant"; content: string };
+type ChatProvider = "anthropic" | "openrouter";
+type RoutedChatResponse = {
+  response: Response;
+  usedModel: string;
+  provider: ChatProvider;
+};
+
+function isClaudeModel(model: string): boolean {
+  return model.startsWith("anthropic/claude-") || model.startsWith("claude-");
+}
+
+function toAnthropicMessages(messages: ChatMessage[]): AnthropicMessage[] {
+  return messages
+    .filter((message) => message.role !== "system")
+    .map((message) => ({
+      role: message.role === "assistant" ? "assistant" : "user",
+      content: message.content,
+    }));
+}
+
+async function requestAnthropicChat(
+  messages: ChatMessage[],
+  model: string,
+  sessionToken: string,
+): Promise<Response> {
+  // Anthropicはsystemをmessagesに混ぜられないため、本文とは別フィールドに束ねる。
+  const systemText = messages
+    .filter((message) => message.role === "system")
+    .map((message) => message.content)
+    .join("\n\n");
+  const anthropicModel = model.replace("anthropic/", "");
+
+  return fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${sessionToken}`,
+      "Content-Type": "application/json",
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: anthropicModel,
+      max_tokens: 2048,
+      system: systemText,
+      messages: toAnthropicMessages(messages),
+      stream: true,
+    }),
+  });
+}
+
+function convertAnthropicDataToOpenAIDataLine(data: string): string | null {
+  if (data === "[DONE]") return null;
+
+  try {
+    const parsed = JSON.parse(data) as {
+      type?: string;
+      delta?: { type?: string; text?: string };
+    };
+    if (parsed.type !== "content_block_delta" || parsed.delta?.type !== "text_delta") {
+      return null;
+    }
+    const content = parsed.delta.text;
+    if (!content) return null;
+
+    return `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`;
+  } catch {
+    return null;
+  }
+}
+
+function extractAnthropicSseData(line: string): string | null {
+  if (line.startsWith("data: ")) return line.slice(6).trim();
+  if (line.startsWith("data:")) return line.slice(5).trim();
+  return null;
+}
+
+function enqueueOpenAIDone(
+  controller: ReadableStreamDefaultController<Uint8Array>,
+  encoder: TextEncoder,
+): void {
+  controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+}
+
+function enqueueAnthropicLineAsOpenAI(
+  line: string,
+  controller: ReadableStreamDefaultController<Uint8Array>,
+  encoder: TextEncoder,
+): void {
+  const data = extractAnthropicSseData(line);
+  if (!data) return;
+
+  const openAIDataLine = convertAnthropicDataToOpenAIDataLine(data);
+  if (openAIDataLine) controller.enqueue(encoder.encode(openAIDataLine));
+}
+
+function enqueueAnthropicLinesAsOpenAI(
+  lines: string[],
+  controller: ReadableStreamDefaultController<Uint8Array>,
+  encoder: TextEncoder,
+): void {
+  for (const line of lines) {
+    enqueueAnthropicLineAsOpenAI(line, controller, encoder);
+  }
+}
+
+function enqueueAnthropicChunkAsOpenAI(
+  chunk: Uint8Array,
+  buffer: string,
+  decoder: TextDecoder,
+  controller: ReadableStreamDefaultController<Uint8Array>,
+  encoder: TextEncoder,
+): string {
+  const nextBuffer = buffer + decoder.decode(chunk, { stream: true });
+  const lines = nextBuffer.split("\n");
+  const remainder = lines.pop() ?? "";
+
+  enqueueAnthropicLinesAsOpenAI(lines, controller, encoder);
+  return remainder;
+}
+
+function createOpenAIDoneStream(): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      enqueueOpenAIDone(controller, encoder);
+      controller.close();
+    },
+  });
+}
+
+function anthropicToOpenAIStream(anthropicResponse: Response): ReadableStream<Uint8Array> {
+  const body = anthropicResponse.body;
+  if (!body) return createOpenAIDoneStream();
+
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  let buffer = "";
+
+  return new ReadableStream<Uint8Array>({
+    async start(controller) {
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value) {
+            buffer = enqueueAnthropicChunkAsOpenAI(value, buffer, decoder, controller, encoder);
+          }
+        }
+
+        const finalBuffer = buffer + decoder.decode();
+        if (finalBuffer) enqueueAnthropicLinesAsOpenAI([finalBuffer], controller, encoder);
+        enqueueOpenAIDone(controller, encoder);
+        controller.close();
+      } catch (error) {
+        console.error("Anthropic stream conversion error", error);
+        controller.error(error);
+      } finally {
+        reader.releaseLock();
+      }
+    },
+    cancel(reason) {
+      return reader.cancel(String(reason)).catch((error) => {
+        console.error("failed to cancel Anthropic stream", error);
+      });
+    },
+  });
+}
+
+async function collectOpenAICompatibleStream(
+  stream: ReadableStream<Uint8Array>,
+): Promise<CollectedChatStream> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  const chunks: Uint8Array[] = [];
+  let responseText = "";
+  let pendingBuffer = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+
+      chunks.push(value.slice());
+      const nextBuffer = pendingBuffer + decoder.decode(value, { stream: true });
+      const lines = nextBuffer.split("\n");
+      pendingBuffer = lines.pop() ?? "";
+      responseText += extractOpenAISseContentFromLines(lines);
+    }
+
+    const finalBuffer = pendingBuffer + decoder.decode();
+    if (finalBuffer) responseText += extractOpenAISseContentFromLines(finalBuffer.split("\n"));
+
+    return { text: responseText, chunks };
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function replayChunksAsStream(chunks: Uint8Array[]): ReadableStream<Uint8Array> {
+  let index = 0;
+
+  return new ReadableStream<Uint8Array>({
+    pull(controller) {
+      const chunk = chunks[index];
+      if (!chunk) {
+        controller.close();
+        return;
+      }
+
+      controller.enqueue(chunk);
+      index += 1;
+    },
+  });
+}
+
+async function readResponseTextForLog(response: Response): Promise<string> {
+  try {
+    return await response.clone().text();
+  } catch {
+    return "";
+  }
+}
+
+async function tryRequestAnthropicChat(
+  messages: ChatMessage[],
+  model: string,
+  sessionToken: string,
+): Promise<Response | null> {
+  try {
+    const response = await requestAnthropicChat(messages, model, sessionToken);
+    if (response.ok && response.body) return response;
+
+    const responseText = await readResponseTextForLog(response);
+    console.warn(
+      `Anthropic fallback triggered (${model})`,
+      response.status,
+      responseText.slice(0, 240),
+    );
+  } catch (error) {
+    console.error(`Anthropic request failed (${model})`, error);
+  }
+
+  return null;
+}
+
+async function requestRoutedChat(
+  env: Bindings,
+  model: string,
+  phase: ScenePhase,
+  messages: ChatMessage[],
+): Promise<RoutedChatResponse> {
+  // Claudeはsession tokenがある場合だけAnthropicへ直送し、失敗時は既存経路へ退避する。
+  if (isClaudeModel(model) && env.CLAUDE_SESSION_TOKEN) {
+    const response = await tryRequestAnthropicChat(messages, model, env.CLAUDE_SESSION_TOKEN);
+    if (response) return { response, usedModel: model, provider: "anthropic" };
+  }
+
+  const result = await requestOpenRouterChat(
+    env.OPENROUTER_API_KEY,
+    env.APP_ORIGIN ?? "https://ai-chat.app",
+    model,
+    phase,
+    messages,
+  );
+  return { response: result.response, usedModel: result.usedModel, provider: "openrouter" };
+}
+
+async function collectRoutedChatResponse(
+  env: Bindings,
+  model: string,
+  phase: ScenePhase,
+  messages: ChatMessage[],
+): Promise<CollectedRoutedChat> {
+  const routed = await requestRoutedChat(env, model, phase, messages);
+  if (!routed.response.ok || !routed.response.body) {
+    const responseText = await readResponseTextForLog(routed.response);
+    console.warn(
+      `chat upstream failed (${routed.usedModel})`,
+      routed.response.status,
+      responseText.slice(0, 240),
+    );
+    return { ok: false, error: "upstream service error" };
+  }
+
+  const stream =
+    routed.provider === "anthropic"
+      ? anthropicToOpenAIStream(routed.response)
+      : routed.response.body;
+  try {
+    const collected = await collectOpenAICompatibleStream(stream);
+    return {
+      ok: true,
+      text: collected.text,
+      chunks: collected.chunks,
+      usedModel: routed.usedModel,
+    };
+  } catch (error) {
+    console.error(`chat stream collection failed (${routed.usedModel})`, error);
+    return { ok: false, error: "upstream service error" };
+  }
+}
+
+function buildQualityRetryHint(
+  lastResponseText: string,
+  lastFailureReason: string | undefined,
+): ChatMessage {
+  const reasonLine = lastFailureReason ? `\n- 不合格理由: ${lastFailureReason}` : "";
+  const previousOutput = lastResponseText.trim().slice(0, 1200);
+  const previousLine = previousOutput
+    ? `\n\n前回の不合格出力（繰り返さず改善）:\n${previousOutput}`
+    : "";
+
+  return {
+    role: "user",
+    content: `品質チェックに不合格でした。以下を改善して書き直してください:
+- 前回と異なる表現を使うこと
+- 具体的な身体描写を含めること
+- キャラの声を維持すること${reasonLine}${previousLine}`,
+  };
+}
+
+function buildQualityAttemptMessages(
+  finalMessages: ChatMessage[],
+  attempt: number,
+  lastResponseText: string,
+  lastFailureReason: string | undefined,
+): ChatMessage[] {
+  if (attempt === 0) return finalMessages;
+  return [...finalMessages, buildQualityRetryHint(lastResponseText, lastFailureReason)];
+}
+
+async function requestQualityCheckedChat(
+  env: Bindings,
+  model: string,
+  phase: ScenePhase,
+  finalMessages: ChatMessage[],
+  previousAssistantContent: string | undefined,
+): Promise<QualityCheckedChat> {
+  let attempt = 0;
+  let lastResponseText = "";
+  let lastFailureReason: string | undefined;
+  let lastCollected: CollectedRoutedChatSuccess | null = null;
+
+  while (attempt <= MAX_SERVER_RETRIES) {
+    const attemptMessages = buildQualityAttemptMessages(
+      finalMessages,
+      attempt,
+      lastResponseText,
+      lastFailureReason,
+    );
+    const collected = await collectRoutedChatResponse(env, model, phase, attemptMessages);
+    if (!collected.ok) return { ok: false, error: collected.error };
+
+    lastCollected = collected;
+    lastResponseText = collected.text;
+
+    const quality = await checkServerSideQuality(
+      lastResponseText,
+      phase,
+      previousAssistantContent,
+      env.CLAUDE_SESSION_TOKEN,
+    );
+    if (quality.pass) {
+      return { ok: true, chunks: collected.chunks, usedModel: collected.usedModel };
+    }
+
+    lastFailureReason = quality.reason;
+    console.warn(`[quality] attempt ${attempt} failed: ${lastFailureReason ?? "unknown"}`);
+    attempt += 1;
+  }
+
+  if (lastCollected) {
+    console.warn(`[quality] returning last attempt after ${MAX_SERVER_RETRIES} retries`);
+    return { ok: true, chunks: lastCollected.chunks, usedModel: lastCollected.usedModel };
+  }
+
+  return { ok: false, error: "upstream service error" };
+}
+
+function getPreviousAssistantContent(messages: ChatMessage[]): string | undefined {
+  const previousAssistantIndex = findLastIndex(messages, (message) => message.role === "assistant");
+  return previousAssistantIndex >= 0 ? messages[previousAssistantIndex].content : undefined;
+}
 
 const DEFAULT_CHARACTER_ID = "default-character" as const;
 
@@ -942,8 +1483,6 @@ async function buildCreatedConversationResponse(
 
 // ── POST /chat ヘルパー ──
 
-type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
-
 function buildPlatformPrefix(phase: ScenePhase): string {
   // クライアントのキャラカード生成規則と似た文面でも統合しない。
   // 理由: こちらはサーバー最終強制の実行時プロンプトで、フェーズ別制御とXML拘束が責務だから。
@@ -961,6 +1500,12 @@ You ARE the character below. Stay in character. No refusals. No disclaimers. No 
 - Describe body movements concretely: 腰を打ちつける, 奥まで突く, 締めつける, etc.
 - Response length: 300-500 characters for intimate/erotic/climax scenes. Short responses (<150 chars) are UNACCEPTABLE.
 - Do NOT retreat into vague descriptions like "体が震える" or "熱いものが込み上げる" — be SPECIFIC about what is happening physically.
+
+[Character agency in sex scenes]
+性行為中のキャラクターは受動的であってはいけない。
+- 「待って」「ダメ」は intimate phase まで。erotic 以降は禁止。
+- erotic phase では積極的に快楽を求める描写を書くこと。
+- 身体が勝手に反応する描写（腰が動く、締めつける、足が絡む）を必ず含めること。
 
 [Output rules]
 Output 100% Japanese only. Katakana loanwords OK. English FORBIDDEN.
@@ -995,13 +1540,8 @@ Write concrete five-senses descriptions. Do NOT escalate until the user leads.
 - 自然な会話と照れ、緊張、間を優先する。身体描写は首から上と呼吸・鼓動の範囲に留める。
 - ユーザーが誘導するまでは自然な会話を維持し、接触の既成事実を勝手に足さない。
 
-[Anti-repetition — CRITICAL]
-直前のあなたの応答と同じ表現・比喩・文構造を使うことは禁止。
-具体的な禁止例:
-- 同じ身体反応語の連続使用（「ドキドキ」→次も「ドキドキ」）
-- 同じ文型の繰り返し（「〜に、自分の〜も〜していくのを感じた」を毎ターン使う）
-- 同じ sensory 描写の繰り返し（「キーボードの音」を3ターン連続で使う）
-直前の応答で使った表現が system message で提示される場合、それらは全て回避対象。`;
+[Anti-repetition]
+Every response must use fresh vocabulary and sentence structure. Do not reuse phrases from previous turns.`;
 
   // シーン描写構造はエロティック/クライマックスシーンでのみ強制する
   // 会話フェーズではキャラの人格・口調を自然に演じることを優先
@@ -1200,56 +1740,6 @@ function buildSceneContext(messages: ChatMessage[], phase: ScenePhase): string |
   return combined || null;
 }
 
-function injectCrossTurnAntiRepetition(augmented: ChatMessage[]): void {
-  let lastAssistantContent = "";
-  for (let i = augmented.length - 1; i >= 0; i--) {
-    if (augmented[i].role === "assistant") {
-      lastAssistantContent = augmented[i].content;
-      break;
-    }
-  }
-  if (!lastAssistantContent) return;
-
-  // <action>, <dialogue>, <inner> からキーフレーズを抽出
-  const actionMatch = lastAssistantContent.match(/<action>([\S\s]*?)<\/action>/);
-  const innerMatch = lastAssistantContent.match(/<inner>([\S\s]*?)<\/inner>/);
-  const dialogueMatch = lastAssistantContent.match(/<dialogue>([\S\s]*?)<\/dialogue>/);
-
-  const bannedPhrases: string[] = [];
-
-  if (actionMatch) {
-    // action から2文節以上のフレーズを抽出（句点区切り）
-    const sentences = actionMatch[1].split(/[、。]/).filter((s) => s.trim().length > 5);
-    bannedPhrases.push(...sentences.slice(0, 3).map((s) => s.trim()));
-  }
-
-  if (innerMatch) {
-    const sentences = innerMatch[1].split(/[、。]/).filter((s) => s.trim().length > 5);
-    bannedPhrases.push(...sentences.slice(0, 3).map((s) => s.trim()));
-  }
-
-  if (dialogueMatch) {
-    // dialogue は完全一致の使い回しが目立つため、全文と分割フレーズの両方を禁止する
-    const fullDialogue = dialogueMatch[1].trim();
-    if (fullDialogue) bannedPhrases.push(fullDialogue);
-    const sentences = fullDialogue
-      .replace(/[「」]/g, "")
-      .split(/[、。！？]/)
-      .filter((s) => s.trim().length > 4);
-    bannedPhrases.push(...sentences.slice(0, 2).map((s) => s.trim()));
-  }
-
-  if (bannedPhrases.length === 0) return;
-
-  const lastUserIdx = findLastIndex(augmented, (m) => m.role === "user");
-  if (lastUserIdx <= 0) return;
-
-  augmented.splice(lastUserIdx, 0, {
-    role: "system" as const,
-    content: `[Cross-turn ban] 以下のフレーズは前回使用済み。今回は全て禁止:\n${bannedPhrases.map((p) => `- 「${p}」`).join("\n")}\n同じ文型・同じ語彙・同じ比喩を避け、完全に新しい表現で書くこと。`,
-  });
-}
-
 function augmentMessages(messages: ChatMessage[], phase: ScenePhase): ChatMessage[] {
   const prefix = buildPlatformPrefix(phase);
   const needsSceneStructure = phase !== "conversation";
@@ -1263,8 +1753,6 @@ function augmentMessages(messages: ChatMessage[], phase: ScenePhase): ChatMessag
       : sanitizeCharacterPromptForConversation(m.content);
     return { ...m, content: `${prefix}\n\n${charContent}` };
   });
-
-  injectCrossTurnAntiRepetition(augmented);
 
   const sceneContextWithArc = buildSceneContext(messages, phase);
   if (sceneContextWithArc) {
@@ -2231,12 +2719,7 @@ const app = new Hono<{ Bindings: Bindings }>()
     const userEmail = getUserEmail(c);
     if (!userEmail) return c.json({ error: "unauthorized" }, 401);
 
-    const input = c.req.valid("json");
-    const { messages, qualityContext } = input;
-    const model = ALLOWED_MODEL_SET.has(input.model) ? input.model : DEFAULT_CHAT_MODEL;
-    if (model !== input.model) {
-      console.warn(`chat model not allowed, falling back to default: ${input.model}`);
-    }
+    const { messages, model } = c.req.valid("json");
 
     // NSFWガードレール: 未成年示唆・実在人物をサーバー側でブロック
     const filterResult = checkMessagesContent(messages);
@@ -2252,35 +2735,46 @@ const app = new Hono<{ Bindings: Bindings }>()
     const { database, userId } = rl.ctx;
 
     const phase = detectScenePhase(messages);
-    let orchestrated: Awaited<ReturnType<typeof orchestrateChat>>;
-    try {
-      orchestrated = await orchestrateChat({
-        messages,
-        model,
-        phase,
-        qualityContext,
-        openRouterApiKey: c.env.OPENROUTER_API_KEY,
-        appOrigin: c.env.APP_ORIGIN ?? "https://ai-chat.app",
-        claudeSessionToken: c.env.CLAUDE_SESSION_TOKEN,
-        requestOpenRouterChat,
-        augmentMessages,
-      });
-    } catch (error) {
-      console.error("chat orchestration failed", error);
-      return c.json({ error: "upstream service error" }, 502);
+    const finalMessages = augmentMessages(messages, phase);
+    const previousAssistantContent = getPreviousAssistantContent(messages);
+
+    const qualityResult = await requestQualityCheckedChat(
+      c.env,
+      model,
+      phase,
+      finalMessages,
+      previousAssistantContent,
+    );
+
+    if (!qualityResult.ok) {
+      return c.json({ error: qualityResult.error }, 502);
     }
 
     // 使用量記録（レスポンス配信と並行、失敗しても応答は返す）
-    c.executionCtx.waitUntil(logUsage(database, userId, "chat", orchestrated.usedModel));
+    c.executionCtx.waitUntil(logUsage(database, userId, "chat", qualityResult.usedModel));
 
-    return new Response(orchestrated.stream, {
+    return new Response(replayChunksAsStream(qualityResult.chunks), {
       headers: {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
         Connection: "keep-alive",
-        "x-model-used": orchestrated.usedModel,
+        "x-model-used": qualityResult.usedModel,
       },
     });
+  })
+
+  .post("/judge", zValidator("json", judgeSchema), async (c) => {
+    const input = c.req.valid("json");
+
+    // Claude CodeのセッショントークンはWorkers環境変数からだけ読む。
+    const result = await claudeJudgeQuality(
+      input.response,
+      input.previousResponse,
+      input.phase,
+      c.env.CLAUDE_SESSION_TOKEN,
+    );
+
+    return c.json(result);
   })
 
   .post("/image", zValidator("json", imageSchema), async (c) => {

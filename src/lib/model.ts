@@ -1,31 +1,24 @@
+// OpenRouter 経由のチャット生成用。Claude/GPT は従量課金のため除外。
 export const DEFAULT_CHAT_MODEL = "anthracite-org/magnum-v4-72b" as const;
 
-// 既定モデルがOpenRouter側で利用不能なときだけ順に退避する。
-// 理由: 実在確認できた高品質モデルだけで安全にフォールバックさせたい。
 export const DEFAULT_CHAT_MODEL_FALLBACKS = [
   "qwen/qwen-2.5-72b-instruct",
   "deepseek/deepseek-chat",
-  "anthropic/claude-sonnet-4",
 ] as const;
 
-// API入力で許可する一覧と、サーバー内部でのみ使う退避先は役割が異なる。
-// 理由: UIの選択肢を増やさずに、サーバー再試行だけを安全に強化したい。
 export const MODEL_FALLBACKS: Readonly<Record<string, readonly string[]>> = {
   [DEFAULT_CHAT_MODEL]: DEFAULT_CHAT_MODEL_FALLBACKS,
-  "qwen/qwen-2.5-72b-instruct": [
-    DEFAULT_CHAT_MODEL,
-    "deepseek/deepseek-chat",
-    "anthropic/claude-sonnet-4",
-  ],
-  "deepseek/deepseek-chat": [
-    DEFAULT_CHAT_MODEL,
-    "qwen/qwen-2.5-72b-instruct",
-    "anthropic/claude-sonnet-4",
-  ],
+  "qwen/qwen-2.5-72b-instruct": [DEFAULT_CHAT_MODEL, "deepseek/deepseek-chat"],
+  "deepseek/deepseek-chat": [DEFAULT_CHAT_MODEL, "qwen/qwen-2.5-72b-instruct"],
   "anthropic/claude-sonnet-4": [
     DEFAULT_CHAT_MODEL,
     "qwen/qwen-2.5-72b-instruct",
     "deepseek/deepseek-chat",
+  ],
+  "anthropic/claude-opus-4": [
+    "anthropic/claude-sonnet-4",
+    DEFAULT_CHAT_MODEL,
+    "qwen/qwen-2.5-72b-instruct",
   ],
 };
 
@@ -115,6 +108,19 @@ export const MODEL_CATALOG = [
     name: "Hermes 3 70B",
     tier: "プレミアム",
     desc: "アンセンサード・汎用",
+  },
+  // ── ハイエンド ──────────────────────────────────────────────────────────
+  {
+    id: "anthropic/claude-sonnet-4",
+    name: "Claude Sonnet 4",
+    tier: "ハイエンド",
+    desc: "Anthropic最新・高品質日本語・バランス型",
+  },
+  {
+    id: "anthropic/claude-opus-4",
+    name: "Claude Opus 4",
+    tier: "ハイエンド",
+    desc: "Anthropic最上位・最高品質・コスト高",
   },
 ] as const;
 
