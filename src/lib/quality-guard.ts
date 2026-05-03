@@ -371,7 +371,7 @@ export async function runClaudeJudge(
     const res = await fetch("/api/judge", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ response, phase, prevResponse: prevResponse ?? "" }),
+      body: JSON.stringify({ response, phase, previousResponse: prevResponse ?? "" }),
     });
     if (!res.ok) return { passed: true };
     const data: unknown = await res.json();
