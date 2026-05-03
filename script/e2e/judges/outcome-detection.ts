@@ -1,6 +1,6 @@
 import type { ScenarioResult, TurnResult } from "../types";
 
-const CREAMPIE_USER_PATTERN = /中に出|出して|射精|中出し/;
+const CREAMPIE_USER_PATTERN = /中に出|出して|射精|中出し|注ぐ|注い/;
 
 const CREAMPIE_ASSISTANT_CUES = [
   "中に出",
@@ -11,8 +11,11 @@ const CREAMPIE_ASSISTANT_CUES = [
   "溢れ",
   "あふれ",
   "満たされ",
+  "満た",
   "精液",
+  "精液を受け止め",
   "射精",
+  "子宮",
   "どくどく",
 ] as const;
 

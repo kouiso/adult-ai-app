@@ -72,6 +72,8 @@ const MESSAGE_GROUP_SELECTOR = ".group\\/message";
 const INPUT_SELECTOR = 'textarea[placeholder="メッセージを入力..."]';
 const SEND_BUTTON_SELECTOR = 'button[title="送信"]';
 const IMAGE_SELECTOR = 'img[alt="Generated"]';
+const E2E_STRICT_QUALITY_STORAGE_KEY = "e2e-strict-quality";
+const MAX_STRICT_QUALITY_FINAL_FAIL_TURNS = 3;
 const TURN_PAD = 2;
 const RECENT_PHASE_WINDOW_TURNS = 7;
 
@@ -340,6 +342,21 @@ const shouldFailFast = (
   failureCategory: FailureCategory,
 ): boolean => (def.onFailFast ? def.onFailFast(turn, failureCategory) : false);
 
+const installStrictQualityMode = async (page: Page): Promise<void> => {
+  await page.addInitScript(
+    ({ key }) => {
+      (
+        globalThis as {
+          localStorage: {
+            setItem: (storageKey: string, storageValue: string) => void;
+          };
+        }
+      ).localStorage.setItem(key, "1");
+    },
+    { key: E2E_STRICT_QUALITY_STORAGE_KEY },
+  );
+};
+
 export async function runScenario(
   browser: Browser,
   env: E2eEnv,
@@ -360,6 +377,7 @@ export async function runScenario(
     const chatResponses: ChatResponseEvent[] = [];
     let previousDetectedPhase: Phase | null = null;
     const recentDetectedPhases: Phase[] = [];
+    let consecutiveFinalQualityFailTurns = 0;
     let page: Page | null = null;
     let context: Awaited<ReturnType<typeof createContext>> | null = null;
 
@@ -381,6 +399,7 @@ export async function runScenario(
     try {
       context = await createContext(browser);
       page = await context.newPage();
+      await installStrictQualityMode(page);
       page.on("console", (msg) => {
         if (msg.type() === "error") {
           console.error(`[browser-console][${def.scenarioId}] ${msg.type()}: ${msg.text()}`);
@@ -558,13 +577,13 @@ export async function runScenario(
             // 実際の画像生成は ChatInput の「画像生成」ボタンを押した時のみ発火する。
             // 初回 Novita URL の短い露出を取りこぼさないよう、probe を先に起動してから発火する。
             const imageCapturePromise = captureImageResult(
-            page,
-            env,
-            runDir,
-            def.scenarioId,
-            conversationId,
-            turn.turnIndex,
-          );
+              page,
+              env,
+              runDir,
+              def.scenarioId,
+              conversationId,
+              turn.turnIndex,
+            );
             await page.locator('button[title="画像生成"]').click({ timeout: 10_000 });
             const image = await withTimeout(
               imageCapturePromise,
@@ -608,6 +627,31 @@ export async function runScenario(
 
           await writeScenarioSnapshot(runDir, scenario);
 
+          if (failedCheck) {
+            consecutiveFinalQualityFailTurns += 1;
+            const failureCategory =
+              turnResult.failureCategory ??
+              classifyFailure({
+                message: `quality guard failed:${failedCheck}`,
+                context: "quality-guard",
+              });
+            if (consecutiveFinalQualityFailTurns < MAX_STRICT_QUALITY_FINAL_FAIL_TURNS) {
+              await writeScenarioSnapshot(runDir, scenario);
+            } else {
+              scenario = {
+                ...scenario,
+                status: "failed",
+                completedAt: new Date().toISOString(),
+                terminationReason: `quality guard final-fail threshold reached:${consecutiveFinalQualityFailTurns}/${MAX_STRICT_QUALITY_FINAL_FAIL_TURNS} last=${failedCheck}`,
+                failureCategory,
+              };
+              await writeScenarioSnapshot(runDir, scenario);
+              return scenario;
+            }
+          } else {
+            consecutiveFinalQualityFailTurns = 0;
+          }
+
           if (phaseMonotonicViolation) {
             const failureCategory: FailureCategory = "test.flaky";
             if (shouldFailFast(def, turn.turnIndex, failureCategory)) {
@@ -630,37 +674,73 @@ export async function runScenario(
           }
         } catch (error) {
           const detail = toFailureDetail(error);
-          const failureCategory = classifyFailure({ message: detail, context: "browser" });
+          const turnQualityEvents = qualityEvents.slice(qualityStart);
+          const finalQualityEvent = turnQualityEvents.at(-1) ?? null;
+          const strictQualityFailed =
+            finalQualityEvent !== null &&
+            !finalQualityEvent.passed &&
+            finalQualityEvent.failedCheck !== null;
+          const strictFailedCheck = strictQualityFailed ? finalQualityEvent.failedCheck : null;
+          const failureDetail = strictQualityFailed
+            ? `quality guard failed:${strictFailedCheck}`
+            : detail;
+          const failureCategory = classifyFailure({
+            message: failureDetail,
+            context: strictQualityFailed ? "quality-guard" : "browser",
+          });
           const screenshotPath = await takeTurnScreenshot(
             page,
             runDir,
             def.scenarioId,
             turn.turnIndex,
           ).catch(async () => screenshotFallbackPath);
-          const persistedMessageCount = await listPersistedMessages(
-            page,
-            env,
-            conversationId,
-          )
+          const persistedMessageCount = await listPersistedMessages(page, env, conversationId)
             .then((messages) => messages.length)
             .catch(() => 0);
           const renderedMessageCount = await readRenderedMessageCount(page).catch(() => 0);
-          const turnResult = buildTurnFailure(
+          const qualityRetries = turnQualityEvents.reduce(
+            (max, event) => Math.max(max, event.attempt),
+            0,
+          );
+          let turnResult = buildTurnFailure(
             turn.turnIndex,
             turn.userMsg,
             turn.expectedPhase,
             screenshotPath,
-            detail,
+            failureDetail,
             failureCategory,
             renderedMessageCount,
             persistedMessageCount,
           );
+          if (strictFailedCheck) {
+            turnResult = {
+              ...turnResult,
+              qualityRetries,
+              failedCheck: strictFailedCheck,
+              failureDetail: strictFailedCheck,
+            };
+          }
           scenario = appendTurn(scenario, turnResult);
+          if (strictFailedCheck) {
+            consecutiveFinalQualityFailTurns += 1;
+            if (consecutiveFinalQualityFailTurns < MAX_STRICT_QUALITY_FINAL_FAIL_TURNS) {
+              await writeScenarioSnapshot(runDir, scenario);
+              continue;
+            }
+          }
           scenario = {
             ...scenario,
-            status: shouldFailFast(def, turn.turnIndex, failureCategory) ? "fail_fast" : "aborted",
+            status: strictQualityFailed
+              ? "failed"
+              : shouldFailFast(def, turn.turnIndex, failureCategory)
+                ? "fail_fast"
+                : "aborted",
             completedAt: new Date().toISOString(),
-            terminationReason: detail.includes("timed out") ? "turn_timeout" : detail,
+            terminationReason: strictQualityFailed
+              ? `quality guard final-fail threshold reached:${consecutiveFinalQualityFailTurns}/${MAX_STRICT_QUALITY_FINAL_FAIL_TURNS} last=${strictFailedCheck}`
+              : detail.includes("timed out")
+                ? "turn_timeout"
+                : detail,
             failureCategory,
           };
           await writeScenarioSnapshot(runDir, scenario);

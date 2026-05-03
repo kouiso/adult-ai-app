@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const SCENARIO_IDS = ["S1", "S2", "S3", "S4", "S5"] as const;
+export const SCENARIO_IDS = ["S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8"] as const;
 export type ScenarioId = (typeof SCENARIO_IDS)[number];
 
 export const PHASES = ["conversation", "intimate", "erotic", "climax", "afterglow"] as const;

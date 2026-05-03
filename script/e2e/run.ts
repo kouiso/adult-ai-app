@@ -13,6 +13,9 @@ import scenarioS2 from "./scenarios/s2-cohabitation-24h";
 import scenarioS3 from "./scenarios/s3-multi-round";
 import scenarioS4 from "./scenarios/s4-character-switch";
 import scenarioS5 from "./scenarios/s5-monkey-kink";
+import scenarioS6 from "./scenarios/s6-rinka-lab";
+import scenarioS7 from "./scenarios/s7-saya-rain";
+import scenarioS8 from "./scenarios/s8-reina-reversal";
 import { SCENARIO_IDS } from "./types";
 
 import type { ScenarioDefinition } from "./scenarios/_types";
@@ -31,10 +34,10 @@ const WAVE_TWO_STEP_SECONDS = 4;
 const VERSION_FALLBACK = "unknown";
 
 const USAGE = `Usage:
-  tsx script/e2e/run.ts                           # full run, all 5 scenarios, both waves
+  tsx script/e2e/run.ts                           # full run, all 8 scenarios, both waves
   tsx script/e2e/run.ts --scenarios=S1,S2         # comma-separated
   tsx script/e2e/run.ts --wave=1                  # wave 1 only (S1,S2,S3)
-  tsx script/e2e/run.ts --wave=2                  # wave 2 only (S4,S5)
+  tsx script/e2e/run.ts --wave=2                  # wave 2 only (S4,S5,S6,S7,S8)
   tsx script/e2e/run.ts --smoke                   # only S1, first 5 turns
   tsx script/e2e/run.ts --smoke --scenarios=S2    # smoke a different scenario
   tsx script/e2e/run.ts --runId=abc               # resume / override runId`;
@@ -45,10 +48,13 @@ const SCENARIO_MAP = {
   S3: scenarioS3,
   S4: scenarioS4,
   S5: scenarioS5,
+  S6: scenarioS6,
+  S7: scenarioS7,
+  S8: scenarioS8,
 } satisfies Record<ScenarioId, ScenarioDefinition>;
 
 const WAVE_ONE_SCENARIOS = ["S1", "S2", "S3"] as const;
-const WAVE_TWO_SCENARIOS = ["S4", "S5"] as const;
+const WAVE_TWO_SCENARIOS = ["S4", "S5", "S6", "S7", "S8"] as const;
 const WAVE_ONE_SET = new Set<ScenarioId>(WAVE_ONE_SCENARIOS);
 const WAVE_TWO_SET = new Set<ScenarioId>(WAVE_TWO_SCENARIOS);
 
