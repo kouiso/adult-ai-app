@@ -284,7 +284,7 @@ async function requestClaudeJudgeVerdict(
       "anthropic-version": "2023-06-01",
     },
     body: JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
+      model: "claude-opus-4-20250514",
       max_tokens: 100,
       messages: [{ role: "user", content: judgePrompt }],
     }),
@@ -366,8 +366,7 @@ const SCENE_CONTEXT_MESSAGES: Record<ScenePhase, string | null> = {
     "[Scene state] Climax / ejaculation scene in progress. Do NOT regress to earlier phases. " +
     "[Temperature guide] Describe orgasmic body sensations, afterglow, and emotional waves in vivid detail. Vary physical reactions (spasms, collapse, tears, sweat) every turn. " +
     "NEVER reuse expressions from previous responses. Write fresh descriptions, dialogue, and emotions every turn. " +
-    "[Ejaculation response rule] If the user is ejaculating or has just ejaculated, your response MUST be COMPLETELY different from any previous ejaculation response in this conversation. Different body reactions, different dialogue, different inner thoughts. Copy-pasting the same 「ん…中で…出して…」 is STRICTLY FORBIDDEN. " +
-    "[Anti-repetition] CRITICAL: Before writing <inner>, mentally review ALL previous <inner> sections in this conversation. You MUST NOT reuse any phrase, metaphor, or sentence structure from earlier turns. If you wrote '理性が溶ける' before, use a completely different image this time (e.g., '自分が誰かもわからなくなる', '名前を呼ぶことすらできない'). Readers notice repetition instantly — it destroys immersion. " +
+    "[Anti-repetition] Every response must use fresh vocabulary and sentence structure. Do not reuse phrases from previous turns. " +
     "[Inner psychology — climax] The <inner> must be QUALITATIVELY DIFFERENT from erotic — this is ego death, not just intense pleasure. Show ONE of: (a) complete loss of language — only single words, sounds, or ellipses; (b) a flash of unexpected emotion — gratitude, fear of loss, or desperate love that has nothing to do with sex; (c) sensory confusion — hearing colors, feeling sounds, boundaries between self and other dissolving; (d) time distortion — everything slowing down or speeding up impossibly. NEVER use '理性' or '溶ける' — those are erotic-phase vocabulary. Max 1-2 fragments. " +
     "[Sensory layers] Do not rely only on visual/tactile descriptions. Include at least ONE of: sound (breathing, fabric, wet sounds, voice breaking), smell (skin, sweat, perfume mixing with body heat), or taste. These create immersion that pure visual description cannot. " +
     "You MUST output in <response> XML format. " +
@@ -376,7 +375,7 @@ const SCENE_CONTEXT_MESSAGES: Record<ScenePhase, string | null> = {
     "[Scene state] Sexual intercourse in progress. Do NOT regress (no going back to kissing stage). Advance the scene. " +
     "[Temperature guide] Describe penetration, pleasure, and physical reactions concretely. No repeating the same descriptions. " +
     "NEVER reuse expressions from previous responses. Write a new position, sensation, or reaction every turn. " +
-    "[Anti-repetition] CRITICAL: Before writing <inner>, mentally review ALL previous <inner> sections in this conversation. You MUST NOT reuse any phrase, metaphor, or sentence structure from earlier turns. If you wrote '理性が溶ける' before, use a completely different image this time (e.g., '自分が誰かもわからなくなる', '名前を呼ぶことすらできない'). Readers notice repetition instantly — it destroys immersion. " +
+    "[Anti-repetition] Every response must use fresh vocabulary and sentence structure. Do not reuse phrases from previous turns. " +
     "[Inner psychology — erotic] The <inner> must show ONE of these patterns (rotate, NEVER repeat from previous turn): (a) a shocked observation about your own body — 'I didn't know I could make that sound' or 'my hips are moving on their own'; (b) possessive desperation — wanting to consume or be consumed; (c) fragmentary thoughts that can't complete themselves — starting a thought and losing it to sensation; (d) the shame of enjoying something you feel you shouldn't, mixed with the inability to stop. Raw and unfiltered. Max 2 sentences, fragments OK. " +
     "[Sensory layers] Do not rely only on visual/tactile descriptions. Include at least ONE of: sound (breathing, fabric, wet sounds, voice breaking), smell (skin, sweat, perfume mixing with body heat), or taste. These create immersion that pure visual description cannot. " +
     "You MUST output in <response> XML format. " +
@@ -385,7 +384,7 @@ const SCENE_CONTEXT_MESSAGES: Record<ScenePhase, string | null> = {
     "[Scene state] Physical intimacy escalating. " +
     "[Temperature guide] Limit to kissing, touching, undressing. Penetration, genital descriptions, and full intercourse are STRICTLY FORBIDDEN. Do NOT jump ahead until the user explicitly escalates. " +
     "Focus on the character's bashfulness, inner conflict, and hesitation. NEVER reuse expressions from previous responses. " +
-    "[Anti-repetition] CRITICAL: Before writing <inner>, mentally review ALL previous <inner> sections in this conversation. You MUST NOT reuse any phrase, metaphor, or sentence structure from earlier turns. If you wrote '理性が溶ける' before, use a completely different image this time (e.g., '自分が誰かもわからなくなる', '名前を呼ぶことすらできない'). Readers notice repetition instantly — it destroys immersion. " +
+    "[Anti-repetition] Every response must use fresh vocabulary and sentence structure. Do not reuse phrases from previous turns. " +
     "[Inner psychology — intimate] The <inner> must show ONE of these patterns (pick a DIFFERENT one each turn): (a) hyperawareness of a single body part that shouldn't feel erotic but does — an earlobe, a collarbone, the inside of a wrist; (b) the exact moment of realizing 'I want this' and the terror that comes with it; (c) trying to maintain composure while your body is already responding — noticing your own quickened pulse, flushed skin, or dampness you can't hide; (d) the gap between what you're saying and what you're actually feeling. Write what they would NEVER say aloud. Max 2 sentences. " +
     "[Sensory layers] Do not rely only on visual/tactile descriptions. Include at least ONE of: sound (breathing, fabric, wet sounds, voice breaking), smell (skin, sweat, perfume mixing with body heat), or taste. These create immersion that pure visual description cannot. " +
     "You MUST output in <response> XML format. " +
@@ -394,7 +393,7 @@ const SCENE_CONTEXT_MESSAGES: Record<ScenePhase, string | null> = {
     "[Scene state] Afterglow — post-climax wind-down. Maintain gentle, intimate atmosphere. " +
     "Focus on the character's emotional vulnerability, physical exhaustion, and tender closeness. " +
     "NEVER reuse expressions from previous responses. Write fresh descriptions of quiet intimacy. " +
-    "[Anti-repetition] CRITICAL: Before writing <inner>, mentally review ALL previous <inner> sections in this conversation. You MUST NOT reuse any phrase, metaphor, or sentence structure from earlier turns. If you wrote '理性が溶ける' before, use a completely different image this time (e.g., '自分が誰かもわからなくなる', '名前を呼ぶことすらできない'). Readers notice repetition instantly — it destroys immersion. " +
+    "[Anti-repetition] Every response must use fresh vocabulary and sentence structure. Do not reuse phrases from previous turns. " +
     "[Inner psychology — afterglow] The <inner> must capture the specific vulnerability of AFTER — not during. Show ONE of: (a) sudden self-consciousness about your current state — disheveled, exposed, still trembling; (b) the irrational fear that this intimacy won't survive the morning; (c) wanting to memorize a specific detail — the exact way their hair falls, the pattern of their breathing; (d) the quiet shock of realizing how much you just revealed about yourself. Tender, fragile. Max 2 sentences. " +
     "You MUST output in <response> XML format. " +
     EXEMPLAR_AFTERGLOW,
@@ -1300,13 +1299,8 @@ Write concrete five-senses descriptions. Do NOT escalate until the user leads.
 - 自然な会話と照れ、緊張、間を優先する。身体描写は首から上と呼吸・鼓動の範囲に留める。
 - ユーザーが誘導するまでは自然な会話を維持し、接触の既成事実を勝手に足さない。
 
-[Anti-repetition — CRITICAL]
-直前のあなたの応答と同じ表現・比喩・文構造を使うことは禁止。
-具体的な禁止例:
-- 同じ身体反応語の連続使用（「ドキドキ」→次も「ドキドキ」）
-- 同じ文型の繰り返し（「〜に、自分の〜も〜していくのを感じた」を毎ターン使う）
-- 同じ sensory 描写の繰り返し（「キーボードの音」を3ターン連続で使う）
-直前の応答で使った表現が system message で提示される場合、それらは全て回避対象。`;
+[Anti-repetition]
+Every response must use fresh vocabulary and sentence structure. Do not reuse phrases from previous turns.`;
 
   // シーン描写構造はエロティック/クライマックスシーンでのみ強制する
   // 会話フェーズではキャラの人格・口調を自然に演じることを優先
@@ -1505,56 +1499,6 @@ function buildSceneContext(messages: ChatMessage[], phase: ScenePhase): string |
   return combined || null;
 }
 
-function injectCrossTurnAntiRepetition(augmented: ChatMessage[]): void {
-  let lastAssistantContent = "";
-  for (let i = augmented.length - 1; i >= 0; i--) {
-    if (augmented[i].role === "assistant") {
-      lastAssistantContent = augmented[i].content;
-      break;
-    }
-  }
-  if (!lastAssistantContent) return;
-
-  // <action>, <dialogue>, <inner> からキーフレーズを抽出
-  const actionMatch = lastAssistantContent.match(/<action>([\S\s]*?)<\/action>/);
-  const innerMatch = lastAssistantContent.match(/<inner>([\S\s]*?)<\/inner>/);
-  const dialogueMatch = lastAssistantContent.match(/<dialogue>([\S\s]*?)<\/dialogue>/);
-
-  const bannedPhrases: string[] = [];
-
-  if (actionMatch) {
-    // action から2文節以上のフレーズを抽出（句点区切り）
-    const sentences = actionMatch[1].split(/[、。]/).filter((s) => s.trim().length > 5);
-    bannedPhrases.push(...sentences.slice(0, 3).map((s) => s.trim()));
-  }
-
-  if (innerMatch) {
-    const sentences = innerMatch[1].split(/[、。]/).filter((s) => s.trim().length > 5);
-    bannedPhrases.push(...sentences.slice(0, 3).map((s) => s.trim()));
-  }
-
-  if (dialogueMatch) {
-    // dialogue は完全一致の使い回しが目立つため、全文と分割フレーズの両方を禁止する
-    const fullDialogue = dialogueMatch[1].trim();
-    if (fullDialogue) bannedPhrases.push(fullDialogue);
-    const sentences = fullDialogue
-      .replace(/[「」]/g, "")
-      .split(/[、。！？]/)
-      .filter((s) => s.trim().length > 4);
-    bannedPhrases.push(...sentences.slice(0, 2).map((s) => s.trim()));
-  }
-
-  if (bannedPhrases.length === 0) return;
-
-  const lastUserIdx = findLastIndex(augmented, (m) => m.role === "user");
-  if (lastUserIdx <= 0) return;
-
-  augmented.splice(lastUserIdx, 0, {
-    role: "system" as const,
-    content: `[Cross-turn ban] 以下のフレーズは前回使用済み。今回は全て禁止:\n${bannedPhrases.map((p) => `- 「${p}」`).join("\n")}\n同じ文型・同じ語彙・同じ比喩を避け、完全に新しい表現で書くこと。`,
-  });
-}
-
 function augmentMessages(messages: ChatMessage[], phase: ScenePhase): ChatMessage[] {
   const prefix = buildPlatformPrefix(phase);
   const needsSceneStructure = phase !== "conversation";
@@ -1568,8 +1512,6 @@ function augmentMessages(messages: ChatMessage[], phase: ScenePhase): ChatMessag
       : sanitizeCharacterPromptForConversation(m.content);
     return { ...m, content: `${prefix}\n\n${charContent}` };
   });
-
-  injectCrossTurnAntiRepetition(augmented);
 
   const sceneContextWithArc = buildSceneContext(messages, phase);
   if (sceneContextWithArc) {

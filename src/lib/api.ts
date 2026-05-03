@@ -324,7 +324,7 @@ async function runClaudeJudgeForClient(
     if (judgeResult.pass) return { passed: true };
 
     console.info(`[quality-guard] claude-judge reason=${judgeResult.reason ?? "none"}`);
-    return { passed: false, failedCheck: "claude-judge" };
+    return { passed: false, failedCheck: "claude-judge-fail" };
   } catch (error) {
     console.warn("claude judge failed", error);
     return { passed: true };

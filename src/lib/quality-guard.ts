@@ -177,7 +177,7 @@ function checkWithinTurnRepetition(response: string): boolean {
 }
 
 const CROSS_TURN_MIN_PHRASE_LENGTH = 8;
-const CROSS_TURN_REPETITION_THRESHOLD = 1;
+const CROSS_TURN_REPETITION_THRESHOLD = 2;
 
 function extractActionContent(response: string): string {
   return response.match(/<action>([\s\S]*?)<\/action>/)?.[1] || "";

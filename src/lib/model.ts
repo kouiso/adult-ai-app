@@ -1,44 +1,15 @@
-export const DEFAULT_CHAT_MODEL = "anthropic/claude-opus-4-20250514" as const;
+// OpenRouter 経由のチャット生成用。Claude/GPT は従量課金のため除外。
+export const DEFAULT_CHAT_MODEL = "anthracite-org/magnum-v4-72b" as const;
 
-// 既定モデルがOpenRouter側で利用不能なときだけ順に退避する。
-// 理由: 実在確認できた高品質モデルだけで安全にフォールバックさせたい。
 export const DEFAULT_CHAT_MODEL_FALLBACKS = [
-  "anthracite-org/magnum-v4-72b",
-  "anthropic/claude-sonnet-4-20250514",
   "qwen/qwen-2.5-72b-instruct",
   "deepseek/deepseek-chat",
 ] as const;
 
-// API入力で許可する一覧と、サーバー内部でのみ使う退避先は役割が異なる。
-// 理由: UIの選択肢を増やさずに、サーバー再試行だけを安全に強化したい。
 export const MODEL_FALLBACKS: Readonly<Record<string, readonly string[]>> = {
   [DEFAULT_CHAT_MODEL]: DEFAULT_CHAT_MODEL_FALLBACKS,
-  "anthropic/claude-sonnet-4-20250514": [
-    DEFAULT_CHAT_MODEL,
-    "anthracite-org/magnum-v4-72b",
-    "qwen/qwen-2.5-72b-instruct",
-    "deepseek/deepseek-chat",
-  ],
-  "anthropic/claude-haiku-4-5-20251001": [
-    DEFAULT_CHAT_MODEL,
-    "anthropic/claude-sonnet-4-20250514",
-    "anthracite-org/magnum-v4-72b",
-  ],
-  "qwen/qwen-2.5-72b-instruct": [
-    DEFAULT_CHAT_MODEL,
-    "anthracite-org/magnum-v4-72b",
-    "deepseek/deepseek-chat",
-  ],
-  "deepseek/deepseek-chat": [
-    DEFAULT_CHAT_MODEL,
-    "anthracite-org/magnum-v4-72b",
-    "qwen/qwen-2.5-72b-instruct",
-  ],
-  "anthracite-org/magnum-v4-72b": [
-    DEFAULT_CHAT_MODEL,
-    "qwen/qwen-2.5-72b-instruct",
-    "deepseek/deepseek-chat",
-  ],
+  "qwen/qwen-2.5-72b-instruct": [DEFAULT_CHAT_MODEL, "deepseek/deepseek-chat"],
+  "deepseek/deepseek-chat": [DEFAULT_CHAT_MODEL, "qwen/qwen-2.5-72b-instruct"],
 };
 
 export const DEFAULT_FALLBACK_MODELS = [
@@ -47,25 +18,6 @@ export const DEFAULT_FALLBACK_MODELS = [
 ] as const;
 
 export const MODEL_CATALOG = [
-  // ── 推奨 ────────────────────────────────────────────────────────────────
-  {
-    id: "anthropic/claude-opus-4-20250514",
-    name: "Claude Opus 4 ⭐ 推奨",
-    tier: "推奨",
-    desc: "最高品質（推奨）",
-  },
-  {
-    id: "anthropic/claude-sonnet-4-20250514",
-    name: "Claude Sonnet 4",
-    tier: "推奨",
-    desc: "高品質・高速",
-  },
-  {
-    id: "anthropic/claude-haiku-4-5-20251001",
-    name: "Claude Haiku 4.5",
-    tier: "推奨",
-    desc: "高速・軽量",
-  },
   // ── 無料 ────────────────────────────────────────────────────────────────
   {
     id: "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
