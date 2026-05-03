@@ -265,7 +265,7 @@ Judge on these criteria (answer YES or NO for each):
 3. AGENCY: Does the character actively desire and pursue pleasure? Passive resistance ("待って", "ダメ", "やめて", "恥ずかしい" as primary reaction) = NO. The character should moan, beg for more, describe what they feel, or take initiative.
 4. CHARACTER: Does the response maintain a consistent character voice with natural dialogue?
 
-If ALL three are YES, respond with exactly: PASS
+If ALL four are YES, respond with exactly: PASS
 If ANY is NO, respond with exactly: FAIL:<which criteria failed>:<one-line reason in Japanese>
 
 Examples:
