@@ -149,6 +149,7 @@ const FIRST_TOKEN_TIMEOUT_MS = 8_000;
 const LAST_CHUNK_TIMEOUT_MS = 30_000;
 const FIRST_TOKEN_TIMEOUT_LABEL = "first-token-timeout";
 const LAST_CHUNK_TIMEOUT_LABEL = "last-chunk-timeout";
+const MAX_SERVER_RETRIES = 3;
 const MODEL_FALLBACK_PATTERNS = [
   /model_not_available/i,
   /content_policy/i,
@@ -231,6 +232,16 @@ const idSchema = z.string().min(1).max(128);
 type ScenePhase = ReturnType<typeof detectScenePhase>;
 type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 type ClaudeJudgeResult = { pass: boolean; reason?: string };
+type CollectedChatStream = { text: string; chunks: Uint8Array[] };
+type CollectedRoutedChat =
+  | { ok: true; text: string; chunks: Uint8Array[]; usedModel: string }
+  | { ok: false; error: string };
+type CollectedRoutedChatSuccess = Extract<CollectedRoutedChat, { ok: true }>;
+type QualityCheckedChat =
+  | { ok: true; chunks: Uint8Array[]; usedModel: string }
+  | { ok: false; error: string };
+
+const ACTION_TAG_PATTERN = /<action>([\S\s]*?)<\/action>/;
 
 function shouldRunClaudeJudge(phase: ScenePhase): boolean {
   return phase === "erotic" || phase === "climax";
@@ -315,6 +326,44 @@ async function claudeJudgeQuality(
   } catch {
     return { pass: true };
   }
+}
+
+function extractActionContent(responseText: string): string {
+  return responseText.match(ACTION_TAG_PATTERN)?.[1]?.trim() ?? "";
+}
+
+function hasCrossTurnActionRepetition(
+  responseText: string,
+  previousAssistantContent: string,
+): boolean {
+  const prevAction = extractActionContent(previousAssistantContent);
+  const currentAction = extractActionContent(responseText);
+  return prevAction.length > 20 && currentAction.includes(prevAction.slice(0, 30));
+}
+
+async function checkServerSideQuality(
+  responseText: string,
+  phase: ScenePhase,
+  previousAssistantContent: string | undefined,
+  sessionToken: string | undefined,
+): Promise<ClaudeJudgeResult> {
+  if (!responseText.includes("<response>") || !responseText.includes("<action>")) {
+    return { pass: false, reason: "xml-format-missing" };
+  }
+
+  if (phase !== "conversation" && responseText.length < 100) {
+    return { pass: false, reason: "scene-min-length" };
+  }
+
+  if (
+    previousAssistantContent &&
+    hasCrossTurnActionRepetition(responseText, previousAssistantContent)
+  ) {
+    return { pass: false, reason: "cross-turn-repetition" };
+  }
+
+  // 官能・絶頂フェーズだけClaude判定を追加し、判定失敗時は既存どおり通す。
+  return claudeJudgeQuality(responseText, previousAssistantContent, phase, sessionToken);
 }
 
 // Few-shot exemplars: demonstrate XML format with target-language (Japanese) content
@@ -622,6 +671,25 @@ function parseOpenRouterSseLine(data: string): string | "[DONE]" | null {
     console.error("failed to parse OpenRouter SSE line", error);
     return null;
   }
+}
+
+function extractOpenAISseData(line: string): string | null {
+  if (line.startsWith("data: ")) return line.slice(6).trim();
+  if (line.startsWith("data:")) return line.slice(5).trim();
+  return null;
+}
+
+function extractOpenAISseContent(line: string): string {
+  const data = extractOpenAISseData(line);
+  if (!data) return "";
+
+  const parsed = parseOpenRouterSseLine(data);
+  if (!parsed || parsed === "[DONE]") return "";
+  return parsed;
+}
+
+function extractOpenAISseContentFromLines(lines: string[]): string {
+  return lines.map((line) => extractOpenAISseContent(line)).join("");
 }
 
 function hasFirstContentToken(
@@ -1013,6 +1081,54 @@ function anthropicToOpenAIStream(anthropicResponse: Response): ReadableStream<Ui
   });
 }
 
+async function collectOpenAICompatibleStream(
+  stream: ReadableStream<Uint8Array>,
+): Promise<CollectedChatStream> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  const chunks: Uint8Array[] = [];
+  let responseText = "";
+  let pendingBuffer = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+
+      chunks.push(value.slice());
+      const nextBuffer = pendingBuffer + decoder.decode(value, { stream: true });
+      const lines = nextBuffer.split("\n");
+      pendingBuffer = lines.pop() ?? "";
+      responseText += extractOpenAISseContentFromLines(lines);
+    }
+
+    const finalBuffer = pendingBuffer + decoder.decode();
+    if (finalBuffer) responseText += extractOpenAISseContentFromLines(finalBuffer.split("\n"));
+
+    return { text: responseText, chunks };
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function replayChunksAsStream(chunks: Uint8Array[]): ReadableStream<Uint8Array> {
+  let index = 0;
+
+  return new ReadableStream<Uint8Array>({
+    pull(controller) {
+      const chunk = chunks[index];
+      if (!chunk) {
+        controller.close();
+        return;
+      }
+
+      controller.enqueue(chunk);
+      index += 1;
+    },
+  });
+}
+
 async function readResponseTextForLog(response: Response): Promise<string> {
   try {
     return await response.clone().text();
@@ -1063,6 +1179,123 @@ async function requestRoutedChat(
     messages,
   );
   return { response: result.response, usedModel: result.usedModel, provider: "openrouter" };
+}
+
+async function collectRoutedChatResponse(
+  env: Bindings,
+  model: string,
+  phase: ScenePhase,
+  messages: ChatMessage[],
+): Promise<CollectedRoutedChat> {
+  const routed = await requestRoutedChat(env, model, phase, messages);
+  if (!routed.response.ok || !routed.response.body) {
+    const responseText = await readResponseTextForLog(routed.response);
+    console.warn(
+      `chat upstream failed (${routed.usedModel})`,
+      routed.response.status,
+      responseText.slice(0, 240),
+    );
+    return { ok: false, error: "upstream service error" };
+  }
+
+  const stream =
+    routed.provider === "anthropic"
+      ? anthropicToOpenAIStream(routed.response)
+      : routed.response.body;
+  try {
+    const collected = await collectOpenAICompatibleStream(stream);
+    return {
+      ok: true,
+      text: collected.text,
+      chunks: collected.chunks,
+      usedModel: routed.usedModel,
+    };
+  } catch (error) {
+    console.error(`chat stream collection failed (${routed.usedModel})`, error);
+    return { ok: false, error: "upstream service error" };
+  }
+}
+
+function buildQualityRetryHint(
+  lastResponseText: string,
+  lastFailureReason: string | undefined,
+): ChatMessage {
+  const reasonLine = lastFailureReason ? `\n- 不合格理由: ${lastFailureReason}` : "";
+  const previousOutput = lastResponseText.trim().slice(0, 1200);
+  const previousLine = previousOutput
+    ? `\n\n前回の不合格出力（繰り返さず改善）:\n${previousOutput}`
+    : "";
+
+  return {
+    role: "user",
+    content: `品質チェックに不合格でした。以下を改善して書き直してください:
+- 前回と異なる表現を使うこと
+- 具体的な身体描写を含めること
+- キャラの声を維持すること${reasonLine}${previousLine}`,
+  };
+}
+
+function buildQualityAttemptMessages(
+  finalMessages: ChatMessage[],
+  attempt: number,
+  lastResponseText: string,
+  lastFailureReason: string | undefined,
+): ChatMessage[] {
+  if (attempt === 0) return finalMessages;
+  return [...finalMessages, buildQualityRetryHint(lastResponseText, lastFailureReason)];
+}
+
+async function requestQualityCheckedChat(
+  env: Bindings,
+  model: string,
+  phase: ScenePhase,
+  finalMessages: ChatMessage[],
+  previousAssistantContent: string | undefined,
+): Promise<QualityCheckedChat> {
+  let attempt = 0;
+  let lastResponseText = "";
+  let lastFailureReason: string | undefined;
+  let lastCollected: CollectedRoutedChatSuccess | null = null;
+
+  while (attempt <= MAX_SERVER_RETRIES) {
+    const attemptMessages = buildQualityAttemptMessages(
+      finalMessages,
+      attempt,
+      lastResponseText,
+      lastFailureReason,
+    );
+    const collected = await collectRoutedChatResponse(env, model, phase, attemptMessages);
+    if (!collected.ok) return { ok: false, error: collected.error };
+
+    lastCollected = collected;
+    lastResponseText = collected.text;
+
+    const quality = await checkServerSideQuality(
+      lastResponseText,
+      phase,
+      previousAssistantContent,
+      env.CLAUDE_SESSION_TOKEN,
+    );
+    if (quality.pass) {
+      return { ok: true, chunks: collected.chunks, usedModel: collected.usedModel };
+    }
+
+    lastFailureReason = quality.reason;
+    console.warn(`[quality] attempt ${attempt} failed: ${lastFailureReason ?? "unknown"}`);
+    attempt += 1;
+  }
+
+  if (lastCollected) {
+    console.warn(`[quality] returning last attempt after ${MAX_SERVER_RETRIES} retries`);
+    return { ok: true, chunks: lastCollected.chunks, usedModel: lastCollected.usedModel };
+  }
+
+  return { ok: false, error: "upstream service error" };
+}
+
+function getPreviousAssistantContent(messages: ChatMessage[]): string | undefined {
+  const previousAssistantIndex = findLastIndex(messages, (message) => message.role === "assistant");
+  return previousAssistantIndex >= 0 ? messages[previousAssistantIndex].content : undefined;
 }
 
 const DEFAULT_CHARACTER_ID = "default-character" as const;
@@ -2504,29 +2737,29 @@ const app = new Hono<{ Bindings: Bindings }>()
 
     const phase = detectScenePhase(messages);
     const finalMessages = augmentMessages(messages, phase);
+    const previousAssistantContent = getPreviousAssistantContent(messages);
 
-    const { response, usedModel, provider } = await requestRoutedChat(
+    const qualityResult = await requestQualityCheckedChat(
       c.env,
       model,
       phase,
       finalMessages,
+      previousAssistantContent,
     );
 
-    if (!response.ok || !response.body) {
-      return c.json({ error: "upstream service error" }, 502);
+    if (!qualityResult.ok) {
+      return c.json({ error: qualityResult.error }, 502);
     }
 
     // 使用量記録（レスポンス配信と並行、失敗しても応答は返す）
-    c.executionCtx.waitUntil(logUsage(database, userId, "chat", usedModel));
+    c.executionCtx.waitUntil(logUsage(database, userId, "chat", qualityResult.usedModel));
 
-    const stream = provider === "anthropic" ? anthropicToOpenAIStream(response) : response.body;
-
-    return new Response(stream, {
+    return new Response(replayChunksAsStream(qualityResult.chunks), {
       headers: {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
         Connection: "keep-alive",
-        "x-model-used": usedModel,
+        "x-model-used": qualityResult.usedModel,
       },
     });
   })
