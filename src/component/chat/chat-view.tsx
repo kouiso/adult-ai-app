@@ -16,21 +16,13 @@ import {
   listConversationMessages,
   persistImageToR2,
   streamChat,
-  streamChatWithQualityGuard,
   type PersistedMessage,
 } from "@/lib/api";
-import {
-  ALL_FIRST_PERSONS,
-  buildMessagesForApi,
-  extractFirstPerson,
-  type ApiMessage,
-} from "@/lib/chat-message-adapter";
+import { buildMessagesForApi } from "@/lib/chat-message-adapter";
 import { DEFAULT_SYSTEM_PROMPT } from "@/lib/config";
 import { parseSystemPrompt } from "@/lib/prompt-builder";
-import type { QualityCheckContext } from "@/lib/quality-guard";
 import { queryKey } from "@/lib/query-key";
 import { detectScenePhase, type ScenePhase } from "@/lib/scene-phase";
-import { parseXmlResponse } from "@/lib/xml-response-parser";
 import type { ChatMessage } from "@/store/chat-store";
 import { useChatStore } from "@/store/chat-store";
 import { useSettingsStore } from "@/store/settings-store";
@@ -184,28 +176,13 @@ const getCharacterImageDescription = (characterSystemPrompt?: string): string =>
 const mergeStreamChunk = (accumulated: string, chunk: string): string =>
   chunk.length > accumulated.length + 100 ? chunk : accumulated + chunk;
 
-const buildQualityContext = (
-  sourceMessages: ChatMessage[],
-  apiMessages: ApiMessage[],
-  systemPrompt: string,
-): QualityCheckContext => {
-  const assistantMessages = sourceMessages.filter(
-    (message) => message.role === "assistant" && !message.isStreaming,
-  );
-  const firstPerson = extractFirstPerson(systemPrompt);
-  return {
-    phase: detectScenePhase(apiMessages),
-    prevAssistantResponse: assistantMessages.at(-1)?.content,
-    firstPerson: firstPerson ?? undefined,
-    wrongFirstPersons: firstPerson
-      ? ALL_FIRST_PERSONS.filter((candidate) => candidate !== firstPerson)
-      : undefined,
-    prevInnerTexts: assistantMessages
-      .slice(-5)
-      .map((message) => parseXmlResponse(message.content)?.inner ?? "")
-      .filter((inner) => inner.length >= 5),
-  };
-};
+const buildQualityContext = (sourceMessages: ChatMessage[]): { prevTexts: string[] } => ({
+  prevTexts: sourceMessages
+    .filter((message) => message.role === "assistant" && !message.isStreaming)
+    .slice(-3)
+    .map((message) => message.content)
+    .filter((content) => content.trim().length > 0),
+});
 
 /** ポーリング結果に応じてメッセージを更新する。処理完了なら true を返す */
 const processImageResult = (
@@ -753,19 +730,10 @@ export const ChatView = ({
 
       const currentMessages = useChatStore.getState().messages;
       const apiMessages = buildApiMessages(currentMessages, systemPrompt, characterName);
-
-      const phase = detectScenePhase(apiMessages);
-      const assistantMessages = currentMessages.filter(
-        (message) => message.role === "assistant" && !message.isStreaming,
-      );
-      const prevAssistant = assistantMessages.at(-1)?.content;
-      const prevInnerTexts = assistantMessages
-        .slice(-5)
-        .map((message) => parseXmlResponse(message.content)?.inner ?? "")
-        .filter((inner) => inner.length >= 5);
+      const qualityContext = buildQualityContext(currentMessages);
 
       let accumulated = "";
-      await streamChatWithQualityGuard(
+      await streamChat(
         apiMessages,
         currentModel,
         (chunk) => {
@@ -778,8 +746,8 @@ export const ChatView = ({
             updateMessage(assistantId, accumulated, true);
           });
         },
-        ({ content: finalText, warningLevel }) => {
-          updateMessage(assistantId, finalText, false, warningLevel);
+        () => {
+          updateMessage(assistantId, accumulated, false);
           setLoading(false);
           void persistUserMessage
             .then(async () => {
@@ -787,10 +755,10 @@ export const ChatView = ({
                 conversationId,
                 id: assistantId,
                 role: "assistant",
-                content: finalText,
+                content: accumulated,
               });
             })
-            .then(() => void tryGenerateTitle(conversationId, text, finalText))
+            .then(() => void tryGenerateTitle(conversationId, text, accumulated))
             .catch((error) => console.error("failed to persist assistant message", error));
         },
         (error) => {
@@ -799,18 +767,7 @@ export const ChatView = ({
           setLoading(false);
           toast.error(`メッセージ送信に失敗しました: ${error}`);
         },
-        {
-          phase,
-          prevAssistantResponse: prevAssistant,
-          firstPerson: extractFirstPerson(systemPrompt) ?? undefined,
-          wrongFirstPersons: (() => {
-            const firstPerson = extractFirstPerson(systemPrompt);
-            return firstPerson
-              ? ALL_FIRST_PERSONS.filter((candidate) => candidate !== firstPerson)
-              : undefined;
-          })(),
-          prevInnerTexts,
-        },
+        qualityContext,
       );
     },
     [buildApiMessages, createMessageEntry, setLoading, tryGenerateTitle],
@@ -876,13 +833,13 @@ export const ChatView = ({
       // 対象メッセージより前のメッセージだけを使ってAPIを呼ぶ
       const prevMsgs = currentMsgs.slice(0, msgIndex);
       const apiMessages = buildApiMessages(prevMsgs, currentSystemPrompt, currentCharacterName);
-      const qualityContext = buildQualityContext(prevMsgs, apiMessages, currentSystemPrompt);
+      const qualityContext = buildQualityContext(prevMsgs);
 
       updateMessage(messageId, "", true);
       setLoading(true);
 
       let accumulated = "";
-      await streamChatWithQualityGuard(
+      await streamChat(
         apiMessages,
         currentModel,
         (chunk) => {
@@ -891,10 +848,10 @@ export const ChatView = ({
             updateMessage(messageId, accumulated, true);
           });
         },
-        ({ content: finalText, warningLevel }) => {
-          updateMessage(messageId, finalText, false, warningLevel);
+        () => {
+          updateMessage(messageId, accumulated, false);
           setLoading(false);
-          void updateMessageContentEntry(messageId, finalText).catch((error) =>
+          void updateMessageContentEntry(messageId, accumulated).catch((error) =>
             console.error("failed to update message content", error),
           );
         },
@@ -967,10 +924,10 @@ export const ChatView = ({
 
       const latestMsgs = useChatStore.getState().messages;
       const apiMessages = buildApiMessages(latestMsgs, currentSystemPrompt, currentCharacterName);
-      const qualityContext = buildQualityContext(latestMsgs, apiMessages, currentSystemPrompt);
+      const qualityContext = buildQualityContext(latestMsgs);
 
       let accumulated = "";
-      await streamChatWithQualityGuard(
+      await streamChat(
         apiMessages,
         currentModel,
         (chunk) => {
@@ -979,14 +936,14 @@ export const ChatView = ({
             updateMessage(assistantId, accumulated, true);
           });
         },
-        ({ content: finalText, warningLevel }) => {
-          updateMessage(assistantId, finalText, false, warningLevel);
+        () => {
+          updateMessage(assistantId, accumulated, false);
           setLoading(false);
           void createMessageEntry({
             conversationId,
             id: assistantId,
             role: "assistant",
-            content: finalText,
+            content: accumulated,
           }).catch((error) => console.error("failed to persist regenerated message", error));
         },
         (error) => {
@@ -1031,6 +988,7 @@ export const ChatView = ({
       // エラーメッセージより前のメッセージでAPIコンテキストを構築
       const prevMsgs = currentMsgs.slice(0, errorMsgIndex);
       const apiMessages = buildApiMessages(prevMsgs, currentSystemPrompt, currentCharacterName);
+      const qualityContext = buildQualityContext(prevMsgs);
 
       // 既存メッセージIDを再利用してストリーミングを再開（updateMessageでerrorもクリアされる）
       updateMessage(errorMessageId, "", true);
@@ -1075,6 +1033,7 @@ export const ChatView = ({
           setLoading(false);
           toast.error(`再試行に失敗しました: ${error}`);
         },
+        qualityContext,
       );
     },
     [

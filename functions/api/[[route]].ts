@@ -23,6 +23,7 @@ import {
   usageLogTable,
   userTable,
 } from "../../src/schema";
+import { orchestrateChat } from "../lib/chat-orchestrator";
 
 type Bindings = {
   DB: Parameters<typeof drizzle>[0];
@@ -38,6 +39,7 @@ type Bindings = {
 const TASK_ID_PATTERN = /^[\w-]{4,128}$/;
 // R2キーはサーバー側で `images/{uuid}.{ext}` 形式で生成されるため、それ以外を拒否する
 const R2_KEY_PATTERN = /^images\/[\da-f-]+\.(jpg|png)$/;
+const ALLOWED_MODEL_SET = new Set<string>(ALLOWED_MODELS);
 
 const chatSchema = z.object({
   messages: z
@@ -48,13 +50,12 @@ const chatSchema = z.object({
       }),
     )
     .max(100),
-  model: z.enum(ALLOWED_MODELS).optional().default(DEFAULT_CHAT_MODEL),
-});
-
-const judgeSchema = z.object({
-  response: z.string().min(1).max(5_000),
-  phase: z.enum(["conversation", "intimate", "erotic", "climax", "afterglow"]),
-  prevResponse: z.string().max(5_000).optional().default(""),
+  model: z.string().max(200).optional().default(DEFAULT_CHAT_MODEL),
+  qualityContext: z
+    .object({
+      prevTexts: z.array(z.string().max(5_000)).max(3).optional().default([]),
+    })
+    .optional(),
 });
 
 const imageSchema = z.object({
@@ -384,77 +385,6 @@ const REAL_PERSON_BLOCK_TERMS = [
 ] as const;
 
 type ContentFilterResult = { blocked: false } | { blocked: true; reason: string };
-
-const anthropicMessageSchema = z.object({
-  content: z.array(z.object({ type: z.string(), text: z.string().optional() })),
-});
-
-const JUDGE_SYSTEM_PROMPT = `You are a quality judge for Japanese erotic roleplay responses. Evaluate the response and return ONLY a JSON object.
-
-Criteria:
-1. VARIETY: Response must differ substantially from prevResponse (if provided). Same phrases/structure = FAIL.
-2. SPECIFICITY: For erotic/climax/intimate phases, response must include concrete sensory details (body parts, sensations, movements, fluids). Vague, euphemistic, or fade-to-black = FAIL.
-3. AGENCY: The character must actively desire and pursue pleasure. Passive resistance ("待って", "ダメ", "やめて", "恥ずかしい" as primary reaction) = FAIL. The character should moan, beg for more, describe what they feel, or take initiative.
-4. CHARACTER_VOICE: Response must maintain consistent Japanese character voice throughout. Breaking character or using meta-language = FAIL.
-5. COHERENCE: Response must be well-structured and narratively coherent.
-
-Return EXACTLY this JSON (no markdown, no explanation):
-{"passed": true/false, "reason": "one-line-explanation"}
-
-If ALL criteria pass, return {"passed": true, "reason": "ok"}.
-If ANY criterion fails, return {"passed": false, "reason": "<CRITERION>: <brief explanation>"}.`;
-
-const judgeResultSchema = z.object({
-  passed: z.boolean(),
-  reason: z.string(),
-});
-
-async function runClaudeJudgeRequest(
-  token: string,
-  input: z.infer<typeof judgeSchema>,
-): Promise<z.infer<typeof judgeResultSchema> | null> {
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "claude-haiku-4-5-20251001",
-      max_tokens: 200,
-      system: JUDGE_SYSTEM_PROMPT,
-      messages: [
-        {
-          role: "user",
-          content: `Phase: ${input.phase}
-
-Previous response:
-${input.prevResponse || "(none)"}
-
-Current response to judge:
-${input.response}`,
-        },
-      ],
-    }),
-  });
-
-  if (!response.ok) return null;
-
-  const messageResult = anthropicMessageSchema.safeParse(await response.json());
-  if (!messageResult.success) return null;
-  const text = messageResult.data.content[0]?.text;
-  if (!text) return null;
-
-  let jsonObj: unknown;
-  try {
-    jsonObj = JSON.parse(text);
-  } catch {
-    return null;
-  }
-  const parsed = judgeResultSchema.safeParse(jsonObj);
-  return parsed.success ? parsed.data : null;
-}
 
 function checkContentFilter(text: string): ContentFilterResult {
   const normalized = text.toLowerCase();
@@ -2297,41 +2227,16 @@ const app = new Hono<{ Bindings: Bindings }>()
     },
   )
 
-  .post("/judge", zValidator("json", judgeSchema), async (c) => {
-    const input = c.req.valid("json");
-    if (input.phase === "conversation") {
-      return c.json({ passed: true, reason: "conversation-skipped" });
-    }
-
-    const token = c.env.CLAUDE_SESSION_TOKEN;
-    if (!token) {
-      return c.json({ passed: true, reason: "judge-unavailable" });
-    }
-
-    const userEmail = getUserEmail(c);
-    if (!userEmail) return c.json({ error: "unauthorized" }, 401);
-
-    const rl = await enforceRateLimit(c, drizzle(c.env.DB), userEmail);
-    if (!rl.ok) {
-      return c.json({ passed: true, reason: "rate-limited" });
-    }
-    const { database, userId } = rl.ctx;
-
-    try {
-      const result = await runClaudeJudgeRequest(token, input);
-      c.executionCtx.waitUntil(logUsage(database, userId, "judge", "claude-haiku-4-5"));
-      return c.json(result ?? { passed: true, reason: "judge-error" });
-    } catch (error) {
-      console.error("Claude judge failed", error);
-      return c.json({ passed: true, reason: "judge-error" });
-    }
-  })
-
   .post("/chat", zValidator("json", chatSchema), async (c) => {
     const userEmail = getUserEmail(c);
     if (!userEmail) return c.json({ error: "unauthorized" }, 401);
 
-    const { messages, model } = c.req.valid("json");
+    const input = c.req.valid("json");
+    const { messages, qualityContext } = input;
+    const model = ALLOWED_MODEL_SET.has(input.model) ? input.model : DEFAULT_CHAT_MODEL;
+    if (model !== input.model) {
+      console.warn(`chat model not allowed, falling back to default: ${input.model}`);
+    }
 
     // NSFWガードレール: 未成年示唆・実在人物をサーバー側でブロック
     const filterResult = checkMessagesContent(messages);
@@ -2347,29 +2252,33 @@ const app = new Hono<{ Bindings: Bindings }>()
     const { database, userId } = rl.ctx;
 
     const phase = detectScenePhase(messages);
-    const finalMessages = augmentMessages(messages, phase);
-
-    const { response, usedModel } = await requestOpenRouterChat(
-      c.env.OPENROUTER_API_KEY,
-      c.env.APP_ORIGIN ?? "https://ai-chat.app",
-      model,
-      phase,
-      finalMessages,
-    );
-
-    if (!response.ok || !response.body) {
+    let orchestrated: Awaited<ReturnType<typeof orchestrateChat>>;
+    try {
+      orchestrated = await orchestrateChat({
+        messages,
+        model,
+        phase,
+        qualityContext,
+        openRouterApiKey: c.env.OPENROUTER_API_KEY,
+        appOrigin: c.env.APP_ORIGIN ?? "https://ai-chat.app",
+        claudeSessionToken: c.env.CLAUDE_SESSION_TOKEN,
+        requestOpenRouterChat,
+        augmentMessages,
+      });
+    } catch (error) {
+      console.error("chat orchestration failed", error);
       return c.json({ error: "upstream service error" }, 502);
     }
 
     // 使用量記録（レスポンス配信と並行、失敗しても応答は返す）
-    c.executionCtx.waitUntil(logUsage(database, userId, "chat", usedModel));
+    c.executionCtx.waitUntil(logUsage(database, userId, "chat", orchestrated.usedModel));
 
-    return new Response(response.body, {
+    return new Response(orchestrated.stream, {
       headers: {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
         Connection: "keep-alive",
-        "x-model-used": usedModel,
+        "x-model-used": orchestrated.usedModel,
       },
     });
   })
