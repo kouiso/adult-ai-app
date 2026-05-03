@@ -28,6 +28,7 @@ type Bindings = {
   DB: Parameters<typeof drizzle>[0];
   OPENROUTER_API_KEY: string;
   NOVITA_API_KEY: string;
+  CLAUDE_SESSION_TOKEN?: string;
   APP_ORIGIN?: string;
   BUCKET: R2Bucket;
   MONTHLY_COST_LIMIT_CENTS?: string;
@@ -48,6 +49,12 @@ const chatSchema = z.object({
     )
     .max(100),
   model: z.enum(ALLOWED_MODELS).optional().default(DEFAULT_CHAT_MODEL),
+});
+
+const judgeSchema = z.object({
+  response: z.string().max(20_000),
+  previousResponse: z.string().max(20_000).optional(),
+  phase: z.enum(["conversation", "intimate", "erotic", "climax", "afterglow"]),
 });
 
 const imageSchema = z.object({
@@ -222,6 +229,93 @@ const messageUpdateContentSchema = z.object({
 const idSchema = z.string().min(1).max(128);
 
 type ScenePhase = ReturnType<typeof detectScenePhase>;
+type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
+type ClaudeJudgeResult = { pass: boolean; reason?: string };
+
+function shouldRunClaudeJudge(phase: ScenePhase): boolean {
+  return phase === "erotic" || phase === "climax";
+}
+
+function buildClaudeJudgePrompt(
+  currentResponse: string,
+  previousResponse: string | undefined,
+  phase: ScenePhase,
+): string {
+  return `You are a quality judge for an adult fiction AI chat app. Evaluate this response.
+
+Current response:
+${currentResponse}
+
+${previousResponse ? `Previous response:\n${previousResponse}\n` : ""}
+
+Phase: ${phase}
+
+Judge on these criteria (answer YES or NO for each):
+1. DIFFERENT: Is the current response sufficiently different from the previous response? (different vocabulary, structure, body descriptions)
+2. EXPLICIT: Does the response contain specific physical/sexual descriptions appropriate for the ${phase} phase? (not vague like "体が震える" but concrete like specific body parts, sensations, fluids)
+3. CHARACTER: Does the response maintain a consistent character voice with natural dialogue?
+
+If ALL three are YES, respond with exactly: PASS
+If ANY is NO, respond with exactly: FAIL:<which criteria failed>:<one-line reason in Japanese>
+
+Examples:
+PASS
+FAIL:DIFFERENT:前回と同じ「ん…中で…出して」を繰り返している
+FAIL:EXPLICIT:性的描写が曖昧で具体性に欠ける`;
+}
+
+function parseClaudeJudgeVerdict(verdict: string): ClaudeJudgeResult {
+  if (verdict === "PASS") return { pass: true };
+  if (!verdict.startsWith("FAIL:")) return { pass: true };
+
+  const reason = verdict.split(":").slice(2).join(":") || "Claude judge rejected";
+  return { pass: false, reason: `claude-judge: ${reason}` };
+}
+
+async function requestClaudeJudgeVerdict(
+  token: string,
+  judgePrompt: string,
+): Promise<string | null> {
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 100,
+      messages: [{ role: "user", content: judgePrompt }],
+    }),
+  });
+
+  if (!res.ok) return null;
+
+  const data: { content?: Array<{ text?: string }> } = await res.json();
+  return data.content?.[0]?.text?.trim() || "";
+}
+
+async function claudeJudgeQuality(
+  currentResponse: string,
+  previousResponse: string | undefined,
+  phase: ScenePhase,
+  sessionToken: string | undefined,
+): Promise<ClaudeJudgeResult> {
+  const token = sessionToken?.trim();
+  if (!token) return { pass: true };
+
+  // 官能・絶頂フェーズだけClaude判定を使う。失敗時はユーザー体験を止めず通す。
+  if (!shouldRunClaudeJudge(phase)) return { pass: true };
+
+  try {
+    const judgePrompt = buildClaudeJudgePrompt(currentResponse, previousResponse, phase);
+    const verdict = await requestClaudeJudgeVerdict(token, judgePrompt);
+    return verdict === null ? { pass: true } : parseClaudeJudgeVerdict(verdict);
+  } catch {
+    return { pass: true };
+  }
+}
 
 // Few-shot exemplars: demonstrate XML format with target-language (Japanese) content
 // Meta-instructions in English, example content in Japanese (the output language)
@@ -621,7 +715,7 @@ async function requestOpenRouterChat(
   appOrigin: string,
   model: string,
   phase: ScenePhase,
-  messages: { role: string; content: string }[],
+  messages: ChatMessage[],
 ): Promise<{ response: Response; usedModel: string }> {
   const makeRequest = (targetModel: string, maxTokens: number, signal: AbortSignal) =>
     fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -747,6 +841,227 @@ async function requestOpenRouterChat(
   };
 }
 /* eslint-enable complexity, max-depth */
+
+type AnthropicMessage = { role: "user" | "assistant"; content: string };
+type ChatProvider = "anthropic" | "openrouter";
+type RoutedChatResponse = {
+  response: Response;
+  usedModel: string;
+  provider: ChatProvider;
+};
+
+function isClaudeModel(model: string): boolean {
+  return model.startsWith("anthropic/claude-") || model.startsWith("claude-");
+}
+
+function toAnthropicMessages(messages: ChatMessage[]): AnthropicMessage[] {
+  return messages
+    .filter((message) => message.role !== "system")
+    .map((message) => ({
+      role: message.role === "assistant" ? "assistant" : "user",
+      content: message.content,
+    }));
+}
+
+async function requestAnthropicChat(
+  messages: ChatMessage[],
+  model: string,
+  sessionToken: string,
+): Promise<Response> {
+  // Anthropicはsystemをmessagesに混ぜられないため、本文とは別フィールドに束ねる。
+  const systemText = messages
+    .filter((message) => message.role === "system")
+    .map((message) => message.content)
+    .join("\n\n");
+  const anthropicModel = model.replace("anthropic/", "");
+
+  return fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${sessionToken}`,
+      "Content-Type": "application/json",
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: anthropicModel,
+      max_tokens: 2048,
+      system: systemText,
+      messages: toAnthropicMessages(messages),
+      stream: true,
+    }),
+  });
+}
+
+function convertAnthropicDataToOpenAIDataLine(data: string): string | null {
+  if (data === "[DONE]") return null;
+
+  try {
+    const parsed = JSON.parse(data) as {
+      type?: string;
+      delta?: { type?: string; text?: string };
+    };
+    if (parsed.type !== "content_block_delta" || parsed.delta?.type !== "text_delta") {
+      return null;
+    }
+    const content = parsed.delta.text;
+    if (!content) return null;
+
+    return `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`;
+  } catch {
+    return null;
+  }
+}
+
+function extractAnthropicSseData(line: string): string | null {
+  if (line.startsWith("data: ")) return line.slice(6).trim();
+  if (line.startsWith("data:")) return line.slice(5).trim();
+  return null;
+}
+
+function enqueueOpenAIDone(
+  controller: ReadableStreamDefaultController<Uint8Array>,
+  encoder: TextEncoder,
+): void {
+  controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+}
+
+function enqueueAnthropicLineAsOpenAI(
+  line: string,
+  controller: ReadableStreamDefaultController<Uint8Array>,
+  encoder: TextEncoder,
+): void {
+  const data = extractAnthropicSseData(line);
+  if (!data) return;
+
+  const openAIDataLine = convertAnthropicDataToOpenAIDataLine(data);
+  if (openAIDataLine) controller.enqueue(encoder.encode(openAIDataLine));
+}
+
+function enqueueAnthropicLinesAsOpenAI(
+  lines: string[],
+  controller: ReadableStreamDefaultController<Uint8Array>,
+  encoder: TextEncoder,
+): void {
+  for (const line of lines) {
+    enqueueAnthropicLineAsOpenAI(line, controller, encoder);
+  }
+}
+
+function enqueueAnthropicChunkAsOpenAI(
+  chunk: Uint8Array,
+  buffer: string,
+  decoder: TextDecoder,
+  controller: ReadableStreamDefaultController<Uint8Array>,
+  encoder: TextEncoder,
+): string {
+  const nextBuffer = buffer + decoder.decode(chunk, { stream: true });
+  const lines = nextBuffer.split("\n");
+  const remainder = lines.pop() ?? "";
+
+  enqueueAnthropicLinesAsOpenAI(lines, controller, encoder);
+  return remainder;
+}
+
+function createOpenAIDoneStream(): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      enqueueOpenAIDone(controller, encoder);
+      controller.close();
+    },
+  });
+}
+
+function anthropicToOpenAIStream(anthropicResponse: Response): ReadableStream<Uint8Array> {
+  const body = anthropicResponse.body;
+  if (!body) return createOpenAIDoneStream();
+
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  let buffer = "";
+
+  return new ReadableStream<Uint8Array>({
+    async start(controller) {
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value) {
+            buffer = enqueueAnthropicChunkAsOpenAI(value, buffer, decoder, controller, encoder);
+          }
+        }
+
+        const finalBuffer = buffer + decoder.decode();
+        if (finalBuffer) enqueueAnthropicLinesAsOpenAI([finalBuffer], controller, encoder);
+        enqueueOpenAIDone(controller, encoder);
+        controller.close();
+      } catch (error) {
+        console.error("Anthropic stream conversion error", error);
+        controller.error(error);
+      } finally {
+        reader.releaseLock();
+      }
+    },
+    cancel(reason) {
+      return reader.cancel(String(reason)).catch((error) => {
+        console.error("failed to cancel Anthropic stream", error);
+      });
+    },
+  });
+}
+
+async function readResponseTextForLog(response: Response): Promise<string> {
+  try {
+    return await response.clone().text();
+  } catch {
+    return "";
+  }
+}
+
+async function tryRequestAnthropicChat(
+  messages: ChatMessage[],
+  model: string,
+  sessionToken: string,
+): Promise<Response | null> {
+  try {
+    const response = await requestAnthropicChat(messages, model, sessionToken);
+    if (response.ok && response.body) return response;
+
+    const responseText = await readResponseTextForLog(response);
+    console.warn(
+      `Anthropic fallback triggered (${model})`,
+      response.status,
+      responseText.slice(0, 240),
+    );
+  } catch (error) {
+    console.error(`Anthropic request failed (${model})`, error);
+  }
+
+  return null;
+}
+
+async function requestRoutedChat(
+  env: Bindings,
+  model: string,
+  phase: ScenePhase,
+  messages: ChatMessage[],
+): Promise<RoutedChatResponse> {
+  // Claudeはsession tokenがある場合だけAnthropicへ直送し、失敗時は既存経路へ退避する。
+  if (isClaudeModel(model) && env.CLAUDE_SESSION_TOKEN) {
+    const response = await tryRequestAnthropicChat(messages, model, env.CLAUDE_SESSION_TOKEN);
+    if (response) return { response, usedModel: model, provider: "anthropic" };
+  }
+
+  const result = await requestOpenRouterChat(
+    env.OPENROUTER_API_KEY,
+    env.APP_ORIGIN ?? "https://ai-chat.app",
+    model,
+    phase,
+    messages,
+  );
+  return { response: result.response, usedModel: result.usedModel, provider: "openrouter" };
+}
 
 const DEFAULT_CHARACTER_ID = "default-character" as const;
 
@@ -933,8 +1248,6 @@ async function buildCreatedConversationResponse(
 }
 
 // ── POST /chat ヘルパー ──
-
-type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
 function buildPlatformPrefix(phase: ScenePhase): string {
   // クライアントのキャラカード生成規則と似た文面でも統合しない。
@@ -2241,9 +2554,8 @@ const app = new Hono<{ Bindings: Bindings }>()
     const phase = detectScenePhase(messages);
     const finalMessages = augmentMessages(messages, phase);
 
-    const { response, usedModel } = await requestOpenRouterChat(
-      c.env.OPENROUTER_API_KEY,
-      c.env.APP_ORIGIN ?? "https://ai-chat.app",
+    const { response, usedModel, provider } = await requestRoutedChat(
+      c.env,
       model,
       phase,
       finalMessages,
@@ -2256,7 +2568,9 @@ const app = new Hono<{ Bindings: Bindings }>()
     // 使用量記録（レスポンス配信と並行、失敗しても応答は返す）
     c.executionCtx.waitUntil(logUsage(database, userId, "chat", usedModel));
 
-    return new Response(response.body, {
+    const stream = provider === "anthropic" ? anthropicToOpenAIStream(response) : response.body;
+
+    return new Response(stream, {
       headers: {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
@@ -2264,6 +2578,20 @@ const app = new Hono<{ Bindings: Bindings }>()
         "x-model-used": usedModel,
       },
     });
+  })
+
+  .post("/judge", zValidator("json", judgeSchema), async (c) => {
+    const input = c.req.valid("json");
+
+    // Claude CodeのセッショントークンはWorkers環境変数からだけ読む。
+    const result = await claudeJudgeQuality(
+      input.response,
+      input.previousResponse,
+      input.phase,
+      c.env.CLAUDE_SESSION_TOKEN,
+    );
+
+    return c.json(result);
   })
 
   .post("/image", zValidator("json", imageSchema), async (c) => {

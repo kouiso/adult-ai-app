@@ -293,6 +293,44 @@ function runQualityChecksForClient(
   return result;
 }
 
+const claudeJudgeResponseSchema = z.object({
+  pass: z.boolean(),
+  reason: z.string().optional(),
+});
+
+async function runClaudeJudgeForClient(
+  response: string,
+  qualityContext: QualityCheckContext,
+): Promise<QualityCheckResult> {
+  // Claude判定は官能・絶頂フェーズだけに限定し、通信失敗時は品質ガードを止めない。
+  if (qualityContext.phase !== "erotic" && qualityContext.phase !== "climax") {
+    return { passed: true };
+  }
+
+  try {
+    const judgeResponse = await fetch("/api/judge", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        response,
+        previousResponse: qualityContext.prevAssistantResponse,
+        phase: qualityContext.phase,
+      }),
+    });
+
+    if (!judgeResponse.ok) return { passed: true };
+
+    const judgeResult = claudeJudgeResponseSchema.parse(await judgeResponse.json());
+    if (judgeResult.pass) return { passed: true };
+
+    console.info(`[quality-guard] claude-judge reason=${judgeResult.reason ?? "none"}`);
+    return { passed: false, failedCheck: "claude-judge" };
+  } catch (error) {
+    console.warn("claude judge failed", error);
+    return { passed: true };
+  }
+}
+
 // SSEストリームを全て読み取り、完全なテキストを返す（再生成判定用）
 async function collectStreamResponse(
   messages: { role: "system" | "user" | "assistant"; content: string }[],
@@ -393,7 +431,10 @@ async function executeQualityAttempt(
     const fallbackApplied = applyConversationXmlFallback(response, qualityContext.phase, attempt);
     if (fallbackApplied !== response) onChunk(fallbackApplied);
 
-    const checkResult = runQualityChecksForClient(fallbackApplied, qualityContext);
+    const localCheckResult = runQualityChecksForClient(fallbackApplied, qualityContext);
+    const checkResult = localCheckResult.passed
+      ? await runClaudeJudgeForClient(fallbackApplied, qualityContext)
+      : localCheckResult;
     console.info(
       `[quality-guard] attempt=${attempt} len=${fallbackApplied.length} phase=${qualityContext.phase} passed=${checkResult.passed} failed=${checkResult.failedCheck ?? "none"}`,
     );
