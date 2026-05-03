@@ -155,6 +155,8 @@ export function buildRetryMessages(
         return "\n英単語・アルファベットは本文に一切含めないこと。日本語だけで自然に書き直すこと。";
       case "within-turn-repetition":
         return "\n前回と同じ台詞・比喩・文末を繰り返さず、別の展開と語彙で書き直すこと。";
+      case "cross-turn-repetition":
+        return "\n前回と同じ文・比喩・身体反応語を繰り返している。完全に異なる表現・語彙・文構造で書き直すこと。";
       case "xml-format-missing":
         return "\n<response><action>...</action><dialogue>...</dialogue><inner>...</inner></response> を厳守すること。";
       case "meta_remark":

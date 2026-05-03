@@ -246,6 +246,17 @@ function getEffectiveMaxQualityRetries(phase: ScenePhase): number {
     : baseRetries;
 }
 
+// 品質ガード用に、現在生成中の応答より前の最後のassistant応答を取り出す
+function findPreviousAssistantContent(
+  messages: { role: "system" | "user" | "assistant"; content: string }[],
+): string | undefined {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message?.role === "assistant") return message.content;
+  }
+  return undefined;
+}
+
 const SHARED_JA_CJK_MARKERS = /[会実時経]/g;
 const KNOWN_XML_TAGS_PATTERN = /<\/?(?:response|action|dialogue|inner|narration|remember)[^>]*>?/g;
 
@@ -428,14 +439,20 @@ export async function streamChatWithQualityGuard(
 ): Promise<void> {
   let lastResponse = "";
   let lastFailedCheck: string | null = null;
-  const maxRetries = getEffectiveMaxQualityRetries(qualityContext.phase);
+  const effectiveQualityContext: QualityCheckContext = {
+    ...qualityContext,
+    prevAssistantResponse: qualityContext.prevAssistantResponse?.trim()
+      ? qualityContext.prevAssistantResponse
+      : findPreviousAssistantContent(messages),
+  };
+  const maxRetries = getEffectiveMaxQualityRetries(effectiveQualityContext.phase);
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const result = await executeQualityAttempt(
       messages,
       model,
       onChunk,
-      qualityContext,
+      effectiveQualityContext,
       attempt,
       lastResponse,
       lastFailedCheck,

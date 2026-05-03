@@ -87,6 +87,17 @@ describe("buildRetryMessages", () => {
     const result = buildRetryMessages([{ role: "system" as const, content: "p" }], "resp", {});
     expect(result).toHaveLength(3);
   });
+
+  it("cross-turn-repetition用の具体的な書き直し指示を含める", () => {
+    const result = buildRetryMessages(
+      [{ role: "system" as const, content: "p" }],
+      "resp",
+      {},
+      "cross-turn-repetition",
+    );
+    expect(result[2].content).toContain("前回と同じ文");
+    expect(result[2].content).toContain("完全に異なる表現");
+  });
 });
 
 describe("buildDriftCorrectionReminder", () => {

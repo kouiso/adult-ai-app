@@ -245,6 +245,16 @@ describe("runQualityChecks", () => {
     expect(result.failedCheck).toBe("within-turn-repetition");
   });
 
+  it("前ターンと同じaction/innerフレーズが2つ以上あるとcross-turn-repetitionを検出する", () => {
+    const prevAssistantResponse =
+      "<response><action>*窓辺でそっと息を整える。薄い光に目を細める*</action><dialogue>「うん、ここにいるよ」</dialogue><inner>まだ心の奥が静かに揺れている。言葉を探して少し黙る</inner></response>";
+    const xml =
+      "<response><action>*窓辺でそっと息を整える。指先でカップを包み直し、ゆっくり顔を上げる*</action><dialogue>「ねえ、もう少しそばにいて。あなたの声を聞いていると、胸のざわめきがゆっくりほどけて、さっきより素直に息ができるの」</dialogue><inner>まだ心の奥が静かに揺れている。けれど今は、名前を呼ぶだけで少し安心できる</inner></response>";
+    const result = runQualityChecks(xml, { phase: "intimate", prevAssistantResponse });
+    expect(result.passed).toBe(false);
+    expect(result.failedCheck).toBe("cross-turn-repetition");
+  });
+
   it("turn25相当のafterglow睡眠導線はconversationでも過剰接触扱いしない", () => {
     const xml =
       "<response><narration>腕に身体を預けたまま、眠る前の熱が静かにほどけていく。</narration><dialogue>「もう一回だけ、優しく抱き寄せて…？ おやすみなさい、けんちゃん…」</dialogue><inner>おやすみなさいって囁くだけで安心して、寝息に近い呼吸へゆっくり落ち着いていく。</inner></response>";

@@ -176,6 +176,51 @@ function checkWithinTurnRepetition(response: string): boolean {
   return true;
 }
 
+const CROSS_TURN_MIN_PHRASE_LENGTH = 8;
+const CROSS_TURN_REPETITION_THRESHOLD = 2;
+
+function extractActionContent(response: string): string {
+  return response.match(/<action>([\s\S]*?)<\/action>/)?.[1] || "";
+}
+
+function extractInnerContent(response: string): string {
+  return response.match(/<inner>([\s\S]*?)<\/inner>/)?.[1] || "";
+}
+
+function splitComparablePhrases(text: string): string[] {
+  return text
+    .split(/[。、！？\n]/)
+    .map((phrase) => phrase.trim())
+    .filter((phrase) => phrase.length >= CROSS_TURN_MIN_PHRASE_LENGTH);
+}
+
+function countRepeatedPhrases(previousText: string, currentText: string): number {
+  if (!previousText || !currentText) return 0;
+  return splitComparablePhrases(previousText).filter((phrase) => currentText.includes(phrase))
+    .length;
+}
+
+// チェック4.5: 前ターンとのフレーズ繰り返し検出
+function checkCrossTurnRepetition(
+  currentResponse: string,
+  previousAssistantContent: string | undefined,
+): boolean {
+  if (!previousAssistantContent || previousAssistantContent.length < 20) return true;
+
+  // 前ターンと現ターンの<action>/<inner>だけを比較し、本文XML構造には手を入れない
+  const repeatedCount =
+    countRepeatedPhrases(
+      extractActionContent(previousAssistantContent),
+      extractActionContent(currentResponse),
+    ) +
+    countRepeatedPhrases(
+      extractInnerContent(previousAssistantContent),
+      extractInnerContent(currentResponse),
+    );
+
+  return repeatedCount < CROSS_TURN_REPETITION_THRESHOLD;
+}
+
 // チェック5: 最大文字数（デコードループによる異常長文を検出）
 // max_tokens 2048 でも異常長文だけは弾きたい。官能シーンのクライマックスでも通常はこの上限で十分。
 function checkMaxLength(response: string): boolean {
@@ -277,6 +322,7 @@ export function runQualityChecks(
     [checkConversationEscalation(plainText, context.phase), "conversation-over-escalation"],
     [checkSceneMinLength(plainText, context.phase), "scene-min-length"],
     [checkWithinTurnRepetition(plainText), "within-turn-repetition"],
+    [checkCrossTurnRepetition(response, context.prevAssistantResponse), "cross-turn-repetition"],
     [checkMaxLength(plainText), "max-length-exceeded"],
   ];
 
