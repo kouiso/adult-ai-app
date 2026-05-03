@@ -350,3 +350,35 @@ export const getMaxQualityRetries = (phase: ScenePhase): number => {
   void phase;
   return 1;
 };
+
+function isClaudeJudgeResponse(data: unknown): data is { passed: boolean; reason: string } {
+  return (
+    typeof data === "object" &&
+    data !== null &&
+    "passed" in data &&
+    "reason" in data &&
+    typeof data.passed === "boolean" &&
+    typeof data.reason === "string"
+  );
+}
+
+export async function runClaudeJudge(
+  response: string,
+  phase: ScenePhase,
+  prevResponse?: string,
+): Promise<QualityCheckResult> {
+  try {
+    const res = await fetch("/api/judge", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ response, phase, prevResponse: prevResponse ?? "" }),
+    });
+    if (!res.ok) return { passed: true };
+    const data: unknown = await res.json();
+    if (!isClaudeJudgeResponse(data)) return { passed: true };
+    if (data.passed) return { passed: true };
+    return { passed: false, failedCheck: `claude-judge: ${data.reason}` };
+  } catch {
+    return { passed: true };
+  }
+}

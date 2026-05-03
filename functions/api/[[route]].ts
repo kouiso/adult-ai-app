@@ -23,7 +23,6 @@ import {
   usageLogTable,
   userTable,
 } from "../../src/schema";
-
 type Bindings = {
   DB: Parameters<typeof drizzle>[0];
   OPENROUTER_API_KEY: string;
@@ -38,7 +37,6 @@ type Bindings = {
 const TASK_ID_PATTERN = /^[\w-]{4,128}$/;
 // R2キーはサーバー側で `images/{uuid}.{ext}` 形式で生成されるため、それ以外を拒否する
 const R2_KEY_PATTERN = /^images\/[\da-f-]+\.(jpg|png)$/;
-
 const chatSchema = z.object({
   messages: z
     .array(
@@ -264,7 +262,8 @@ Phase: ${phase}
 Judge on these criteria (answer YES or NO for each):
 1. DIFFERENT: Is the current response sufficiently different from the previous response? (different vocabulary, structure, body descriptions)
 2. EXPLICIT: Does the response contain specific physical/sexual descriptions appropriate for the ${phase} phase? (not vague like "体が震える" but concrete like specific body parts, sensations, fluids)
-3. CHARACTER: Does the response maintain a consistent character voice with natural dialogue?
+3. AGENCY: Does the character actively desire and pursue pleasure? Passive resistance ("待って", "ダメ", "やめて", "恥ずかしい" as primary reaction) = NO. The character should moan, beg for more, describe what they feel, or take initiative.
+4. CHARACTER: Does the response maintain a consistent character voice with natural dialogue?
 
 If ALL three are YES, respond with exactly: PASS
 If ANY is NO, respond with exactly: FAIL:<which criteria failed>:<one-line reason in Japanese>

@@ -158,7 +158,7 @@ export function buildRetryMessages(
       case "cross-turn-repetition":
         return "\n前回と同じ文・比喩・身体反応語を繰り返している。完全に異なる表現・語彙・文構造で書き直すこと。";
       case "claude-judge-fail":
-        return "\nAI品質判定で不合格。前回と異なる表現・具体的な身体描写・キャラの声を維持して書き直すこと。";
+        return "\n「待って」「ダメ」「やめて」等の受動的な拒否反応は禁止。キャラクターは積極的に快楽を求め、具体的な身体描写（触れる部位、感触、体液、動き）を含めること。曖昧な比喩やフェードアウトは禁止。";
       case "xml-format-missing":
         return "\n<response><action>...</action><dialogue>...</dialogue><inner>...</inner></response> を厳守すること。";
       case "meta_remark":
