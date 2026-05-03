@@ -21,6 +21,10 @@ const LEGACY_MODEL_MIGRATIONS: [number, string][] = [
   // v22で既定モデルをEVAへ統一。旧既定値だけ自動移行して明示的な選択はなるべく壊さない。
   [22, "qwen/qwen-2.5-72b-instruct"],
   [22, "anthracite-org/magnum-v4-72b"],
+  // v24: Claude/GPTモデルを削除（従量課金禁止）。保存済みの選択をmagnumへ戻す。
+  [24, "anthropic/claude-opus-4-20250514"],
+  [24, "anthropic/claude-sonnet-4-20250514"],
+  [24, "anthropic/claude-haiku-4-5-20251001"],
 ];
 
 function shouldMigrateModel(version: number, currentModel: string): boolean {
@@ -88,7 +92,7 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: "ai-chat-settings",
-      version: 22,
+      version: 24,
       migrate: (persistedState: unknown, version: number): PersistedSettings => {
         const result = persistedSettingsSchema.safeParse(persistedState);
         const parsed = result.success
