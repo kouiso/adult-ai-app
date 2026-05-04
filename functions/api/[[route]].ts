@@ -6,6 +6,7 @@ import { handle } from "hono/cloudflare-pages";
 import { cors } from "hono/cors";
 import { z } from "zod/v4";
 
+import { DEFAULT_CHARACTER } from "../../src/data/default-character";
 import { ALL_FIRST_PERSONS, extractFirstPerson } from "../../src/lib/chat-message-adapter";
 import {
   ALLOWED_MODELS,
@@ -1333,7 +1334,7 @@ function buildServerQualityContext(
   };
 }
 
-const DEFAULT_CHARACTER_ID = "default-character" as const;
+const DEFAULT_CHARACTER_ID = DEFAULT_CHARACTER.id;
 
 // ── POST /conversations ヘルパー ──
 
@@ -1347,11 +1348,11 @@ async function ensureDefaultCharacter(
     .values({
       id: DEFAULT_CHARACTER_ID,
       userId,
-      name: "AI",
-      avatar: null,
-      systemPrompt: "",
-      greeting: "",
-      tags: [],
+      name: DEFAULT_CHARACTER.name,
+      avatar: DEFAULT_CHARACTER.avatar,
+      systemPrompt: DEFAULT_CHARACTER.systemPrompt,
+      greeting: DEFAULT_CHARACTER.greeting,
+      tags: DEFAULT_CHARACTER.tags,
       createdAt: now,
     })
     .onConflictDoNothing();

@@ -405,6 +405,36 @@ type ImageGenerationSetup = Pick<
   msgs: ChatMessage[];
 };
 
+type AutoImageMessageIdsSetter = (update: (ids: Set<string>) => Set<string>) => void;
+
+type ImageGenerationTaskDeps = ImageResultHandlerDeps & {
+  prompt: string;
+  characterDescription: string;
+  phase: ScenePhase;
+};
+
+const addAutoImageMessageId = (
+  isAutoGeneration: boolean,
+  imageMessageId: string,
+  setActiveIds: AutoImageMessageIdsSetter,
+): void => {
+  if (!isAutoGeneration) return;
+  setActiveIds((ids) => new Set(ids).add(imageMessageId));
+};
+
+const removeAutoImageMessageId = (
+  isAutoGeneration: boolean,
+  imageMessageId: string,
+  setActiveIds: AutoImageMessageIdsSetter,
+): void => {
+  if (!isAutoGeneration) return;
+  setActiveIds((ids) => {
+    const nextIds = new Set(ids);
+    nextIds.delete(imageMessageId);
+    return nextIds;
+  });
+};
+
 const getImageGenerationSetup = (isOnline: boolean): ImageGenerationSetup | null => {
   if (!isOnline) {
     toast.error("オフライン中は画像生成できません");
@@ -530,6 +560,39 @@ const pollGeneratedImage = async (
   }
 
   return { status: "timeout" };
+};
+
+const runImageGenerationTask = async ({
+  prompt,
+  characterDescription,
+  phase,
+  imageMessageId,
+  updateMessage,
+  updateMessageImage,
+  persistMessageImageEntry,
+  updateMessageContentEntry,
+}: ImageGenerationTaskDeps): Promise<void> => {
+  try {
+    const result = await generateImage(prompt, characterDescription, phase);
+    if ("error" in result) {
+      updateMessage(imageMessageId, `❌ 画像生成エラー: ${result.error}`, false);
+      return;
+    }
+
+    const imageResult = await pollGeneratedImage(result.task_id, (attempt, maxAttempts) => {
+      updateMessage(imageMessageId, `🖼️ 画像を生成中... (${attempt}/${maxAttempts})`, true);
+    });
+
+    processImageResult(imageResult, {
+      imageMessageId,
+      updateMessage,
+      updateMessageImage,
+      persistMessageImageEntry,
+      updateMessageContentEntry,
+    });
+  } catch (err) {
+    updateMessage(imageMessageId, `❌ ネットワークエラー: ${String(err)}`, false);
+  }
 };
 
 const canMessageSpeak = (
@@ -748,10 +811,15 @@ export const ChatView = ({
   const setMessages = useChatStore((s) => s.setMessages);
   const setLoading = useChatStore((s) => s.setLoading);
   const nsfwBlur = useSettingsStore((s) => s.nsfwBlur);
+  const autoGenerateImages = useSettingsStore((s) => s.autoGenerateImages);
   const isOnline = useNetworkStatus();
   const [isMobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [isSearchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [imageGenerationCount, setImageGenerationCount] = useState(0);
+  const [activeAutoImageMessageIds, setActiveAutoImageMessageIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [sceneConversationPrompts, setSceneConversationPrompts] =
     useState<SceneConversationPrompts>({});
 
@@ -767,6 +835,7 @@ export const ChatView = ({
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
   const previousScenePhaseRef = useRef<ScenePhase>("conversation");
   const pendingAutoImageAssistantIdsRef = useRef<Set<string>>(new Set());
+  const wasOfflineRef = useRef(false);
 
   const {
     conversations,
@@ -801,6 +870,18 @@ export const ChatView = ({
   useEffect(() => {
     scrollToBottom();
   }, [messages, scrollToBottom]);
+
+  useEffect(() => {
+    if (!isOnline) {
+      wasOfflineRef.current = true;
+      return;
+    }
+
+    if (wasOfflineRef.current) {
+      toast.success("接続が復帰しました");
+      wasOfflineRef.current = false;
+    }
+  }, [isOnline]);
 
   // 現在の会話のキャラクター情報（レンダー毎の再検索を防ぐ）
   const currentConversation = useMemo(
@@ -1473,6 +1554,24 @@ export const ChatView = ({
     ],
   );
 
+  const startImageGenerationUi = useCallback(
+    (imageMessageId: string, isAutoGeneration: boolean, lockInput: boolean) => {
+      setImageGenerationCount((count) => count + 1);
+      if (lockInput) setLoading(true);
+      addAutoImageMessageId(isAutoGeneration, imageMessageId, setActiveAutoImageMessageIds);
+    },
+    [setLoading],
+  );
+
+  const finishImageGenerationUi = useCallback(
+    (imageMessageId: string, isAutoGeneration: boolean, lockInput: boolean) => {
+      if (lockInput) setLoading(false);
+      setImageGenerationCount((count) => Math.max(0, count - 1));
+      removeAutoImageMessageId(isAutoGeneration, imageMessageId, setActiveAutoImageMessageIds);
+    },
+    [setLoading],
+  );
+
   const handleGenerateImage = useCallback(
     async (options?: { lockInput?: boolean }) => {
       const setup = getImageGenerationSetup(isOnline);
@@ -1485,13 +1584,14 @@ export const ChatView = ({
       const imageMessageId = crypto.randomUUID();
       const conversationId = useChatStore.getState().currentConversationId;
       const lockInput = options?.lockInput ?? true;
+      const isAutoGeneration = !lockInput;
 
       if (!conversationId) return;
 
       // キャラの見た目情報を抽出して画像プロンプトに渡す
       const charDesc = getCharacterImageDescription(currentConversation?.characterSystemPrompt);
 
-      if (lockInput) setLoading(true);
+      startImageGenerationUi(imageMessageId, isAutoGeneration, lockInput);
       addMessage({
         id: imageMessageId,
         role: "assistant",
@@ -1507,35 +1607,27 @@ export const ChatView = ({
       }).catch((error) => console.error("failed to persist image message", error));
 
       try {
-        const result = await generateImage(prompt, charDesc, phase);
-        if ("error" in result) {
-          updateMessage(imageMessageId, `❌ 画像生成エラー: ${result.error}`, false);
-          return;
-        }
-
-        const imageResult = await pollGeneratedImage(result.task_id, (attempt, maxAttempts) => {
-          updateMessage(imageMessageId, `🖼️ 画像を生成中... (${attempt}/${maxAttempts})`, true);
-        });
-
-        processImageResult(imageResult, {
+        await runImageGenerationTask({
+          prompt,
+          characterDescription: charDesc,
+          phase,
           imageMessageId,
           updateMessage,
           updateMessageImage,
           persistMessageImageEntry,
           updateMessageContentEntry,
         });
-      } catch (err) {
-        updateMessage(imageMessageId, `❌ ネットワークエラー: ${String(err)}`, false);
       } finally {
-        if (lockInput) setLoading(false);
+        finishImageGenerationUi(imageMessageId, isAutoGeneration, lockInput);
       }
     },
     [
       createMessageEntry,
+      finishImageGenerationUi,
       persistMessageImageEntry,
+      startImageGenerationUi,
       updateMessageContentEntry,
       isOnline,
-      setLoading,
       currentConversation?.characterSystemPrompt,
     ],
   );
@@ -1687,6 +1779,7 @@ export const ChatView = ({
   );
 
   const isInputDisabled = isLoading || !isOnline;
+  const isGeneratingImage = imageGenerationCount > 0;
 
   return (
     <div className="flex h-full">
@@ -1711,7 +1804,7 @@ export const ChatView = ({
 
         {!isOnline && (
           <div className="border-b border-yellow-500/30 bg-yellow-500/10 px-4 py-2 text-sm text-yellow-700 dark:text-yellow-400">
-            オフライン中です。会話履歴は閲覧できますが、新規送信はできません。
+            オフラインです。電波が戻ったら自動で送信できます
           </div>
         )}
 
@@ -1767,6 +1860,9 @@ export const ChatView = ({
                   canSpeak={canMessageSpeak(ttsEnabled, message)}
                   isSpeaking={speakingMessageId === message.id && isSpeaking}
                   isLast={message.id === lastAssistantId}
+                  isAutoGeneratingImage={
+                    autoGenerateImages && activeAutoImageMessageIds.has(message.id)
+                  }
                   showLabel={
                     message.role === "assistant" &&
                     (visibleIndex === 0 || previousVisibleMessage?.role !== "assistant")
@@ -1786,6 +1882,7 @@ export const ChatView = ({
           onSend={stableHandleSend}
           onGenerateImage={stableHandleGenerateImage}
           isLoading={isInputDisabled}
+          isGeneratingImage={isGeneratingImage}
         />
         <footer className="border-t border-border/50 bg-card/70 px-4 py-3">
           <div className="mx-auto max-w-3xl">

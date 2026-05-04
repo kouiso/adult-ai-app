@@ -1,12 +1,13 @@
 import { memo, useCallback, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 
-import { Pencil, RefreshCw, RotateCcw, Volume2, VolumeOff } from "lucide-react";
+import { Pencil, RefreshCw, RotateCcw, Sparkles, Volume2, VolumeOff } from "lucide-react";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/component/ui/avatar";
 import { Badge } from "@/component/ui/badge";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/component/ui/tooltip";
 import { apiFetch } from "@/lib/api";
 import { cn, getAvatarFallback } from "@/lib/utils";
 import {
@@ -32,6 +33,7 @@ interface MessageBubbleProps {
   warningLevel?: boolean;
   isLast?: boolean;
   showLabel?: boolean;
+  isAutoGeneratingImage?: boolean;
   isHighlighted?: boolean;
   onSpeak?: (messageId: string, text: string) => void;
   onStopSpeaking?: () => void;
@@ -468,6 +470,7 @@ interface MessageActionsProps {
   isUser: boolean;
   isLoading: boolean;
   isLast: boolean;
+  warningLevel: boolean;
   canSpeak: boolean;
   isSpeaking: boolean;
   content: string;
@@ -531,11 +534,34 @@ const RegenerateButton = ({
   );
 };
 
+const QualityWarningBadge = () => (
+  <TooltipProvider>
+    <Tooltip>
+      <TooltipTrigger
+        type="button"
+        className="inline-flex appearance-none border-0 bg-transparent p-0"
+        aria-label="品質低下の説明"
+      >
+        <Badge
+          variant="outline"
+          className="border-yellow-500/40 text-yellow-700 dark:text-yellow-300"
+        >
+          ⚠ 品質低下
+        </Badge>
+      </TooltipTrigger>
+      <TooltipContent>
+        AI応答の品質が低下している可能性があります。再生成を推奨します
+      </TooltipContent>
+    </Tooltip>
+  </TooltipProvider>
+);
+
 const MessageActions = ({
   id,
   isUser,
   isLoading,
   isLast,
+  warningLevel,
   canSpeak,
   isSpeaking,
   content,
@@ -561,6 +587,7 @@ const MessageActions = ({
       hasEditHandler={hasEditHandler}
       onStartEdit={onStartEdit}
     />
+    {warningLevel && !isUser && <QualityWarningBadge />}
     <RegenerateButton
       id={id}
       isUser={isUser}
@@ -655,14 +682,7 @@ const BubbleFooter = ({
 }: BubbleFooterProps) => (
   <>
     {error && !isUser && !isEditing && <ErrorIndicator messageId={id} onRetry={onRetry} />}
-    {warningLevel && !isUser && !isEditing && !error && (
-      <Badge
-        variant="outline"
-        className="border-yellow-500/40 text-yellow-700 dark:text-yellow-300"
-      >
-        ⚠ quality warning
-      </Badge>
-    )}
+    {warningLevel && !isUser && !isEditing && !error && isStreaming && <QualityWarningBadge />}
 
     {!isStreaming && !isEditing && !error && (
       <MessageActions
@@ -670,6 +690,7 @@ const BubbleFooter = ({
         isUser={isUser}
         isLoading={isLoading}
         isLast={isLast}
+        warningLevel={warningLevel}
         canSpeak={canSpeak}
         isSpeaking={isSpeaking}
         content={content}
@@ -705,6 +726,7 @@ const applyBubbleDefaults = (props: MessageBubbleProps) => ({
   isSpeaking: false,
   isLast: false,
   showLabel: false,
+  isAutoGeneratingImage: false,
   isHighlighted: false,
   ...props,
 });
@@ -726,6 +748,7 @@ export const MessageBubble = memo((rawProps: MessageBubbleProps) => {
     isSpeaking,
     isLast,
     showLabel,
+    isAutoGeneratingImage,
     isHighlighted,
     onSpeak,
     onStopSpeaking,
@@ -739,6 +762,8 @@ export const MessageBubble = memo((rawProps: MessageBubbleProps) => {
   const [showAvatarViewer, setShowAvatarViewer] = useState(false);
   const bubbleStyle = isUser ? userBubbleStyle : assistantBubbleStyle;
   const visibleCharacterName = isUser ? null : getVisibleCharacterName(characterName);
+  const shouldShowMessageMeta =
+    !isUser && ((showLabel && visibleCharacterName) || isAutoGeneratingImage);
 
   const handleEditSave = useCallback(
     (newContent: string) => {
@@ -763,8 +788,18 @@ export const MessageBubble = memo((rawProps: MessageBubbleProps) => {
       />
       <div className={cn("max-w-[75%] space-y-2", isUser && "text-right")}>
         <div>
-          {showLabel && visibleCharacterName && (
-            <p className="mb-1 text-xs font-medium text-muted-foreground">{visibleCharacterName}</p>
+          {shouldShowMessageMeta && (
+            <div className="mb-1 flex flex-wrap items-center gap-2">
+              {showLabel && visibleCharacterName ? (
+                <p className="text-xs font-medium text-muted-foreground">{visibleCharacterName}</p>
+              ) : null}
+              {isAutoGeneratingImage ? (
+                <Badge variant="secondary" className="h-5 animate-pulse bg-primary/10 text-primary">
+                  <Sparkles className="h-3 w-3" />
+                  自動生成中
+                </Badge>
+              ) : null}
+            </div>
           )}
           <BubbleBody
             id={id}
