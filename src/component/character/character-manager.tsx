@@ -13,6 +13,7 @@ import { useChatQuery } from "@/hook/use-chat-query";
 import type { Character, CharacterInput } from "@/lib/api";
 import type { GeneratedCharacter } from "@/lib/character-generator";
 import { buildSystemPrompt, parseSystemPrompt } from "@/lib/prompt-builder";
+import { getAvatarFallback } from "@/lib/utils";
 import { useChatStore } from "@/store/chat-store";
 import { useSettingsStore } from "@/store/settings-store";
 
@@ -260,7 +261,7 @@ interface CharacterListItemProps {
 
 const CharacterAvatar = ({ character }: { character: Character }) => {
   const av = character.avatar;
-  if (!av) return <>{character.name.slice(0, 2)}</>;
+  if (!av) return <>{getAvatarFallback(character.name)}</>;
   if (av.startsWith("http") || av.startsWith("/")) {
     return <img src={av} alt={character.name} className="h-8 w-8 rounded-full object-cover" />;
   }

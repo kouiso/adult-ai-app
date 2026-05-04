@@ -2,6 +2,7 @@ import { ArrowRight, Clock3 } from "lucide-react";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/component/ui/avatar";
 import type { PersistedMessage } from "@/lib/api";
+import { getAvatarFallback } from "@/lib/utils";
 import { stripXmlTags } from "@/lib/xml-response-parser";
 
 type ContinueConversationCardProps = {
@@ -66,7 +67,7 @@ export const ContinueConversationCard = ({
         <div className="flex items-start gap-3">
           <Avatar size="sm">
             {characterAvatar ? <AvatarImage src={characterAvatar} alt={characterName} /> : null}
-            <AvatarFallback>{characterName.slice(0, 1)}</AvatarFallback>
+            <AvatarFallback>{getAvatarFallback(characterName)}</AvatarFallback>
           </Avatar>
           <div className="min-w-0 flex-1">
             <div className="flex items-center justify-between gap-2">
