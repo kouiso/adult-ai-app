@@ -1632,7 +1632,7 @@ export const ChatView = ({
                 />
               </div>
             )}
-            {visibleMessages.map((message) => (
+            {visibleMessages.map((message, index) => (
               <MessageBubble
                 key={message.id}
                 id={message.id}
@@ -1649,6 +1649,10 @@ export const ChatView = ({
                 canSpeak={canMessageSpeak(ttsEnabled, message)}
                 isSpeaking={speakingMessageId === message.id && isSpeaking}
                 isLast={message.id === lastAssistantId}
+                showLabel={
+                  message.role === "assistant" &&
+                  (index === 0 || visibleMessages[index - 1].role !== "assistant")
+                }
                 isHighlighted={highlightedMessageIds.has(message.id)}
                 onSpeak={handleSpeak}
                 onStopSpeaking={handleStopSpeaking}
