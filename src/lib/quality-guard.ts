@@ -8,6 +8,7 @@ import type { ScenePhase } from "./scene-phase";
 
 export interface QualityCheckContext {
   phase: ScenePhase;
+  characterName?: string;
   prevAssistantResponse?: string;
   // キャラクターの一人称（設定されている場合のみチェック）
   firstPerson?: string;
@@ -240,6 +241,16 @@ function checkXmlFormat(response: string): boolean {
   return isXmlResponse(response);
 }
 
+function checkSelfThirdPersonAction(response: string, characterName: string | undefined): boolean {
+  const name = characterName?.trim();
+  if (!name) return true;
+
+  const parsed = parseXmlResponse(response);
+  if (!parsed?.action) return true;
+
+  return !["が", "は", "の"].some((particle) => parsed.action.includes(`${name}${particle}`));
+}
+
 // チェック9: 「ユーザー」という単語の漏れ検出（没入感破壊ワード）
 // モデルがユーザーのことを「ユーザー」と呼ぶのはロールプレイ文脈として不自然
 function checkNoUserLeak(plainText: string): boolean {
@@ -326,6 +337,7 @@ export function runQualityChecks(
     [checkMultilingualLeak(response), "multilingual-leak"],
     [checkNoEnglish(plainText), "no-english"],
     [checkXmlFormat(response), "xml-format-missing"],
+    [checkSelfThirdPersonAction(response, context.characterName), "self-third-person-action"],
     [checkNoUserLeak(plainText), "user-leak"],
     [checkConversationEscalation(plainText, context.phase), "conversation-over-escalation"],
     [checkSceneMinLength(plainText, context.phase), "scene-min-length"],

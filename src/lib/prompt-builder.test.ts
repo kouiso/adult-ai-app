@@ -36,6 +36,21 @@ describe("buildSystemPrompt", () => {
     expect(result).toContain("ABSOLUTE LANGUAGE RULE");
   });
 
+  it("action narrationを一人称/主語省略に固定する指示を含む", () => {
+    const result = buildSystemPrompt({
+      name: "結衣",
+      personality: "甘えたがり",
+      scenario: "深夜ベッド",
+      custom: "一人称は「あたし」",
+    });
+
+    expect(result).toContain("[ACTION POV");
+    expect(result).toContain("All action narration");
+    expect(result).toContain("結衣が身体を震わせる");
+    expect(result).toContain("身体がびくっと震える");
+    expect(result).toContain("Vary your response structure");
+  });
+
   it("空フィールドはセクションを省略する", () => {
     const result = buildSystemPrompt({
       name: "テスト",

@@ -1250,6 +1250,8 @@ const QUALITY_RETRY_HINTS: Record<string, string> = {
     "<response><action>...</action><dialogue>...</dialogue><inner>...</inner></response> を厳守してください。",
   "scene-min-length": "シーンフェーズでは十分な長さと具体描写を含めてください。",
   "cross-turn-repetition": "前回と同じ表現を使わず、語彙、身体反応、文構造を変えてください。",
+  "self-third-person-action":
+    "action内で自分を名前呼びしないでください。自分の身体感覚として一人称または主語省略で書いてください。",
   "inner-missing": "<inner>にキャラクターの内心を必ず入れてください。",
 };
 
@@ -1349,6 +1351,12 @@ function getPreviousInnerTexts(messages: ChatMessage[]): string[] {
     .filter((inner) => inner.length >= 5);
 }
 
+function extractCharacterName(systemPrompt: string): string | undefined {
+  const matched = systemPrompt.match(/^名前:\s*(.+)$/m);
+  const name = matched?.[1]?.trim();
+  return name && name.length <= 80 ? name : undefined;
+}
+
 function buildServerQualityContext(
   messages: ChatMessage[],
   phase: ScenePhase,
@@ -1357,6 +1365,7 @@ function buildServerQualityContext(
   const firstPerson = extractFirstPerson(systemPrompt);
   return {
     phase,
+    characterName: extractCharacterName(systemPrompt),
     prevAssistantResponse: getPreviousAssistantContent(messages),
     firstPerson: firstPerson ?? undefined,
     wrongFirstPersons: firstPerson

@@ -201,6 +201,29 @@ describe("runQualityChecks", () => {
     expect(result.failedCheck).toBe("wrong-first-person");
   });
 
+  it("action内で自分を名前+助詞で三人称描写するとfail", () => {
+    const xml =
+      "<response><action>*結衣が身体を震わせて、息が浅くなる*</action><dialogue>「ん…もっと近くに来て」</dialogue><inner>嬉しいのに、うまく声にならない。</inner></response>";
+    const result = runQualityChecks(xml, {
+      phase: "intimate",
+      characterName: "結衣",
+    });
+
+    expect(result.passed).toBe(false);
+    expect(result.failedCheck).toBe("self-third-person-action");
+  });
+
+  it("action内の主語省略された身体感覚はpass", () => {
+    const xml =
+      "<response><action>*身体がびくっと震えて、息が浅くなる。指先がシーツを掴んだまま、熱が頬まで上がっていく*</action><dialogue>「ん…もっと近くに来て。あなたの声、すぐそばで聞きたい」</dialogue><inner>嬉しいのに、うまく声にならない。逃げたい気持ちより、近づきたい気持ちのほうが強い。</inner></response>";
+    const result = runQualityChecks(xml, {
+      phase: "intimate",
+      characterName: "結衣",
+    });
+
+    expect(result.passed).toBe(true);
+  });
+
   it("異常に長い応答を検出する", () => {
     // 5文字以上の同一部分列が3回出現しないようにする
     // 各文字位置をユニークにするため、連番をそのまま日本語文字列化

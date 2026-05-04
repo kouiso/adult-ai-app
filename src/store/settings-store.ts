@@ -25,6 +25,10 @@ const LEGACY_MODEL_MIGRATIONS: [number, string][] = [
   [24, "anthropic/claude-opus-4-20250514"],
   [24, "anthropic/claude-sonnet-4-20250514"],
   [24, "anthropic/claude-haiku-4-5-20251001"],
+  // v25: 品質優先で既定モデルをClaude Sonnet 4へ戻す。
+  [25, "qwen/qwen-2.5-72b-instruct"],
+  [25, "anthracite-org/magnum-v4-72b"],
+  [25, "deepseek/deepseek-chat"],
 ];
 
 function shouldMigrateModel(version: number, currentModel: string): boolean {
@@ -92,7 +96,7 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: "ai-chat-settings",
-      version: 24,
+      version: 25,
       migrate: (persistedState: unknown, version: number): PersistedSettings => {
         const result = persistedSettingsSchema.safeParse(persistedState);
         const parsed = result.success
