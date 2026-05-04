@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { DEFAULT_CHAT_MODEL } from "@/lib/model";
+
 import { useSettingsStore } from "./settings-store";
 
 describe("useSettingsStore", () => {
   beforeEach(() => {
+    localStorage.clear();
     useSettingsStore.setState({
       model: "sao10k/l3.1-euryale-70b",
       nsfwBlur: false,
@@ -13,6 +16,7 @@ describe("useSettingsStore", () => {
       ttsVoiceUri: "",
       ttsRate: 1,
       ttsPitch: 1,
+      activeCharacterId: null,
     });
   });
 
@@ -53,5 +57,29 @@ describe("useSettingsStore", () => {
 
     useSettingsStore.getState().setTtsPitch(0.8);
     expect(useSettingsStore.getState().ttsPitch).toBe(0.8);
+  });
+
+  it("v24以前の旧既定モデルをClaude Sonnet 4へ移行する", async () => {
+    localStorage.setItem(
+      "ai-chat-settings",
+      JSON.stringify({
+        state: {
+          model: "anthracite-org/magnum-v4-72b",
+          nsfwBlur: false,
+          darkMode: true,
+          autoGenerateImages: false,
+          ttsEnabled: false,
+          ttsVoiceUri: "",
+          ttsRate: 1,
+          ttsPitch: 1,
+          activeCharacterId: null,
+        },
+        version: 24,
+      }),
+    );
+
+    await useSettingsStore.persist.rehydrate();
+
+    expect(useSettingsStore.getState().model).toBe(DEFAULT_CHAT_MODEL);
   });
 });
