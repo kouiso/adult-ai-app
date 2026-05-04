@@ -643,6 +643,12 @@ const BubbleFooter = ({
 const userBubbleStyle = "bg-gradient-user-bubble text-white rounded-tr-sm shadow-md";
 const assistantBubbleStyle = "bg-card/90 text-foreground rounded-tl-sm shadow-sm";
 
+const getVisibleCharacterName = (name: string): string | null => {
+  const trimmedName = name.trim();
+  if (!trimmedName || trimmedName === "AI") return null;
+  return trimmedName;
+};
+
 // デフォルト値をスプレッドで適用し、関数内のcyclomatic complexityを削減
 const applyBubbleDefaults = (props: MessageBubbleProps) => ({
   isLoading: false,
@@ -687,13 +693,14 @@ export const MessageBubble = memo((rawProps: MessageBubbleProps) => {
   const [isEditing, setIsEditing] = useState(false);
   const [showAvatarViewer, setShowAvatarViewer] = useState(false);
   const bubbleStyle = isUser ? userBubbleStyle : assistantBubbleStyle;
+  const visibleCharacterName = isUser ? null : getVisibleCharacterName(characterName);
 
   const handleEditSave = useCallback(
     (newContent: string) => {
       setIsEditing(false);
       onEdit?.(id, newContent);
     },
-    [id, onEdit],
+    [id, onEdit, setIsEditing],
   );
 
   return (
@@ -710,20 +717,22 @@ export const MessageBubble = memo((rawProps: MessageBubbleProps) => {
         onAvatarClick={() => setShowAvatarViewer(true)}
       />
       <div className={cn("max-w-[75%] space-y-2", isUser && "text-right")}>
-        {!isUser && showLabel && (
-          <div className="text-xs text-muted-foreground">{characterName}</div>
-        )}
-        <BubbleBody
-          id={id}
-          role={role}
-          content={content}
-          isStreaming={isStreaming}
-          isHighlighted={isHighlighted}
-          isEditing={isEditing}
-          bubbleStyle={bubbleStyle}
-          onSave={handleEditSave}
-          onCancelEdit={() => setIsEditing(false)}
-        />
+        <div>
+          {showLabel && visibleCharacterName && (
+            <p className="mb-1 text-xs font-medium text-muted-foreground">{visibleCharacterName}</p>
+          )}
+          <BubbleBody
+            id={id}
+            role={role}
+            content={content}
+            isStreaming={isStreaming}
+            isHighlighted={isHighlighted}
+            isEditing={isEditing}
+            bubbleStyle={bubbleStyle}
+            onSave={handleEditSave}
+            onCancelEdit={() => setIsEditing(false)}
+          />
+        </div>
 
         <BubbleFooter
           id={id}

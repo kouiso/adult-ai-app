@@ -40,6 +40,9 @@ export const SceneCardPicker = ({
           className="w-full rounded-2xl border border-border/70 bg-card/80 p-4 text-left shadow-sm transition hover:border-primary/45 hover:bg-gradient-to-br hover:from-primary/10 hover:via-card hover:to-warm-gold/10 hover:shadow-[0_10px_30px_oklch(0.50_0.18_350_/_10%)]"
         >
           <p className="font-narrative text-sm font-semibold text-foreground">{scene.title}</p>
+          {scene.characterName && (
+            <p className="mt-1 text-xs font-medium text-muted-foreground">{scene.characterName}</p>
+          )}
           <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
             {scene.summary}
           </p>

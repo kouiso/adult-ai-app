@@ -315,6 +315,12 @@ const hasImageInRecentTurns = (msgs: ChatMessage[], maxTurns: number): boolean =
   return false;
 };
 
+const getChatHeaderTitle = (characterName: string): string => {
+  const trimmedName = characterName.trim();
+  if (!trimmedName || trimmedName === "AI") return "チャット";
+  return trimmedName;
+};
+
 /** 直近N ターンの会話履歴から画像生成用のシーン記述テキストを組み立てる */
 const buildImagePromptFromHistory = (msgs: ChatMessage[]): string => {
   const pairs = collectRecentMessagePairs(msgs, 3);
@@ -496,9 +502,7 @@ const ChatHeader = ({
         </AvatarFallback>
       </Avatar>
       <div className="min-w-0 flex-1">
-        <p className="truncate text-base font-semibold leading-5 text-foreground">
-          {info.name}
-        </p>
+        <p className="truncate text-base font-semibold leading-5 text-foreground">{info.name}</p>
         {info.relationship ? (
           <p className="truncate text-xs leading-4 text-muted-foreground">{info.relationship}</p>
         ) : null}
@@ -1581,6 +1585,7 @@ export const ChatView = ({
   );
 
   const isInputDisabled = isLoading || !isOnline;
+  const chatHeaderTitle = getChatHeaderTitle(currentCharacterName);
 
   return (
     <div className="flex h-full">
@@ -1621,6 +1626,11 @@ export const ChatView = ({
         />
 
         <div ref={scrollContainerRef} className="flex-1 overflow-y-auto bg-chat-area">
+          <div className="sticky top-0 z-10 border-b border-border/50 bg-card/80 px-4 py-2 backdrop-blur">
+            <div className="mx-auto max-w-3xl">
+              <p className="truncate text-sm font-semibold text-foreground">{chatHeaderTitle}</p>
+            </div>
+          </div>
           <div className="mx-auto max-w-3xl py-4">
             {messages.length === 0 && (
               <div className="flex h-[60vh] items-center justify-center">
