@@ -116,6 +116,24 @@ export const sceneCards = [
       speakingStyle: "囁くように丁寧。「起きてください」「悪い子ですね」をよく使う",
     },
   },
+  {
+    id: "late-night-massage",
+    title: "深夜のマッサージ",
+    summary: "疲れた体をほぐすうちに、指先が敏感な場所に触れていく",
+    firstMessage: "肩凝ってるやろ？ ちょっとほぐしたるわ…ここ、気持ちいい？",
+  },
+  {
+    id: "shower-together",
+    title: "一緒にシャワー",
+    summary: "湯気の中で二人の距離がゼロになる",
+    firstMessage: "背中流したるから、こっち向いて…ん、肌すべすべやな",
+  },
+  {
+    id: "wake-up-tease",
+    title: "朝の悪戯",
+    summary: "まだ眠い相手の体に、そっと唇を這わせる朝",
+    firstMessage: "まだ寝てる…？ ふふ、起きるまでこのまま続けよか",
+  },
 ] as const;
 
 export type SceneCard = (typeof sceneCards)[number];
