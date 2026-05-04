@@ -14,6 +14,11 @@ describe("sceneCards", () => {
       expect(scene.character.appearance.length).toBeGreaterThan(0);
       expect(scene.character.relationship.length).toBeGreaterThan(0);
       expect(scene.character.speakingStyle.length).toBeGreaterThan(0);
+      expect(scene.character.eroticPersonality.length).toBeGreaterThan(0);
+      expect(scene.character.escalationStyle.length).toBeGreaterThan(0);
+      expect(scene.character.sensitiveSpots.length).toBeGreaterThan(0);
+      expect(scene.character.afterSex.length).toBeGreaterThan(0);
+      expect(scene.character.signatureMoans.length).toBeGreaterThanOrEqual(2);
     }
   });
 });
