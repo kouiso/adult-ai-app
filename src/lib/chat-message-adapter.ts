@@ -9,6 +9,12 @@ export type ApiMessage = {
   content: string;
 };
 
+export const API_MESSAGE_CONTENT_MAX_LENGTH = 20_000;
+
+const RETRY_ARTIFACT_PATTERN = /失礼しました。再度挑戦します。/gu;
+const RESPONSE_BLOCK_PATTERN = /<response>[\S\s]*?<\/response>/g;
+const REMEMBER_BLOCK_PATTERN = /<remember>[\S\s]*?<\/remember>/g;
+
 // systemPromptからキャラの一人称を抽出（「一人称は「X」」パターン）
 export function extractFirstPerson(systemPrompt: string): string | null {
   const match = systemPrompt.match(/一人称は「([^」]+)」/);
@@ -28,6 +34,32 @@ const LANG_REMINDER =
   "(出力はすべて日本語のみ。英語や他言語を出力に含めないこと。推論過程も見せないこと)";
 
 const USER_TURNS_PER_REMINDER = 3;
+
+function clipMessageContent(content: string): string {
+  if (content.length <= API_MESSAGE_CONTENT_MAX_LENGTH) return content;
+  return content.slice(content.length - API_MESSAGE_CONTENT_MAX_LENGTH);
+}
+
+function extractLastResponseBlock(content: string): string | null {
+  const matches = content.match(RESPONSE_BLOCK_PATTERN);
+  return matches?.at(-1) ?? null;
+}
+
+export function normalizeAssistantMessageContent(content: string): string {
+  const withoutMemory = content.replace(REMEMBER_BLOCK_PATTERN, "").trim();
+  const lastResponseBlock = extractLastResponseBlock(withoutMemory);
+  const normalized = (lastResponseBlock ?? withoutMemory)
+    .replace(RETRY_ARTIFACT_PATTERN, "")
+    .trim();
+  return clipMessageContent(normalized);
+}
+
+function normalizeApiMessageContent(message: Pick<ChatMessage, "role" | "content">): string {
+  if (message.role === "assistant") {
+    return normalizeAssistantMessageContent(message.content);
+  }
+  return clipMessageContent(message.content);
+}
 
 /**
  * チャット履歴からAPI送信用メッセージ配列を構築する。
@@ -58,7 +90,7 @@ export function buildMessagesForApi(
         withReminders.push({ role: "system", content: reminder });
       }
     }
-    withReminders.push({ role: m.role, content: m.content });
+    withReminders.push({ role: m.role, content: normalizeApiMessageContent(m) });
   });
 
   // 言語リマインダーを最後のuserメッセージ直前にsystemとして注入
@@ -67,7 +99,8 @@ export function buildMessagesForApi(
     withReminders.splice(langIdx, 0, { role: "system", content: LANG_REMINDER });
   }
 
-  return [{ role: "system" as const, content: systemPrompt }, ...withReminders];
+  const systemMessage: ApiMessage = { role: "system", content: clipMessageContent(systemPrompt) };
+  return [systemMessage, ...withReminders];
 }
 
 /**
