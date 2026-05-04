@@ -1,5 +1,7 @@
 import { z } from "zod/v4";
 
+import { apiFetch } from "@/lib/api";
+
 // ── 属性チップの定義 ──────────────────────────────────────────────────────
 
 export const CHIP_CATEGORIES = [
@@ -121,7 +123,7 @@ export type GeneratedCharacter = z.infer<typeof generatedCharacterSchema>;
 export async function generateCharacter(
   input: GenerateCharacterInput,
 ): Promise<GeneratedCharacter> {
-  const response = await fetch("/api/generate-character", {
+  const response = await apiFetch("/api/generate-character", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),

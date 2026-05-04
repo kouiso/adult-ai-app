@@ -7,6 +7,7 @@ import remarkGfm from "remark-gfm";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/component/ui/avatar";
 import { Badge } from "@/component/ui/badge";
+import { apiFetch } from "@/lib/api";
 import { cn, getAvatarFallback } from "@/lib/utils";
 import {
   isXmlResponse,
@@ -234,6 +235,45 @@ const isValidImageUrl = (url: string): boolean => {
   }
 };
 
+const useAuthenticatedImageUrl = (imageUrl: string): string | null => {
+  const [authenticatedImage, setAuthenticatedImage] = useState<{
+    source: string;
+    url: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!imageUrl.startsWith("/api/")) {
+      return;
+    }
+
+    let active = true;
+    let objectUrl: string | null = null;
+
+    void apiFetch(imageUrl)
+      .then(async (response) => {
+        if (!response.ok) return;
+        const blob = await response.blob();
+        if (!active) return;
+        objectUrl = URL.createObjectURL(blob);
+        setAuthenticatedImage({ source: imageUrl, url: objectUrl });
+      })
+      .catch((error) => console.error("failed to load authenticated image", error));
+
+    return () => {
+      active = false;
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [imageUrl]);
+
+  if (!imageUrl.startsWith("/api/")) {
+    return imageUrl;
+  }
+
+  return authenticatedImage?.source === imageUrl ? authenticatedImage.url : null;
+};
+
 interface ImagePreviewProps {
   imageUrl: string;
   nsfwBlur: boolean;
@@ -241,15 +281,20 @@ interface ImagePreviewProps {
 
 const ImagePreview = ({ imageUrl, nsfwBlur }: ImagePreviewProps) => {
   const [revealed, setRevealed] = useState(false);
+  const imageSrc = useAuthenticatedImageUrl(imageUrl);
 
   if (!isValidImageUrl(imageUrl)) {
+    return null;
+  }
+
+  if (!imageSrc) {
     return null;
   }
 
   if (!nsfwBlur || revealed) {
     return (
       <div className="relative overflow-hidden rounded-xl">
-        <img src={imageUrl} alt="Generated" className="max-w-full rounded-xl" />
+        <img src={imageSrc} alt="Generated" className="max-w-full rounded-xl" />
       </div>
     );
   }
@@ -264,7 +309,7 @@ const ImagePreview = ({ imageUrl, nsfwBlur }: ImagePreviewProps) => {
       }}
     >
       <img
-        src={imageUrl}
+        src={imageSrc}
         alt="Generated"
         className="max-w-full rounded-xl blur-xl transition-all duration-300"
       />

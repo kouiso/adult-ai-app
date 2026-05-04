@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import { LoginForm } from "@/component/auth/login-form";
 import { CharacterManager } from "@/component/character/character-manager";
 import { ChatView } from "@/component/chat/chat-view";
 import { AgeGateModal } from "@/component/legal/age-gate-modal";
@@ -8,6 +9,7 @@ import { TermsOfService } from "@/component/legal/terms-of-service";
 import { Tokushoho } from "@/component/legal/tokushoho";
 import { SettingsPanel } from "@/component/settings/settings-panel";
 import { Toaster } from "@/component/ui/sonner";
+import { AUTH_TOKEN_INVALID_EVENT } from "@/lib/api";
 import { useSettingsStore } from "@/store/settings-store";
 
 const LEGAL_ROUTES = {
@@ -47,6 +49,8 @@ const getPageTitle = (route: AppRoute): string => {
   }
 };
 
+const hasStoredAuthToken = (): boolean => Boolean(localStorage.getItem("auth_token"));
+
 const renderPageContent = (
   route: AppRoute,
   onOpenCharacterManager: () => void,
@@ -71,6 +75,7 @@ const renderPageContent = (
 
 export const App = () => {
   const darkMode = useSettingsStore((s) => s.darkMode);
+  const [isAuthenticated, setIsAuthenticated] = useState(() => hasStoredAuthToken());
   const [route, setRoute] = useState<AppRoute>(() => parseHashRoute(window.location.hash));
   const [isAgeDenied, setIsAgeDenied] = useState(false);
   // ヘッダーの小さな Users アイコンに加えて、EmptyState の大きなボタンからも
@@ -81,6 +86,17 @@ export const App = () => {
   useEffect(() => {
     document.documentElement.classList.toggle("dark", darkMode);
   }, [darkMode]);
+
+  useEffect(() => {
+    const handleAuthInvalid = () => {
+      setIsAuthenticated(false);
+    };
+
+    window.addEventListener(AUTH_TOKEN_INVALID_EVENT, handleAuthInvalid);
+    return () => {
+      window.removeEventListener(AUTH_TOKEN_INVALID_EVENT, handleAuthInvalid);
+    };
+  }, []);
 
   useEffect(() => {
     const handleHashChange = () => {
@@ -103,6 +119,10 @@ export const App = () => {
 
   if (isAgeDenied) {
     return <div className="min-h-svh bg-background" />;
+  }
+
+  if (!isAuthenticated) {
+    return <LoginForm onLogin={() => setIsAuthenticated(true)} />;
   }
 
   return (
