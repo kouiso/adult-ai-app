@@ -31,9 +31,9 @@ export const ChatInput = memo(
       }
     }, [input, isLoading, onSend]);
 
-    const handleKeyDown = (e: React.KeyboardEvent) => {
-      // Slack式: Ctrl+Enter(またはCmd+Enter)で送信、Enterは改行
-      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      // Enterで送信、Shift+Enterは改行
+      if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         handleSend();
       }
