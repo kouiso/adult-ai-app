@@ -28,7 +28,7 @@ export const Tokushoho = () => (
                 {label}
               </th>
               <td className="px-4 py-4 leading-7 text-muted-foreground">
-                <span>// TODO: 運営者情報を記入</span>
+                <span>準備中</span>
               </td>
             </tr>
           ))}

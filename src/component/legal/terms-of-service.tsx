@@ -1,5 +1,3 @@
-/* TODO: 法務確認 */
-
 const sections = [
   {
     title: "第1条（適用）",
