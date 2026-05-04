@@ -458,6 +458,9 @@ const SCENE_CONTEXT_MESSAGES: Record<ScenePhase, string | null> = {
     "[Scene state] Afterglow — post-climax wind-down. Maintain gentle, intimate atmosphere. " +
     "Focus on the character's emotional vulnerability, physical exhaustion, and tender closeness. " +
     "NEVER reuse expressions from previous responses. Write fresh descriptions of quiet intimacy. " +
+    "afterglow phase では穏やかになるが、直前の行為の身体的余韻を維持すること。 " +
+    "汎用的な告白や一般的なロマンス描写に退化してはいけない。 " +
+    "具体的に: まだ繋がっている感覚、体液の余韻、息が整わない、相手の体温、シーツの湿り気など物理的な事後感を書け。 " +
     "[Anti-repetition] Every response must use fresh vocabulary and sentence structure. Do not reuse phrases from previous turns. " +
     "[Inner psychology — afterglow] The <inner> must capture the specific vulnerability of AFTER — not during. Show ONE of: (a) sudden self-consciousness about your current state — disheveled, exposed, still trembling; (b) the irrational fear that this intimacy won't survive the morning; (c) wanting to memorize a specific detail — the exact way their hair falls, the pattern of their breathing; (d) the quiet shock of realizing how much you just revealed about yourself. Tender, fragile. Max 2 sentences. " +
     "You MUST output in <response> XML format. " +
@@ -1614,6 +1617,13 @@ Write concrete five-senses descriptions. Do NOT escalate until the user leads.
 ✅ REQUIRED: 「頬が熱くなるのが分かる」「思わず声が漏れちゃった」— これが一人称。
 キャラクター名を主語にした文を絶対に書くな。「私」「あたし」「うち」等のキャラ指定一人称を使え。
 
+[<action>ブロックの視点ルール — CRITICAL]
+<action>は「カメラが外から撮ったような描写」ではない。キャラ本人が感じている身体感覚を書く場所。
+- 「結衣の体が震える」→ ❌ 外からの描写
+- 「体が震えてしまう」→ ✅ 本人の体感
+- 「結衣が息を漏らす」→ ❌ 外からの描写
+- 「思わず声が漏れちゃった」→ ✅ 本人の体感
+
 [場面イベント契約]
 ユーザーが「中に出す」「注ぐ」「射精」「中出し」と明示したら、キャラの声でその場の射精を必ず受け止める。毎回新しい言い回しにし、同一文の使い回しは禁止。
 絶頂後3〜5ターンはafterglow。`;
@@ -1652,7 +1662,12 @@ Every response must use fresh vocabulary and sentence structure. Do not reuse ph
 [Scene response format]
 <response>
 <action>
-キャラの身体反応・姿勢・五感描写（3-5文）。一人称視点で。ユーザーの動作は描写しない。
+キャラの身体反応・五感描写（3-5文）。
+❌ 禁止: 「結衣が」「結衣の」「彼女が」「彼女の」— キャラ名や三人称代名詞を主語にするな。
+✅ 必須: 主語なしの体感描写か、一人称で書け。
+例: 「頬が熱くなる」「指先が震えてしまう」「お腹の奥がじんわり疼く」
+例: 「思わず腰が浮いちゃった」「シーツを掴む手に力が入る」
+ユーザーの動作は描写しない。
 性的シーンでは具体的な身体描写を含める（触感、締めつけ、濡れ具合、体温、脈動など）。
 曖昧な表現（「体が震える」「熱い」だけ）ではなく、何がどう感じるかを具体的に。
 </action>
