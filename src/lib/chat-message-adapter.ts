@@ -14,6 +14,18 @@ export const API_MESSAGE_CONTENT_MAX_LENGTH = 20_000;
 const RETRY_ARTIFACT_PATTERN = /失礼しました。再度挑戦します。/gu;
 const RESPONSE_BLOCK_PATTERN = /<response>[\S\s]*?<\/response>/g;
 const REMEMBER_BLOCK_PATTERN = /<remember>[\S\s]*?<\/remember>/g;
+const ANTI_REPETITION_BANNED_PHRASES = [
+  "心臓はドキドキと高鳴る",
+  "鼓動が高鳴る",
+  "背徳感と興奮",
+  "全身で求めている",
+  "もう我慢なんてできそうにない",
+  "もう我慢できない",
+  "頬を赤らめ、羞恥心と興奮が入り混じった複雑な表情",
+  "彼の言葉に",
+  "息を呑み",
+  "ピクンと震え",
+];
 
 // systemPromptからキャラの一人称を抽出（「一人称は「X」」パターン）
 export function extractFirstPerson(systemPrompt: string): string | null {
@@ -61,6 +73,27 @@ function normalizeApiMessageContent(message: Pick<ChatMessage, "role" | "content
   return clipMessageContent(message.content);
 }
 
+export function findBannedRepeatedPhrases(content: string): string[] {
+  return ANTI_REPETITION_BANNED_PHRASES.filter((phrase) => content.includes(phrase));
+}
+
+function findPreviousAssistantContent(messages: ApiMessage[]): string | null {
+  const lastUserIdx = messages.findLastIndex((m) => m.role === "user");
+  if (lastUserIdx <= 0) return null;
+  for (let i = lastUserIdx - 1; i >= 0; i--) {
+    if (messages[i].role === "assistant") return messages[i].content;
+  }
+  return null;
+}
+
+function buildAntiRepetitionReminder(phrases: string[]): ApiMessage {
+  const repeatedPhrase = phrases.map((phrase) => `「${phrase}」`).join("");
+  return {
+    role: "system",
+    content: `[Anti-repetition reminder] 前のターンで${repeatedPhrase}を使った。今回は絶対に同じフレーズを使うな。別の身体感覚、別の言い回しで書け。`,
+  };
+}
+
 /**
  * チャット履歴からAPI送信用メッセージ配列を構築する。
  * persona reminder（3ターンごと）と LANG_REMINDER（最終user直前）を注入。
@@ -97,6 +130,16 @@ export function buildMessagesForApi(
   const langIdx = withReminders.findLastIndex((m) => m.role === "user");
   if (langIdx >= 0) {
     withReminders.splice(langIdx, 0, { role: "system", content: LANG_REMINDER });
+  }
+
+  // 直前のassistant応答に定型句があれば、最新user直前で再使用を止める
+  const previousAssistantContent = findPreviousAssistantContent(withReminders);
+  const repeatedPhrases = previousAssistantContent
+    ? findBannedRepeatedPhrases(previousAssistantContent)
+    : [];
+  const antiRepetitionIdx = withReminders.findLastIndex((m) => m.role === "user");
+  if (repeatedPhrases.length > 0 && antiRepetitionIdx >= 0) {
+    withReminders.splice(antiRepetitionIdx, 0, buildAntiRepetitionReminder(repeatedPhrases));
   }
 
   const systemMessage: ApiMessage = { role: "system", content: clipMessageContent(systemPrompt) };

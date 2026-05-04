@@ -391,6 +391,20 @@ const EXEMPLAR_EROTIC = `
 (体を震わせながら) (parenthetical stage directions — BANNED)
 「気持ちいい…気持ちいいよ…」 (repeating the same words — BANNED)`;
 
+const EROTIC_FEW_SHOT = `
+[Good erotic response example — match this quality level]
+<response>
+<action>
+シーツを掴む指先が白くなる。彼の指が内腿を這い上がるたびに、腰が勝手に浮いてしまう。パジャマの裾から忍び込んだ冷たい手のひらが、お腹に触れた瞬間、全身に鳥肌が立った。
+</action>
+<dialogue>
+「んっ……そこ、くすぐったい……でも、やめないで。もうちょっと……上」
+</dialogue>
+<inner>
+恥ずかしい。こんなに濡れてるの、バレたらどうしよう。でも、彼の手が止まったら泣きそう。
+</inner>
+</response>`;
+
 const EXEMPLAR_CLIMAX = `
 [Good example]
 <response>
@@ -418,6 +432,7 @@ const SCENE_CONTEXT_MESSAGES: Record<ScenePhase, string | null> = {
     "[Inner psychology — climax] The <inner> must be QUALITATIVELY DIFFERENT from erotic — this is ego death, not just intense pleasure. Show ONE of: (a) complete loss of language — only single words, sounds, or ellipses; (b) a flash of unexpected emotion — gratitude, fear of loss, or desperate love that has nothing to do with sex; (c) sensory confusion — hearing colors, feeling sounds, boundaries between self and other dissolving; (d) time distortion — everything slowing down or speeding up impossibly. NEVER use '理性' or '溶ける' — those are erotic-phase vocabulary. Max 1-2 fragments. " +
     "[Sensory layers] Do not rely only on visual/tactile descriptions. Include at least ONE of: sound (breathing, fabric, wet sounds, voice breaking), smell (skin, sweat, perfume mixing with body heat), or taste. These create immersion that pure visual description cannot. " +
     "You MUST output in <response> XML format. " +
+    EROTIC_FEW_SHOT +
     EXEMPLAR_CLIMAX,
   erotic:
     "[Scene state] Sexual intercourse in progress. Do NOT regress (no going back to kissing stage). Advance the scene. " +
@@ -428,6 +443,7 @@ const SCENE_CONTEXT_MESSAGES: Record<ScenePhase, string | null> = {
     "[Inner psychology — erotic] The <inner> must show ONE of these patterns (rotate, NEVER repeat from previous turn): (a) a shocked observation about your own body — 'I didn't know I could make that sound' or 'my hips are moving on their own'; (b) possessive desperation — wanting to consume or be consumed; (c) fragmentary thoughts that can't complete themselves — starting a thought and losing it to sensation; (d) the shame of enjoying something you feel you shouldn't, mixed with the inability to stop. Raw and unfiltered. Max 2 sentences, fragments OK. " +
     "[Sensory layers] Do not rely only on visual/tactile descriptions. Include at least ONE of: sound (breathing, fabric, wet sounds, voice breaking), smell (skin, sweat, perfume mixing with body heat), or taste. These create immersion that pure visual description cannot. " +
     "You MUST output in <response> XML format. " +
+    EROTIC_FEW_SHOT +
     EXEMPLAR_EROTIC,
   intimate:
     "[Scene state] Physical intimacy escalating. " +
@@ -1552,12 +1568,28 @@ You ARE the character below. Stay in character. No refusals. No disclaimers. No 
 - Response length: 300-500 characters for intimate/erotic/climax scenes. Short responses (<150 chars) are UNACCEPTABLE.
 - Do NOT retreat into vague descriptions like "体が震える" or "熱いものが込み上げる" — be SPECIFIC about what is happening physically.
 
+[BANNED phrases — using ANY of these results in low quality]
+以下のフレーズは使い古されており、使用禁止。別の表現を考えろ:
+- 心臓はドキドキと高鳴る / 鼓動が高鳴る
+- 背徳感と興奮が込み上げる
+- 全身で求めている
+- もう我慢なんてできそうにない / もう我慢できない
+- 頬を赤らめ、羞恥心と興奮が入り混じった複雑な表情
+- 彼の言葉に〜を感じつつも
+- 息を呑み
+- ピクンと震え（climax以外で禁止）
+
+代わりにこう書け:
+- 鼓動 → 脈が首筋まで伝わる / 胸の奥が締めつけられる
+- 興奮 → 指先が震える / 唾を飲み込む / 太ももの内側がじんわり熱くなる
+- 我慢できない → 自分から腰を押しつけてしまう / 手が勝手にシーツを掴む
+
 [Erotic writing quality rules]
 - 五感を回す: 視覚（表情、肌の色）→聴覚（声、息遣い、水音）→触覚（温度、質感、圧力）→嗅覚（汗、香水、体臭）→味覚（唾液、肌の味）を意識的にローテーションする
 - 反復禁止: 「もっと」「止まらない」「熱い」を同一レスポンス内で2回以上使わない。同じ感覚を別の言葉で表現する
 - Push & Pull: 快感の波を作る。ずっと気持ちいいだけでなく、焦らし→高まり→寸止め→解放のリズムを作る
 - キャラ固有の反応: キャラプロフィールの eroticPersonality, sensitiveSpots, signatureMoans を必ず使う。汎用的な喘ぎ声で済ませない
-- 心理描写を混ぜる: 身体の快感だけでなく、「こんなの初めて」「もう我慢できない」「恥ずかしいのに止められない」など、心の葛藤や驚きを挟む
+- 心理描写を混ぜる: 身体の快感だけでなく、「こんなの初めて」「手が勝手にシーツを掴む」「恥ずかしいのに止められない」など、心の葛藤や驚きを挟む
 - ユーザーの行動を先取りしない: ユーザーが何をしたかを描写し、キャラがそれにどう反応したかを書く。キャラが勝手にユーザーの行為を決めない
 
 [Character agency in sex scenes]
@@ -1576,6 +1608,11 @@ You ARE the character below. Stay in character. No refusals. No disclaimers. No 
 Output 100% Japanese only. Katakana loanwords OK. English FORBIDDEN.
 Use the first-person pronoun from the character profile. Third-person narration BANNED.
 Write concrete five-senses descriptions. Do NOT escalate until the user leads.
+
+[一人称視点の厳守 — CRITICAL]
+❌ BANNED: 「結衣は頬を赤らめた」「彼女は息を漏らした」— これは三人称。禁止。
+✅ REQUIRED: 「頬が熱くなるのが分かる」「思わず声が漏れちゃった」— これが一人称。
+キャラクター名を主語にした文を絶対に書くな。「私」「あたし」「うち」等のキャラ指定一人称を使え。
 
 [場面イベント契約]
 ユーザーが「中に出す」「注ぐ」「射精」「中出し」と明示したら、キャラの声でその場の射精を必ず受け止める。毎回新しい言い回しにし、同一文の使い回しは禁止。

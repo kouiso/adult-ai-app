@@ -7,6 +7,7 @@ import {
   buildPersonaReminder,
   buildRetryMessages,
   extractFirstPerson,
+  findBannedRepeatedPhrases,
   injectDriftCorrection,
   normalizeAssistantMessageContent,
 } from "./chat-message-adapter";
@@ -100,6 +101,45 @@ describe("buildMessagesForApi", () => {
 
     expect(result[1].content.length).toBe(API_MESSAGE_CONTENT_MAX_LENGTH);
     expect(result[1].content).toContain("末尾");
+  });
+
+  it("直前assistantの禁止定型句を最新user直前で禁止する", () => {
+    const msgs: Parameters<typeof buildMessagesForApi>[0] = [
+      {
+        role: "assistant",
+        content: "<response><action>背徳感と興奮が込み上げる。</action></response>",
+        isStreaming: false,
+      },
+      { role: "user", content: "続けて", isStreaming: false },
+    ];
+    const result = buildMessagesForApi(msgs, "prompt", "AI");
+    const lastUserIdx = result.findLastIndex((m) => m.role === "user");
+
+    expect(result[lastUserIdx - 1].role).toBe("system");
+    expect(result[lastUserIdx - 1].content).toContain("背徳感と興奮");
+    expect(result[lastUserIdx - 1].content).toContain("絶対に同じフレーズを使うな");
+  });
+
+  it("禁止定型句がなければ反復リマインダーを追加しない", () => {
+    const msgs: Parameters<typeof buildMessagesForApi>[0] = [
+      {
+        role: "assistant",
+        content: "<response><action>指先がシーツを掴む。</action></response>",
+        isStreaming: false,
+      },
+      { role: "user", content: "続けて", isStreaming: false },
+    ];
+    const result = buildMessagesForApi(msgs, "prompt", "AI");
+
+    expect(result.map((m) => m.content).join("\n")).not.toContain("Anti-repetition reminder");
+  });
+});
+
+describe("findBannedRepeatedPhrases", () => {
+  it("禁止定型句の部分一致を返す", () => {
+    const result = findBannedRepeatedPhrases("背徳感と興奮が込み上げる。息を呑み、見つめる。");
+
+    expect(result).toEqual(["背徳感と興奮", "息を呑み"]);
   });
 });
 
