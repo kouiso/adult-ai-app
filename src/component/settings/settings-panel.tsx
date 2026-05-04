@@ -8,6 +8,7 @@ import { useShallow } from "zustand/react/shallow";
 import { Separator } from "@/component/ui/separator";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/component/ui/sheet";
 import { Switch } from "@/component/ui/switch";
+import { DEFAULT_CHARACTER } from "@/data/default-character";
 import { useSpeechSynthesis } from "@/hook/use-speech-synthesis";
 import { listCharacters } from "@/lib/api";
 import { MODEL_CATALOG } from "@/lib/model";
@@ -184,9 +185,9 @@ export const SettingsPanel = () => {
                     : "border-border hover:bg-accent/45 hover:shadow-[0_8px_24px_oklch(0.50_0.18_350_/_8%)]"
                 }`}
               >
-                <div className="font-medium">デフォルト（Sakura）</div>
+                <div className="font-medium">デフォルト（{DEFAULT_CHARACTER.name}）</div>
                 <div className="text-xs text-muted-foreground mt-0.5">
-                  色白の大学生・ナンパシナリオ
+                  {DEFAULT_CHARACTER.tags.join("・")}
                 </div>
               </button>
               {characters.map((ch) => (
