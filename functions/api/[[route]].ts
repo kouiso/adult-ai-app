@@ -244,6 +244,11 @@ const messageUpdateContentSchema = z.object({
   content: z.string().max(20_000),
 });
 
+const messageSearchSchema = z.object({
+  q: z.string().trim().min(1).max(100),
+  limit: z.coerce.number().int().min(1).max(50).optional().default(25),
+});
+
 const idSchema = z.string().min(1).max(128);
 
 type ScenePhase = ReturnType<typeof detectScenePhase>;
@@ -298,6 +303,8 @@ function parseClaudeJudgeVerdict(verdict: string): ClaudeJudgeResult {
   const reason = verdict.split(":").slice(2).join(":") || "Claude judge rejected";
   return { pass: false, reason: `claude-judge: ${reason}` };
 }
+
+const escapeSqlLikePattern = (value: string) => value.replace(/[%\\_]/g, "\\$&");
 
 async function requestClaudeJudgeVerdict(
   token: string,
@@ -2588,6 +2595,55 @@ const app = new Hono<{ Bindings: Bindings }>()
       return c.json({ title });
     },
   )
+
+  .get("/conversations/search/messages", zValidator("query", messageSearchSchema), async (c) => {
+    const userEmail = getUserEmail(c);
+    if (!userEmail) {
+      return c.json({ error: "unauthorized" }, 401);
+    }
+
+    const { q, limit } = c.req.valid("query");
+    const database = drizzle(c.env.DB);
+    const userId = await ensureUser(database, userEmail);
+    const likePattern = `%${escapeSqlLikePattern(q.toLowerCase())}%`;
+
+    const rows = await database
+      .select({
+        messageId: messageTable.id,
+        conversationId: conversationTable.id,
+        conversationTitle: conversationTable.title,
+        role: messageTable.role,
+        content: messageTable.content,
+        createdAt: messageTable.createdAt,
+        characterName: characterTable.name,
+        characterAvatar: characterTable.avatar,
+      })
+      .from(messageTable)
+      .innerJoin(conversationTable, eq(messageTable.conversationId, conversationTable.id))
+      .leftJoin(characterTable, eq(conversationTable.characterId, characterTable.id))
+      .where(
+        and(
+          eq(messageTable.userId, userId),
+          eq(conversationTable.userId, userId),
+          sql`lower(${messageTable.content}) LIKE ${likePattern} ESCAPE '\\'`,
+        ),
+      )
+      .orderBy(desc(messageTable.createdAt))
+      .limit(limit);
+
+    return c.json({
+      results: rows.map((row) => ({
+        messageId: row.messageId,
+        conversationId: row.conversationId,
+        conversationTitle: row.conversationTitle,
+        role: row.role,
+        content: row.content,
+        createdAt: row.createdAt,
+        characterName: row.characterName ?? "AI",
+        characterAvatar: row.characterAvatar ?? null,
+      })),
+    });
+  })
 
   .get("/conversations/:conversationId/messages", async (c) => {
     const userEmail = getUserEmail(c);

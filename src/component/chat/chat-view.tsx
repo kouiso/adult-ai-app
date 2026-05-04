@@ -1,7 +1,7 @@
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useQuery } from "@tanstack/react-query";
-import { ArrowDown, Menu, Search, Sparkles, UserPlus, X } from "lucide-react";
+import { ArrowDown, Loader2, Menu, Search, Sparkles, UserPlus, X } from "lucide-react";
 import { toast } from "sonner";
 import { useShallow } from "zustand/react/shallow";
 
@@ -15,9 +15,11 @@ import {
   getImageTaskResult,
   listConversationMessages,
   persistImageToR2,
+  searchConversationMessages,
   streamChat,
   streamChatWithQualityGuard,
   type ConversationSummary,
+  type MessageSearchResult,
   type PersistedMessage,
 } from "@/lib/api";
 import {
@@ -28,6 +30,7 @@ import {
   type ApiMessage,
 } from "@/lib/chat-message-adapter";
 import { DEFAULT_SYSTEM_PROMPT } from "@/lib/config";
+import { buildMessageSearchSnippet } from "@/lib/message-search";
 import { buildSystemPrompt, parseSystemPrompt } from "@/lib/prompt-builder";
 import type { QualityCheckContext } from "@/lib/quality-guard";
 import { queryKey } from "@/lib/query-key";
@@ -55,12 +58,16 @@ const SCENE_INTRO_KIND = "scene-intro";
 const POLL_MAX_DELAY_MS = 10_000;
 const AUTO_IMAGE_RECENT_TURN_LIMIT = 3;
 const AUTO_IMAGE_START_DELAY_MS = 700;
+const MESSAGE_SEARCH_RESULT_LIMIT = 25;
 const AUTO_IMAGE_PHASE_TRANSITIONS = new Set([
   "conversation:intimate",
   "intimate:erotic",
   "erotic:climax",
   "climax:afterglow",
 ]);
+
+const getMessageSelector = (messageId: string) =>
+  `[data-message-id="${messageId.replace(/["\\]/g, "\\$&")}"]`;
 
 type ImagePollingResult =
   | { status: "succeeded"; imageUrl: string }
@@ -795,6 +802,72 @@ const SearchBar = ({
   );
 };
 
+type GlobalSearchResultsProps = {
+  isOpen: boolean;
+  isFetching: boolean;
+  query: string;
+  results: MessageSearchResult[];
+  onSelectResult: (result: MessageSearchResult) => void;
+};
+
+const formatSearchResultTime = (timestamp: number) =>
+  new Date(timestamp).toLocaleString("ja-JP", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+const GlobalSearchResults = ({
+  isOpen,
+  isFetching,
+  query,
+  results,
+  onSelectResult,
+}: GlobalSearchResultsProps) => {
+  const trimmedQuery = query.trim();
+  if (!isOpen || !trimmedQuery) return null;
+
+  return (
+    <div className="border-b border-border/50 bg-background/95 px-4 py-2">
+      <div className="mx-auto max-h-72 max-w-3xl overflow-y-auto rounded-md border border-border/70 bg-card/85 shadow-sm">
+        {isFetching ? (
+          <div className="flex items-center gap-2 px-3 py-3 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            全会話から検索中
+          </div>
+        ) : results.length === 0 ? (
+          <div className="px-3 py-3 text-sm text-muted-foreground">全会話に一致なし</div>
+        ) : (
+          <div className="divide-y divide-border/60">
+            {results.map((result) => (
+              <button
+                key={result.messageId}
+                type="button"
+                onClick={() => onSelectResult(result)}
+                className="block w-full px-3 py-2 text-left transition-colors hover:bg-accent/60"
+              >
+                <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                  <span className="line-clamp-1 font-medium text-foreground">
+                    {result.conversationTitle}
+                  </span>
+                  <span className="shrink-0">{formatSearchResultTime(result.createdAt)}</span>
+                </div>
+                <p className="mt-1 line-clamp-2 text-sm leading-5">
+                  {buildMessageSearchSnippet(result.content, trimmedQuery)}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {result.role === "user" ? "あなた" : result.characterName}
+                </p>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 type ChatViewProps = {
   // EmptyState の「AIでキャラクター作成」ボタンから親の CharacterManager Sheet を開くため
   onOpenCharacterManager?: () => void;
@@ -817,6 +890,7 @@ export const ChatView = ({
   const [isMobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [isSearchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [pendingSearchMessageId, setPendingSearchMessageId] = useState<string | null>(null);
   const [imageGenerationCount, setImageGenerationCount] = useState(0);
   const [activeAutoImageMessageIds, setActiveAutoImageMessageIds] = useState<Set<string>>(
     () => new Set(),
@@ -852,6 +926,14 @@ export const ChatView = ({
     deleteMessagesAfterEntry,
     loadMessages,
   } = useChatQuery(currentConversationId);
+
+  const normalizedSearchQuery = searchQuery.trim();
+  const { data: globalSearchResults = [], isFetching: isGlobalSearchFetching } = useQuery({
+    queryKey: queryKey.messageSearch(normalizedSearchQuery),
+    queryFn: () => searchConversationMessages(normalizedSearchQuery, MESSAGE_SEARCH_RESULT_LIMIT),
+    enabled: isSearchOpen && normalizedSearchQuery.length > 0,
+    staleTime: 5_000,
+  });
 
   const handleSpeakEnd = useCallback(() => setSpeakingMessageId(null), []);
   const { speak, stop, isSpeaking } = useSpeechSynthesis(
@@ -1044,6 +1126,24 @@ export const ChatView = ({
     },
     [conversations, loadMessages, setConversationId, setMessages],
   );
+
+  const handleSelectSearchResult = useCallback(
+    (result: MessageSearchResult) => {
+      setPendingSearchMessageId(result.messageId);
+      void handleSelectConversation(result.conversationId);
+    },
+    [handleSelectConversation],
+  );
+
+  useEffect(() => {
+    if (!pendingSearchMessageId) return;
+
+    const target = document.querySelector(getMessageSelector(pendingSearchMessageId));
+    if (!target) return;
+
+    target.scrollIntoView({ block: "center", behavior: "smooth" });
+    setPendingSearchMessageId(null);
+  }, [messages, pendingSearchMessageId]);
 
   const handleCreateConversation = useCallback(async () => {
     try {
@@ -1820,12 +1920,19 @@ export const ChatView = ({
         <SearchBar
           isSearchOpen={isSearchOpen}
           searchQuery={searchQuery}
-          matchCount={highlightedMessageIds.size}
+          matchCount={globalSearchResults.length}
           onCloseSearch={() => {
             setSearchOpen(false);
             setSearchQuery("");
           }}
           onQueryChange={setSearchQuery}
+        />
+        <GlobalSearchResults
+          isOpen={isSearchOpen}
+          isFetching={isGlobalSearchFetching}
+          query={searchQuery}
+          results={globalSearchResults}
+          onSelectResult={handleSelectSearchResult}
         />
 
         <div ref={scrollContainerRef} className="flex-1 overflow-y-auto bg-chat-area">

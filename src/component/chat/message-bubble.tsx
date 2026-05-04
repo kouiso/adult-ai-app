@@ -775,6 +775,7 @@ export const MessageBubble = memo((rawProps: MessageBubbleProps) => {
 
   return (
     <div
+      data-message-id={id}
       className={cn(
         "flex gap-3 px-4 py-3 group/message message-enter",
         isUser && "flex-row-reverse",
