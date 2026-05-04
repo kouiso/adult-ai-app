@@ -401,8 +401,11 @@ export async function searchConversationMessages(
   query: string,
   limit = 25,
 ): Promise<MessageSearchResult[]> {
+  const normalizedQuery = query.trim();
+  if (!normalizedQuery) return [];
+
   const params = new URLSearchParams({
-    q: query,
+    q: normalizedQuery,
     limit: String(limit),
   });
   const response = await apiFetch(`/api/conversations/search/messages?${params.toString()}`);

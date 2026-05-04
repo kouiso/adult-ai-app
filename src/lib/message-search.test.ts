@@ -20,4 +20,13 @@ describe("buildMessageSearchSnippet", () => {
   it("normalizes whitespace before truncating", () => {
     expect(buildMessageSearchSnippet("alpha\n\n  beta\tgamma", "beta")).toBe("alpha beta gamma");
   });
+
+  it("normalizes query whitespace before finding the snippet window", () => {
+    const content = `${"a".repeat(120)}alpha\n\n  beta${"b".repeat(120)}`;
+    const snippet = buildMessageSearchSnippet(content, "alpha  beta", 80);
+
+    expect(snippet).toContain("alpha beta");
+    expect(snippet.startsWith("...")).toBe(true);
+    expect(snippet.endsWith("...")).toBe(true);
+  });
 });

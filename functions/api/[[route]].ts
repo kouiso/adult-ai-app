@@ -2625,6 +2625,7 @@ const app = new Hono<{ Bindings: Bindings }>()
         and(
           eq(messageTable.userId, userId),
           eq(conversationTable.userId, userId),
+          ne(messageTable.role, "system"),
           sql`lower(${messageTable.content}) LIKE ${likePattern} ESCAPE '\\'`,
         ),
       )

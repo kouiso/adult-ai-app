@@ -6,7 +6,7 @@ export function buildMessageSearchSnippet(content: string, query: string, maxLen
   const normalized = normalizeSnippetText(content);
   if (normalized.length <= maxLength) return normalized;
 
-  const normalizedQuery = query.trim().toLowerCase();
+  const normalizedQuery = normalizeSnippetText(query).toLowerCase();
   const matchIndex = normalizedQuery ? normalized.toLowerCase().indexOf(normalizedQuery) : -1;
   const start = matchIndex === -1 ? 0 : Math.max(0, matchIndex - SEARCH_SNIPPET_RADIUS);
   const end = Math.min(normalized.length, start + maxLength);
