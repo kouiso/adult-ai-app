@@ -80,35 +80,6 @@ export const ConversationList = memo(
         >
           新しい会話
         </Button>
-        {conversations.length > 0 && (
-          <AlertDialog>
-            <AlertDialogTrigger
-              render={
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full text-destructive hover:bg-destructive hover:text-destructive-foreground"
-                />
-              }
-            >
-              全会話を削除
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>全会話を削除</AlertDialogTitle>
-                <AlertDialogDescription>
-                  全{conversations.length}件の会話を削除しますか？この操作は取り消せません。
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>キャンセル</AlertDialogCancel>
-                <AlertDialogAction variant="destructive" onClick={() => void onDeleteAll()}>
-                  全削除
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        )}
       </div>
       <ScrollArea className="h-0 flex-1">
         <div className="space-y-1 p-2">
@@ -215,6 +186,34 @@ export const ConversationList = memo(
               </AlertDialog>
             </div>
           ))}
+          {conversations.length > 0 && (
+            <AlertDialog>
+              <AlertDialogTrigger
+                render={
+                  <button
+                    type="button"
+                    className="mx-auto mt-3 flex rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-destructive"
+                  />
+                }
+              >
+                全会話を削除
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>全会話を削除</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    全{conversations.length}件の会話を削除しますか？この操作は取り消せません。
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>キャンセル</AlertDialogCancel>
+                  <AlertDialogAction variant="destructive" onClick={() => void onDeleteAll()}>
+                    全削除
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          )}
           {!isLoading && conversations.length === 0 && (
             <div className="rounded-2xl border border-border/70 bg-card/65 px-4 py-8 text-center shadow-sm">
               <p className="font-narrative text-sm font-semibold text-foreground">
