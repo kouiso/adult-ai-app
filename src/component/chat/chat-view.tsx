@@ -478,26 +478,57 @@ const canMessageSpeak = (
 ): boolean =>
   ttsEnabled && !message.isStreaming && !!message.content && message.role === "assistant";
 
-const ChatHeader = ({ name, avatar, relationship, sceneTitle }: ChatHeaderInfo) => (
-  <div className="sticky top-0 z-10 border-b border-border/50 bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/80">
-    <div className="mx-auto flex h-14 max-h-14 max-w-3xl items-center gap-3 px-4">
+const ChatHeader = ({
+  info,
+  onOpenMenu,
+  onOpenSearch,
+}: {
+  info: ChatHeaderInfo;
+  onOpenMenu: () => void;
+  onOpenSearch: () => void;
+}) => (
+  <header className="sticky top-0 z-10 h-14 max-h-14 border-b border-border/50 bg-card/85 glass-effect">
+    <div className="mx-auto flex h-full max-w-3xl items-center gap-2 px-3 md:px-4">
       <Avatar className="size-7">
-        {avatar ? <AvatarImage src={avatar} alt={name} /> : null}
-        <AvatarFallback className="text-xs font-medium">{getAvatarFallback(name)}</AvatarFallback>
+        {info.avatar ? <AvatarImage src={info.avatar} alt={info.name} /> : null}
+        <AvatarFallback className="text-[11px] font-medium">
+          {getAvatarFallback(info.name)}
+        </AvatarFallback>
       </Avatar>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-base font-semibold leading-5 text-foreground">{name}</div>
-        {relationship ? (
-          <div className="truncate text-xs leading-4 text-muted-foreground">{relationship}</div>
+        <p className="truncate text-base font-semibold leading-5 text-foreground">
+          {info.name}
+        </p>
+        {info.relationship ? (
+          <p className="truncate text-xs leading-4 text-muted-foreground">{info.relationship}</p>
         ) : null}
       </div>
-      {sceneTitle ? (
-        <Badge variant="secondary" className="max-w-[40%] truncate">
-          {sceneTitle}
+      {info.sceneTitle ? (
+        <Badge
+          variant="outline"
+          className="max-w-[36vw] truncate text-muted-foreground sm:max-w-48"
+        >
+          {info.sceneTitle}
         </Badge>
       ) : null}
+      <button
+        type="button"
+        onClick={onOpenMenu}
+        className="rounded-md p-1.5 transition-colors hover:bg-muted md:hidden"
+        aria-label="会話リストを開く"
+      >
+        <Menu className="h-5 w-5" />
+      </button>
+      <button
+        type="button"
+        onClick={onOpenSearch}
+        className="rounded-md p-1.5 transition-colors hover:bg-muted"
+        aria-label="メッセージを検索"
+      >
+        <Search className="h-5 w-5" />
+      </button>
     </div>
-  </div>
+  </header>
 );
 
 const EmptyState = ({
@@ -573,7 +604,6 @@ type SearchBarProps = {
   isSearchOpen: boolean;
   searchQuery: string;
   matchCount: number;
-  onOpenSearch: () => void;
   onCloseSearch: () => void;
   onQueryChange: (query: string) => void;
 };
@@ -582,23 +612,11 @@ const SearchBar = ({
   isSearchOpen,
   searchQuery,
   matchCount,
-  onOpenSearch,
   onCloseSearch,
   onQueryChange,
 }: SearchBarProps) => {
   if (!isSearchOpen) {
-    return (
-      <div className="hidden md:flex justify-end px-4 pt-2">
-        <button
-          type="button"
-          onClick={onOpenSearch}
-          className="rounded-md p-1.5 text-muted-foreground hover:bg-muted transition-colors"
-          aria-label="メッセージを検索"
-        >
-          <Search className="h-4 w-4" />
-        </button>
-      </div>
-    );
+    return null;
   }
 
   return (
@@ -1579,28 +1597,11 @@ export const ChatView = ({
       </Sheet>
 
       <div className="flex h-full min-w-0 flex-1 flex-col">
-        {/* スマホ用ヘッダー（md以上では非表示） */}
-        <div className="flex items-center gap-2 border-b border-border/50 bg-card/80 glass-effect px-3 py-2 md:hidden">
-          <button
-            type="button"
-            onClick={() => setMobileDrawerOpen(true)}
-            className="rounded-md p-1.5 hover:bg-muted transition-colors"
-            aria-label="会話リストを開く"
-          >
-            <Menu className="h-5 w-5" />
-          </button>
-          <span className="truncate text-sm font-medium text-muted-foreground flex-1">
-            {currentTitle}
-          </span>
-          <button
-            type="button"
-            onClick={() => setSearchOpen((prev) => !prev)}
-            className="rounded-md p-1.5 hover:bg-muted transition-colors"
-            aria-label="メッセージを検索"
-          >
-            <Search className="h-5 w-5" />
-          </button>
-        </div>
+        <ChatHeader
+          info={chatHeaderInfo}
+          onOpenMenu={() => setMobileDrawerOpen(true)}
+          onOpenSearch={() => setSearchOpen((prev) => !prev)}
+        />
 
         {!isOnline && (
           <div className="border-b border-yellow-500/30 bg-yellow-500/10 px-4 py-2 text-sm text-yellow-700 dark:text-yellow-400">
@@ -1612,7 +1613,6 @@ export const ChatView = ({
           isSearchOpen={isSearchOpen}
           searchQuery={searchQuery}
           matchCount={highlightedMessageIds.size}
-          onOpenSearch={() => setSearchOpen(true)}
           onCloseSearch={() => {
             setSearchOpen(false);
             setSearchQuery("");
@@ -1621,7 +1621,6 @@ export const ChatView = ({
         />
 
         <div ref={scrollContainerRef} className="flex-1 overflow-y-auto bg-chat-area">
-          <ChatHeader {...chatHeaderInfo} />
           <div className="mx-auto max-w-3xl py-4">
             {messages.length === 0 && (
               <div className="flex h-[60vh] items-center justify-center">
