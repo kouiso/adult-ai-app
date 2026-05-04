@@ -7,7 +7,7 @@ import remarkGfm from "remark-gfm";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/component/ui/avatar";
 import { Badge } from "@/component/ui/badge";
-import { cn } from "@/lib/utils";
+import { cn, getAvatarFallback } from "@/lib/utils";
 import {
   isXmlResponse,
   parseXmlResponse,
@@ -338,7 +338,7 @@ const MessageAvatar = ({ isUser, characterName, avatarUrl, onAvatarClick }: Mess
           isUser ? "bg-gradient-user-bubble text-white" : "bg-accent text-accent-foreground",
         )}
       >
-        {isUser ? "あなた" : characterName.slice(0, 2)}
+        {isUser ? "あなた" : getAvatarFallback(characterName)}
       </AvatarFallback>
     </Avatar>
   );

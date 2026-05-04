@@ -1,6 +1,6 @@
 import { memo } from "react";
 
-import { Trash2 } from "lucide-react";
+import { Bot, Trash2 } from "lucide-react";
 
 import {
   AlertDialog,
@@ -80,35 +80,6 @@ export const ConversationList = memo(
         >
           新しい会話
         </Button>
-        {conversations.length > 0 && (
-          <AlertDialog>
-            <AlertDialogTrigger
-              render={
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full text-destructive hover:bg-destructive hover:text-destructive-foreground"
-                />
-              }
-            >
-              全会話を削除
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>全会話を削除</AlertDialogTitle>
-                <AlertDialogDescription>
-                  全{conversations.length}件の会話を削除しますか？この操作は取り消せません。
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>キャンセル</AlertDialogCancel>
-                <AlertDialogAction variant="destructive" onClick={() => void onDeleteAll()}>
-                  全削除
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        )}
       </div>
       <ScrollArea className="h-0 flex-1">
         <div className="space-y-1 p-2">
@@ -160,24 +131,26 @@ export const ConversationList = memo(
               >
                 <p className="line-clamp-1 text-sm font-medium">{conversation.title}</p>
                 <p className="mt-1 flex items-center text-xs text-muted-foreground">
-                  {conversation.characterName !== "AI" && (
-                    <span className="mr-1 inline-flex items-center gap-1">
-                      {conversation.characterAvatar &&
+                  <span className="mr-1 inline-flex items-center gap-1">
+                    {conversation.characterName === "AI" || conversation.characterName === "" ? (
+                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-primary/20 bg-primary/10 text-primary">
+                        <Bot className="h-3.5 w-3.5" />
+                      </span>
+                    ) : conversation.characterAvatar &&
                       (conversation.characterAvatar.startsWith("http") ||
                         conversation.characterAvatar.startsWith("/")) ? (
-                        <img
-                          src={conversation.characterAvatar}
-                          alt={conversation.characterName ?? ""}
-                          className="inline-block h-6 w-6 rounded-full border border-primary/20 object-cover shadow-sm"
-                        />
-                      ) : (
-                        <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-primary/20 bg-primary/10 text-[11px] text-primary">
-                          {conversation.characterName.slice(0, 1)}
-                        </span>
-                      )}{" "}
-                      {conversation.characterName} ·{" "}
-                    </span>
-                  )}
+                      <img
+                        src={conversation.characterAvatar}
+                        alt={conversation.characterName}
+                        className="inline-block h-6 w-6 rounded-full border border-primary/20 object-cover shadow-sm"
+                      />
+                    ) : (
+                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-primary/20 bg-primary/10 text-[11px] text-primary">
+                        {conversation.characterName.slice(0, 1)}
+                      </span>
+                    )}{" "}
+                    {conversation.characterName || "AI"} ·{" "}
+                  </span>
                   {formatDateTime(conversation.updatedAt)}
                 </p>
               </button>
@@ -215,6 +188,34 @@ export const ConversationList = memo(
               </AlertDialog>
             </div>
           ))}
+          {conversations.length > 0 && (
+            <AlertDialog>
+              <AlertDialogTrigger
+                render={
+                  <button
+                    type="button"
+                    className="mx-auto mt-3 flex rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-destructive"
+                  />
+                }
+              >
+                全会話を削除
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>全会話を削除</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    全{conversations.length}件の会話を削除しますか？この操作は取り消せません。
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>キャンセル</AlertDialogCancel>
+                  <AlertDialogAction variant="destructive" onClick={() => void onDeleteAll()}>
+                    全削除
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          )}
           {!isLoading && conversations.length === 0 && (
             <div className="rounded-2xl border border-border/70 bg-card/65 px-4 py-8 text-center shadow-sm">
               <p className="font-narrative text-sm font-semibold text-foreground">
