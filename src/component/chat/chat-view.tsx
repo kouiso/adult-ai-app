@@ -13,10 +13,12 @@ import {
   generateConversationTitle,
   generateImage,
   getImageTaskResult,
+  listCharacters,
   listConversationMessages,
   persistImageToR2,
   streamChat,
   streamChatWithQualityGuard,
+  type Character,
   type PersistedMessage,
 } from "@/lib/api";
 import {
@@ -36,6 +38,8 @@ import { useChatStore } from "@/store/chat-store";
 import { useSettingsStore } from "@/store/settings-store";
 
 import { LegalLinks } from "../legal/legal-links";
+import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
+import { Badge } from "../ui/badge";
 import { Sheet, SheetContent } from "../ui/sheet";
 import { Skeleton } from "../ui/skeleton";
 
@@ -291,6 +295,192 @@ const canMessageSpeak = (
 ): boolean =>
   ttsEnabled && !message.isStreaming && !!message.content && message.role === "assistant";
 
+type SceneCharacterRecord = {
+  name?: string;
+  relationship?: string;
+  relation?: string;
+  subtitle?: string;
+  avatar?: string | null;
+  avatarUrl?: string | null;
+  imageUrl?: string | null;
+};
+
+type SceneCardWithCharacter = SceneCard & {
+  character?: string | SceneCharacterRecord;
+};
+
+type ChatHeaderInfo = {
+  characterName: string;
+  characterAvatar: string | null;
+  relationship: string | null;
+  sceneTitle: string | null;
+};
+
+type ChatHeaderCandidate = Omit<ChatHeaderInfo, "sceneTitle">;
+
+const getCharacterRelationship = (character?: Character | null): string | null => {
+  const tags = character?.tags?.filter(Boolean) ?? [];
+  return tags.length > 0 ? tags.slice(0, 2).join(" · ") : null;
+};
+
+const getSceneCharacterInfo = (scene: SceneCard | null): Partial<ChatHeaderInfo> => {
+  const character = (scene as SceneCardWithCharacter | null)?.character;
+  if (!character) return {};
+  if (typeof character === "string") return { characterName: character };
+
+  return {
+    characterName: character.name,
+    characterAvatar: character.avatar ?? character.avatarUrl ?? character.imageUrl ?? null,
+    relationship: character.relationship ?? character.relation ?? character.subtitle ?? null,
+  };
+};
+
+const findActiveScene = (currentTitle: string, messages: ChatMessage[]): SceneCard | null => {
+  const firstUserMessage = messages
+    .find((message) => message.role === "user" && message.content.trim().length > 0)
+    ?.content.trim();
+
+  return (
+    sceneCards.find(
+      (scene) => scene.title === currentTitle || scene.firstMessage === firstUserMessage,
+    ) ?? null
+  );
+};
+
+const getConversationHeaderCandidate = ({
+  currentCharacterName,
+  currentCharacterAvatar,
+  currentConversationCharacter,
+}: {
+  currentCharacterName: string;
+  currentCharacterAvatar: string | null;
+  currentConversationCharacter?: Character | null;
+}): ChatHeaderCandidate | null => {
+  const hasConversationCharacter =
+    currentCharacterName.trim().length > 0 && currentCharacterName !== "AI";
+
+  if (!hasConversationCharacter) return null;
+
+  return {
+    characterName: currentCharacterName,
+    characterAvatar: currentCharacterAvatar,
+    relationship: getCharacterRelationship(currentConversationCharacter),
+  };
+};
+
+const getActiveCharacterHeaderCandidate = (
+  activeCharacter?: Character | null,
+): ChatHeaderCandidate | null => {
+  if (!activeCharacter) return null;
+
+  return {
+    characterName: activeCharacter.name,
+    characterAvatar: activeCharacter.avatar,
+    relationship: getCharacterRelationship(activeCharacter),
+  };
+};
+
+const getSceneHeaderCandidate = (activeScene: SceneCard | null): ChatHeaderCandidate | null => {
+  const sceneCharacter = getSceneCharacterInfo(activeScene);
+  if (!sceneCharacter.characterName) return null;
+
+  return {
+    characterName: sceneCharacter.characterName,
+    characterAvatar: sceneCharacter.characterAvatar ?? null,
+    relationship: sceneCharacter.relationship ?? null,
+  };
+};
+
+const buildChatHeaderInfo = ({
+  currentCharacterName,
+  currentCharacterAvatar,
+  currentConversationCharacter,
+  activeCharacter,
+  activeScene,
+}: {
+  currentCharacterName: string;
+  currentCharacterAvatar: string | null;
+  currentConversationCharacter?: Character | null;
+  activeCharacter?: Character | null;
+  activeScene: SceneCard | null;
+}): ChatHeaderInfo => {
+  const candidate =
+    getConversationHeaderCandidate({
+      currentCharacterName,
+      currentCharacterAvatar,
+      currentConversationCharacter,
+    }) ??
+    getActiveCharacterHeaderCandidate(activeCharacter) ??
+    getSceneHeaderCandidate(activeScene);
+
+  return candidate
+    ? {
+        ...candidate,
+        sceneTitle: activeScene?.title ?? null,
+      }
+    : {
+        characterName: "AI",
+        characterAvatar: null,
+        relationship: null,
+        sceneTitle: activeScene?.title ?? null,
+      };
+};
+
+const ChatHeader = ({
+  info,
+  onOpenMenu,
+  onOpenSearch,
+}: {
+  info: ChatHeaderInfo;
+  onOpenMenu: () => void;
+  onOpenSearch: () => void;
+}) => (
+  <header className="sticky top-0 z-10 h-14 max-h-14 border-b border-border/50 bg-card/85 glass-effect">
+    <div className="mx-auto flex h-full max-w-3xl items-center gap-2 px-3 md:px-4">
+      <Avatar className="size-7">
+        {info.characterAvatar ? (
+          <AvatarImage src={info.characterAvatar} alt={info.characterName} />
+        ) : null}
+        <AvatarFallback className="text-[11px] font-medium">
+          {info.characterName.slice(0, 2)}
+        </AvatarFallback>
+      </Avatar>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-base font-semibold leading-5 text-foreground">
+          {info.characterName}
+        </p>
+        {info.relationship ? (
+          <p className="truncate text-xs leading-4 text-muted-foreground">{info.relationship}</p>
+        ) : null}
+      </div>
+      {info.sceneTitle ? (
+        <Badge
+          variant="outline"
+          className="max-w-[36vw] truncate text-muted-foreground sm:max-w-48"
+        >
+          {info.sceneTitle}
+        </Badge>
+      ) : null}
+      <button
+        type="button"
+        onClick={onOpenMenu}
+        className="rounded-md p-1.5 transition-colors hover:bg-muted md:hidden"
+        aria-label="会話リストを開く"
+      >
+        <Menu className="h-5 w-5" />
+      </button>
+      <button
+        type="button"
+        onClick={onOpenSearch}
+        className="rounded-md p-1.5 transition-colors hover:bg-muted"
+        aria-label="メッセージを検索"
+      >
+        <Search className="h-5 w-5" />
+      </button>
+    </div>
+  </header>
+);
+
 const EmptyState = ({
   isMessageListLoading,
   onSelectScene,
@@ -364,7 +554,6 @@ type SearchBarProps = {
   isSearchOpen: boolean;
   searchQuery: string;
   matchCount: number;
-  onOpenSearch: () => void;
   onCloseSearch: () => void;
   onQueryChange: (query: string) => void;
 };
@@ -373,23 +562,11 @@ const SearchBar = ({
   isSearchOpen,
   searchQuery,
   matchCount,
-  onOpenSearch,
   onCloseSearch,
   onQueryChange,
 }: SearchBarProps) => {
   if (!isSearchOpen) {
-    return (
-      <div className="hidden md:flex justify-end px-4 pt-2">
-        <button
-          type="button"
-          onClick={onOpenSearch}
-          className="rounded-md p-1.5 text-muted-foreground hover:bg-muted transition-colors"
-          aria-label="メッセージを検索"
-        >
-          <Search className="h-4 w-4" />
-        </button>
-      </div>
-    );
+    return null;
   }
 
   return (
@@ -439,6 +616,7 @@ export const ChatView = ({
   const setMessages = useChatStore((s) => s.setMessages);
   const setLoading = useChatStore((s) => s.setLoading);
   const nsfwBlur = useSettingsStore((s) => s.nsfwBlur);
+  const activeCharacterId = useSettingsStore((s) => s.activeCharacterId);
   const isOnline = useNetworkStatus();
   const [isMobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [isSearchOpen, setSearchOpen] = useState(false);
@@ -505,6 +683,10 @@ export const ChatView = ({
       latestConversation ? listConversationMessages(latestConversation.id) : Promise.resolve([]),
     enabled: latestConversation !== null,
   });
+  const { data: characters = [] } = useQuery({
+    queryKey: queryKey.characterList,
+    queryFn: listCharacters,
+  });
   const { currentSystemPrompt, currentCharacterName, currentCharacterAvatar, currentTitle } =
     useMemo(
       () => ({
@@ -515,11 +697,46 @@ export const ChatView = ({
       }),
       [currentConversation],
     );
+  const activeScene = useMemo(
+    () => findActiveScene(currentTitle, messages),
+    [currentTitle, messages],
+  );
+  const currentConversationCharacter = useMemo(
+    () =>
+      currentConversation
+        ? characters.find((character) => character.id === currentConversation.characterId)
+        : null,
+    [characters, currentConversation],
+  );
+  const activeCharacter = useMemo(
+    () =>
+      !currentConversation && activeCharacterId
+        ? characters.find((character) => character.id === activeCharacterId)
+        : null,
+    [activeCharacterId, characters, currentConversation],
+  );
+  const chatHeaderInfo = useMemo(
+    () =>
+      buildChatHeaderInfo({
+        currentCharacterName,
+        currentCharacterAvatar,
+        currentConversationCharacter,
+        activeCharacter,
+        activeScene,
+      }),
+    [
+      activeCharacter,
+      activeScene,
+      currentCharacterAvatar,
+      currentCharacterName,
+      currentConversationCharacter,
+    ],
+  );
 
   const createConversationAndSelect = useCallback(async () => {
-    const activeCharacterId = useSettingsStore.getState().activeCharacterId;
+    const selectedCharacterId = useSettingsStore.getState().activeCharacterId;
     const created = await createConversationEntry({
-      characterId: activeCharacterId ?? undefined,
+      characterId: selectedCharacterId ?? undefined,
     });
     setConversationId(created.id);
     setMessages([]);
@@ -1319,28 +1536,11 @@ export const ChatView = ({
       </Sheet>
 
       <div className="flex h-full min-w-0 flex-1 flex-col">
-        {/* スマホ用ヘッダー（md以上では非表示） */}
-        <div className="flex items-center gap-2 border-b border-border/50 bg-card/80 glass-effect px-3 py-2 md:hidden">
-          <button
-            type="button"
-            onClick={() => setMobileDrawerOpen(true)}
-            className="rounded-md p-1.5 hover:bg-muted transition-colors"
-            aria-label="会話リストを開く"
-          >
-            <Menu className="h-5 w-5" />
-          </button>
-          <span className="truncate text-sm font-medium text-muted-foreground flex-1">
-            {currentTitle}
-          </span>
-          <button
-            type="button"
-            onClick={() => setSearchOpen((prev) => !prev)}
-            className="rounded-md p-1.5 hover:bg-muted transition-colors"
-            aria-label="メッセージを検索"
-          >
-            <Search className="h-5 w-5" />
-          </button>
-        </div>
+        <ChatHeader
+          info={chatHeaderInfo}
+          onOpenMenu={() => setMobileDrawerOpen(true)}
+          onOpenSearch={() => setSearchOpen((prev) => !prev)}
+        />
 
         {!isOnline && (
           <div className="border-b border-yellow-500/30 bg-yellow-500/10 px-4 py-2 text-sm text-yellow-700 dark:text-yellow-400">
@@ -1352,7 +1552,6 @@ export const ChatView = ({
           isSearchOpen={isSearchOpen}
           searchQuery={searchQuery}
           matchCount={highlightedMessageIds.size}
-          onOpenSearch={() => setSearchOpen(true)}
           onCloseSearch={() => {
             setSearchOpen(false);
             setSearchQuery("");
