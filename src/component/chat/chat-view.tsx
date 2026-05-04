@@ -1,7 +1,7 @@
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useQuery } from "@tanstack/react-query";
-import { Menu, Search, Sparkles, UserPlus, X } from "lucide-react";
+import { ArrowDown, Menu, Search, Sparkles, UserPlus, X } from "lucide-react";
 import { toast } from "sonner";
 import { useShallow } from "zustand/react/shallow";
 
@@ -48,7 +48,9 @@ import { MessageBubble } from "./message-bubble";
 import { SceneCardPicker } from "./scene-card-picker";
 
 const IMAGE_PROMPT_MAX_LENGTH = 900;
-// exponential backoff: 1s → 2s → 4s → 8s → cap 10s
+const TITLE_FALLBACK_MAX_LENGTH = 20;
+const SCENE_INTRO_KIND = "scene-intro";
+// 指数バックオフ: 1秒 → 2秒 → 4秒 → 8秒 → 上限10秒
 const POLL_MAX_DELAY_MS = 10_000;
 const AUTO_IMAGE_RECENT_TURN_LIMIT = 3;
 const AUTO_IMAGE_START_DELAY_MS = 700;
@@ -81,9 +83,14 @@ type SceneCharacterInfo = {
   relationship: string | null;
 };
 
-type SceneCardWithOptionalCharacter = SceneCard & {
-  character?: unknown;
+type SceneIntroContent = {
+  title: string;
+  summary: string;
+  characterName: string | null;
 };
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
 const readNonEmptyString = (value: unknown): string | null => {
   if (typeof value !== "string") return null;
@@ -102,9 +109,9 @@ const firstNonEmptyString = (...values: unknown[]): string | null => {
 };
 
 const readSceneCharacterInfo = (scene: SceneCard | null): SceneCharacterInfo | null => {
-  if (!scene || !("character" in scene)) return null;
+  if (!scene) return null;
 
-  const character = (scene as SceneCardWithOptionalCharacter).character;
+  const character: unknown = scene.character;
   if (!character) return null;
 
   if (typeof character === "string") {
@@ -116,17 +123,70 @@ const readSceneCharacterInfo = (scene: SceneCard | null): SceneCharacterInfo | n
   }
 
   if (typeof character !== "object") return null;
+  if (!isRecord(character)) return null;
 
-  const record = character as Record<string, unknown>;
   return {
-    name: readNonEmptyString(record.name),
-    avatar: readNonEmptyString(record.avatar),
+    name: readNonEmptyString(character.name),
+    avatar: readNonEmptyString(character.avatar),
     relationship:
-      readNonEmptyString(record.relationship) ??
-      readNonEmptyString(record.relation) ??
-      readNonEmptyString(record.subtitle),
+      readNonEmptyString(character.relationship) ??
+      readNonEmptyString(character.relation) ??
+      readNonEmptyString(character.subtitle),
   };
 };
+
+const buildSceneIntroContent = (scene: SceneCard): string =>
+  JSON.stringify({
+    kind: SCENE_INTRO_KIND,
+    title: scene.title,
+    summary: scene.summary,
+    characterName: scene.character.name,
+  });
+
+const parseSceneIntroContent = (content: string): SceneIntroContent | null => {
+  try {
+    const parsed: unknown = JSON.parse(content);
+    if (!isRecord(parsed) || parsed.kind !== SCENE_INTRO_KIND) return null;
+
+    const title = readNonEmptyString(parsed.title);
+    const summary = readNonEmptyString(parsed.summary);
+    if (!title || !summary) return null;
+
+    return {
+      title,
+      summary,
+      characterName: readNonEmptyString(parsed.characterName),
+    };
+  } catch {
+    return null;
+  }
+};
+
+const buildSceneIntroMessage = (scene: SceneCard): ChatMessage => ({
+  id: crypto.randomUUID(),
+  role: "system",
+  content: buildSceneIntroContent(scene),
+});
+
+const truncateTitleFallback = (source: string): string | null => {
+  const trimmed = source.trim();
+  if (!trimmed) return null;
+
+  const characters = Array.from(trimmed);
+  if (characters.length <= TITLE_FALLBACK_MAX_LENGTH) return trimmed;
+
+  return `${characters.slice(0, TITLE_FALLBACK_MAX_LENGTH).join("")}...`;
+};
+
+const buildFallbackConversationTitle = (
+  firstUserMessage: string,
+  preferredTitle?: string,
+): string =>
+  firstNonEmptyString(
+    preferredTitle,
+    sceneCards.find((scene) => scene.firstMessage === firstUserMessage)?.title,
+    truncateTitleFallback(firstUserMessage),
+  ) ?? "会話";
 
 const extractRelationshipSubtitle = (systemPrompt?: string): string | null => {
   if (!systemPrompt) return null;
@@ -313,12 +373,6 @@ const hasImageInRecentTurns = (msgs: ChatMessage[], maxTurns: number): boolean =
     }
   }
   return false;
-};
-
-const getChatHeaderTitle = (characterName: string): string => {
-  const trimmedName = characterName.trim();
-  if (!trimmedName || trimmedName === "AI") return "チャット";
-  return trimmedName;
 };
 
 /** 直近N ターンの会話履歴から画像生成用のシーン記述テキストを組み立てる */
@@ -571,8 +625,10 @@ const EmptyState = ({
       <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
         <p className="text-3xl">💬</p>
       </div>
-      <p className="text-lg font-semibold text-foreground">会話を始めましょう</p>
-      <p className="mt-1 text-sm text-muted-foreground">メッセージを入力してください</p>
+      <p className="text-lg font-semibold text-foreground">シーンを選んで始めよう</p>
+      <p className="mt-1 text-sm text-muted-foreground">
+        気分に近いカードを選ぶと、会話の導入から始まります
+      </p>
       {onOpenCharacterManager || onOpenManualCharacterCreate ? (
         <div className="mt-5 flex flex-col items-center gap-2">
           {onOpenCharacterManager ? (
@@ -597,12 +653,34 @@ const EmptyState = ({
           ) : null}
         </div>
       ) : null}
-      <div className="mt-8 text-left">
+      <div className="mt-6 flex items-center justify-center gap-2 text-xs font-medium text-primary">
+        <ArrowDown className="h-4 w-4" />
+        下のシーンカードから選択
+      </div>
+      <div className="mt-3 rounded-2xl border border-primary/25 bg-primary/5 p-3 text-left shadow-[0_12px_36px_oklch(0.50_0.18_350_/_8%)]">
         <SceneCardPicker sceneCards={sceneCards} onSelect={onSelectScene} />
       </div>
     </div>
   );
 };
+
+const SceneIntroCard = ({ intro }: { intro: SceneIntroContent }) => (
+  <div className="px-4 py-3">
+    <div className="mx-auto max-w-2xl rounded-2xl border border-primary/20 bg-card/70 px-4 py-3 text-sm shadow-sm">
+      <div className="flex items-center gap-2 text-xs font-semibold text-primary">
+        <Sparkles className="h-3.5 w-3.5" />
+        シーン導入
+      </div>
+      <p className="mt-2 font-narrative text-base font-semibold text-foreground">{intro.title}</p>
+      <p className="mt-1 italic leading-6 text-muted-foreground">{intro.summary}</p>
+      {intro.characterName ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          登場キャラクター: {intro.characterName}
+        </p>
+      ) : null}
+    </div>
+  </div>
+);
 
 type SearchBarProps = {
   isSearchOpen: boolean;
@@ -953,21 +1031,33 @@ export const ChatView = ({
 
   // タイトル自動生成（初回AI応答完了後に一度だけ実行）
   const tryGenerateTitle = useCallback(
-    async (conversationId: string, userText: string, assistantText: string) => {
+    async (
+      conversationId: string,
+      userText: string,
+      assistantText: string,
+      fallbackTitle?: string,
+    ) => {
       const conv = conversations.find((c) => c.id === conversationId);
-      if (!conv || conv.title !== "新しい会話") return;
+      if (conv && conv.title !== "新しい会話") return;
 
-      const model = useSettingsStore.getState().model;
-      const newTitle = await generateConversationTitle(
-        conversationId,
-        [
-          { role: "user", content: userText },
-          { role: "assistant", content: assistantText },
-        ],
-        model,
-      );
-      if (newTitle) {
-        await updateConversationTitleEntry(conversationId, newTitle);
+      const fallback = buildFallbackConversationTitle(userText, fallbackTitle);
+
+      try {
+        const model = useSettingsStore.getState().model;
+        const newTitle = await generateConversationTitle(
+          conversationId,
+          [
+            { role: "user", content: userText },
+            { role: "assistant", content: assistantText },
+          ],
+          model,
+        );
+        await updateConversationTitleEntry(conversationId, newTitle || fallback);
+      } catch (error) {
+        console.error("failed to generate conversation title", error);
+        await updateConversationTitleEntry(conversationId, fallback).catch((updateError) =>
+          console.error("failed to set fallback conversation title", updateError),
+        );
       }
     },
     [conversations, updateConversationTitleEntry],
@@ -985,11 +1075,13 @@ export const ChatView = ({
       conversationId,
       systemPrompt,
       characterName,
+      fallbackTitle,
     }: {
       text: string;
       conversationId: string;
       systemPrompt: string;
       characterName: string;
+      fallbackTitle?: string;
     }) => {
       const { addMessage, updateMessage, markMessageError } = useChatStore.getState();
       const currentModel = useSettingsStore.getState().model;
@@ -1061,7 +1153,7 @@ export const ChatView = ({
                 content: finalText,
               });
             })
-            .then(() => void tryGenerateTitle(conversationId, text, finalText))
+            .then(() => void tryGenerateTitle(conversationId, text, finalText, fallbackTitle))
             .catch((error) => console.error("failed to persist assistant message", error));
         },
         (error) => {
@@ -1119,12 +1211,21 @@ export const ChatView = ({
         const scenePrompt = getSceneStartPrompt(scene, activeCharacterId);
         const created = await createConversationAndSelect({ characterId: activeCharacterId });
         rememberSceneConversationPrompt(created.id, scenePrompt);
+        const sceneIntroMessage = buildSceneIntroMessage(scene);
+        await createMessageEntry({
+          conversationId: created.id,
+          id: sceneIntroMessage.id,
+          role: sceneIntroMessage.role,
+          content: sceneIntroMessage.content,
+        });
+        useChatStore.getState().addMessage(sceneIntroMessage);
         const sendContext = getConversationSendContext(created, scenePrompt);
         await sendMessageToConversation({
           text: scene.firstMessage,
           conversationId: created.id,
           systemPrompt: sendContext.systemPrompt,
           characterName: sendContext.characterName,
+          fallbackTitle: scene.title,
         });
       } catch (error) {
         console.error("failed to start scene", error);
@@ -1133,6 +1234,7 @@ export const ChatView = ({
     },
     [
       createConversationAndSelect,
+      createMessageEntry,
       isOnline,
       rememberSceneConversationPrompt,
       sendMessageToConversation,
@@ -1585,7 +1687,6 @@ export const ChatView = ({
   );
 
   const isInputDisabled = isLoading || !isOnline;
-  const chatHeaderTitle = getChatHeaderTitle(currentCharacterName);
 
   return (
     <div className="flex h-full">
@@ -1626,11 +1727,6 @@ export const ChatView = ({
         />
 
         <div ref={scrollContainerRef} className="flex-1 overflow-y-auto bg-chat-area">
-          <div className="sticky top-0 z-10 border-b border-border/50 bg-card/80 px-4 py-2 backdrop-blur">
-            <div className="mx-auto max-w-3xl">
-              <p className="truncate text-sm font-semibold text-foreground">{chatHeaderTitle}</p>
-            </div>
-          </div>
           <div className="mx-auto max-w-3xl py-4">
             {messages.length === 0 && (
               <div className="flex h-[60vh] items-center justify-center">
@@ -1642,35 +1738,48 @@ export const ChatView = ({
                 />
               </div>
             )}
-            {visibleMessages.map((message, index) => (
-              <MessageBubble
-                key={message.id}
-                id={message.id}
-                role={message.role}
-                content={message.content}
-                imageUrl={message.imageUrl}
-                isStreaming={message.isStreaming}
-                isLoading={isLoading}
-                error={message.error}
-                warningLevel={message.warningLevel}
-                characterName={currentCharacterName}
-                characterAvatar={currentCharacterAvatar}
-                nsfwBlur={nsfwBlur}
-                canSpeak={canMessageSpeak(ttsEnabled, message)}
-                isSpeaking={speakingMessageId === message.id && isSpeaking}
-                isLast={message.id === lastAssistantId}
-                showLabel={
-                  message.role === "assistant" &&
-                  (index === 0 || visibleMessages[index - 1].role !== "assistant")
-                }
-                isHighlighted={highlightedMessageIds.has(message.id)}
-                onSpeak={handleSpeak}
-                onStopSpeaking={handleStopSpeaking}
-                onRegenerate={stableHandleRegenerate}
-                onEdit={stableHandleEdit}
-                onRetry={stableHandleRetry}
-              />
-            ))}
+            {messages.map((message) => {
+              if (message.role === "system") {
+                const intro = parseSceneIntroContent(message.content);
+                return intro ? <SceneIntroCard key={message.id} intro={intro} /> : null;
+              }
+
+              const visibleIndex = visibleMessages.findIndex(
+                (visibleMessage) => visibleMessage.id === message.id,
+              );
+              const previousVisibleMessage =
+                visibleIndex > 0 ? visibleMessages[visibleIndex - 1] : null;
+
+              return (
+                <MessageBubble
+                  key={message.id}
+                  id={message.id}
+                  role={message.role}
+                  content={message.content}
+                  imageUrl={message.imageUrl}
+                  isStreaming={message.isStreaming}
+                  isLoading={isLoading}
+                  error={message.error}
+                  warningLevel={message.warningLevel}
+                  characterName={currentCharacterName}
+                  characterAvatar={currentCharacterAvatar}
+                  nsfwBlur={nsfwBlur}
+                  canSpeak={canMessageSpeak(ttsEnabled, message)}
+                  isSpeaking={speakingMessageId === message.id && isSpeaking}
+                  isLast={message.id === lastAssistantId}
+                  showLabel={
+                    message.role === "assistant" &&
+                    (visibleIndex === 0 || previousVisibleMessage?.role !== "assistant")
+                  }
+                  isHighlighted={highlightedMessageIds.has(message.id)}
+                  onSpeak={handleSpeak}
+                  onStopSpeaking={handleStopSpeaking}
+                  onRegenerate={stableHandleRegenerate}
+                  onEdit={stableHandleEdit}
+                  onRetry={stableHandleRetry}
+                />
+              );
+            })}
           </div>
         </div>
         <ChatInput
