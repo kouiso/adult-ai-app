@@ -1,5 +1,5 @@
-// OpenRouter 経由のチャット生成用。Claude/GPT は従量課金のため除外。
-export const DEFAULT_CHAT_MODEL = "anthracite-org/magnum-v4-72b" as const;
+// OpenRouter 経由のチャット生成用。デフォルトは品質優先でClaude。
+export const DEFAULT_CHAT_MODEL = "anthropic/claude-sonnet-4" as const;
 
 export const DEFAULT_CHAT_MODEL_FALLBACKS = [
   "qwen/qwen-2.5-72b-instruct",
@@ -10,15 +10,15 @@ export const MODEL_FALLBACKS: Readonly<Record<string, readonly string[]>> = {
   [DEFAULT_CHAT_MODEL]: DEFAULT_CHAT_MODEL_FALLBACKS,
   "qwen/qwen-2.5-72b-instruct": [DEFAULT_CHAT_MODEL, "deepseek/deepseek-chat"],
   "deepseek/deepseek-chat": [DEFAULT_CHAT_MODEL, "qwen/qwen-2.5-72b-instruct"],
-  "anthropic/claude-sonnet-4": [
+  "anthracite-org/magnum-v4-72b": [
     DEFAULT_CHAT_MODEL,
     "qwen/qwen-2.5-72b-instruct",
     "deepseek/deepseek-chat",
   ],
   "anthropic/claude-opus-4": [
-    "anthropic/claude-sonnet-4",
     DEFAULT_CHAT_MODEL,
     "qwen/qwen-2.5-72b-instruct",
+    "deepseek/deepseek-chat",
   ],
 };
 
