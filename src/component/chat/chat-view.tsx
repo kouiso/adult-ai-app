@@ -17,6 +17,7 @@ import {
   persistImageToR2,
   streamChat,
   streamChatWithQualityGuard,
+  type ConversationSummary,
   type PersistedMessage,
 } from "@/lib/api";
 import {
@@ -26,7 +27,7 @@ import {
   type ApiMessage,
 } from "@/lib/chat-message-adapter";
 import { DEFAULT_SYSTEM_PROMPT } from "@/lib/config";
-import { parseSystemPrompt } from "@/lib/prompt-builder";
+import { buildSystemPrompt, parseSystemPrompt } from "@/lib/prompt-builder";
 import type { QualityCheckContext } from "@/lib/quality-guard";
 import { queryKey } from "@/lib/query-key";
 import { detectScenePhase, type ScenePhase } from "@/lib/scene-phase";
@@ -36,6 +37,8 @@ import { useChatStore } from "@/store/chat-store";
 import { useSettingsStore } from "@/store/settings-store";
 
 import { LegalLinks } from "../legal/legal-links";
+import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
+import { Badge } from "../ui/badge";
 import { Sheet, SheetContent } from "../ui/sheet";
 import { Skeleton } from "../ui/skeleton";
 
@@ -62,6 +65,160 @@ type ImagePollingResult =
   | { status: "timeout" };
 
 type MessagePair = { user?: string; assistant?: string };
+type SceneConversationPrompt = { systemPrompt: string; characterName: string };
+type SceneConversationPrompts = Record<string, SceneConversationPrompt>;
+
+type ChatHeaderInfo = {
+  name: string;
+  avatar: string | null;
+  relationship: string | null;
+  sceneTitle: string | null;
+};
+
+type SceneCharacterInfo = {
+  name: string | null;
+  avatar: string | null;
+  relationship: string | null;
+};
+
+type SceneCardWithOptionalCharacter = SceneCard & {
+  character?: unknown;
+};
+
+const readNonEmptyString = (value: unknown): string | null => {
+  if (typeof value !== "string") return null;
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
+const firstNonEmptyString = (...values: unknown[]): string | null => {
+  for (const value of values) {
+    const stringValue = readNonEmptyString(value);
+    if (stringValue) return stringValue;
+  }
+
+  return null;
+};
+
+const readSceneCharacterInfo = (scene: SceneCard | null): SceneCharacterInfo | null => {
+  if (!scene || !("character" in scene)) return null;
+
+  const character = (scene as SceneCardWithOptionalCharacter).character;
+  if (!character) return null;
+
+  if (typeof character === "string") {
+    return {
+      name: readNonEmptyString(character),
+      avatar: null,
+      relationship: null,
+    };
+  }
+
+  if (typeof character !== "object") return null;
+
+  const record = character as Record<string, unknown>;
+  return {
+    name: readNonEmptyString(record.name),
+    avatar: readNonEmptyString(record.avatar),
+    relationship:
+      readNonEmptyString(record.relationship) ??
+      readNonEmptyString(record.relation) ??
+      readNonEmptyString(record.subtitle),
+  };
+};
+
+const extractRelationshipSubtitle = (systemPrompt?: string): string | null => {
+  if (!systemPrompt) return null;
+
+  const normalized = systemPrompt.replace(/\\n/g, "\n");
+  const marker = "【関係性】";
+  const startIdx = normalized.indexOf(marker);
+  if (startIdx === -1) return null;
+
+  const contentStart = startIdx + marker.length;
+  const endMarkers = ["【シナリオ】", "【追加設定】", "【キャラカード】"];
+  const endIdx = endMarkers.reduce((nearest, endMarker) => {
+    const idx = normalized.indexOf(endMarker, contentStart);
+    return idx === -1 ? nearest : Math.min(nearest, idx);
+  }, normalized.length);
+
+  return readNonEmptyString(normalized.slice(contentStart, endIdx).replace(/\s+/g, " "));
+};
+
+const getAvatarFallback = (name: string): string => Array.from(name.trim()).slice(0, 2).join("");
+
+const getSceneConversationPrompt = (
+  conversationId: string | null,
+  sceneConversationPrompts: SceneConversationPrompts,
+): SceneConversationPrompt | undefined =>
+  conversationId ? sceneConversationPrompts[conversationId] : undefined;
+
+const getConversationSendContext = (
+  conversation: Pick<ConversationSummary, "characterSystemPrompt" | "characterName">,
+  scenePrompt?: SceneConversationPrompt | null,
+): SceneConversationPrompt => ({
+  systemPrompt:
+    firstNonEmptyString(scenePrompt?.systemPrompt, conversation.characterSystemPrompt) ??
+    DEFAULT_SYSTEM_PROMPT,
+  characterName:
+    firstNonEmptyString(scenePrompt?.characterName, conversation.characterName) ?? "AI",
+});
+
+const getCurrentConversationDetails = (
+  conversation: ConversationSummary | undefined,
+  scenePrompt: SceneConversationPrompt | undefined,
+) => {
+  const sendContext = getConversationSendContext(
+    {
+      characterSystemPrompt: conversation?.characterSystemPrompt ?? "",
+      characterName: conversation?.characterName ?? "",
+    },
+    scenePrompt,
+  );
+
+  return {
+    currentSystemPrompt: sendContext.systemPrompt,
+    currentCharacterName: sendContext.characterName,
+    currentCharacterAvatar: readNonEmptyString(conversation?.characterAvatar),
+    currentTitle: firstNonEmptyString(conversation?.title) ?? "新しい会話",
+  };
+};
+
+const buildChatHeaderInfo = ({
+  currentCharacterAvatar,
+  currentCharacterName,
+  currentConversation,
+  currentSceneCard,
+  currentSystemPrompt,
+}: {
+  currentCharacterAvatar: string | null;
+  currentCharacterName: string;
+  currentConversation: ConversationSummary | undefined;
+  currentSceneCard: SceneCard | null;
+  currentSystemPrompt: string;
+}): ChatHeaderInfo => {
+  const sceneCharacterInfo = readSceneCharacterInfo(currentSceneCard);
+
+  return {
+    name:
+      firstNonEmptyString(
+        currentCharacterName,
+        currentConversation?.characterName,
+        sceneCharacterInfo?.name,
+      ) ?? "AI",
+    avatar: firstNonEmptyString(
+      currentConversation?.characterAvatar,
+      currentCharacterAvatar,
+      sceneCharacterInfo?.avatar,
+    ),
+    relationship: firstNonEmptyString(
+      extractRelationshipSubtitle(currentSystemPrompt),
+      sceneCharacterInfo?.relationship,
+    ),
+    sceneTitle: firstNonEmptyString(currentSceneCard?.title),
+  };
+};
 
 const hasContent = (m: ChatMessage): boolean => m.content.length > 0;
 
@@ -78,6 +235,36 @@ const buildFallbackPair = (reversedMsgs: ChatMessage[]): MessagePair[] => {
 
 const hasContinueConversationContent = (messages: PersistedMessage[]): boolean =>
   messages.some((message) => message.role === "assistant" && message.content.trim().length > 0);
+
+const buildSceneConversationPrompt = (scene: SceneCard): SceneConversationPrompt => ({
+  systemPrompt: buildSystemPrompt(
+    {
+      name: "",
+      personality: "",
+      appearance: "",
+      scenario: scene.summary,
+      custom: "",
+    },
+    scene.character,
+  ),
+  characterName: scene.character.name,
+});
+
+const hasSceneFirstMessage = (scene: SceneCard, messages: ChatMessage[]): boolean =>
+  messages.some((message) => message.role === "user" && message.content === scene.firstMessage);
+
+const findCurrentSceneCard = (currentTitle: string, messages: ChatMessage[]): SceneCard | null =>
+  sceneCards.find((scene) => scene.title === currentTitle) ??
+  sceneCards.find((scene) => hasSceneFirstMessage(scene, messages)) ??
+  null;
+
+const getSceneStartPrompt = (
+  scene: SceneCard,
+  activeCharacterId: string | null | undefined,
+): SceneConversationPrompt | null => {
+  if (activeCharacterId) return null;
+  return buildSceneConversationPrompt(scene);
+};
 
 const collectRecentMessagePairs = (msgs: ChatMessage[], maxTurns: number): MessagePair[] => {
   const pairs: MessagePair[] = [];
@@ -291,6 +478,28 @@ const canMessageSpeak = (
 ): boolean =>
   ttsEnabled && !message.isStreaming && !!message.content && message.role === "assistant";
 
+const ChatHeader = ({ name, avatar, relationship, sceneTitle }: ChatHeaderInfo) => (
+  <div className="sticky top-0 z-10 border-b border-border/50 bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/80">
+    <div className="mx-auto flex h-14 max-h-14 max-w-3xl items-center gap-3 px-4">
+      <Avatar className="size-7">
+        {avatar ? <AvatarImage src={avatar} alt={name} /> : null}
+        <AvatarFallback className="text-xs font-medium">{getAvatarFallback(name)}</AvatarFallback>
+      </Avatar>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-base font-semibold leading-5 text-foreground">{name}</div>
+        {relationship ? (
+          <div className="truncate text-xs leading-4 text-muted-foreground">{relationship}</div>
+        ) : null}
+      </div>
+      {sceneTitle ? (
+        <Badge variant="secondary" className="max-w-[40%] truncate">
+          {sceneTitle}
+        </Badge>
+      ) : null}
+    </div>
+  </div>
+);
+
 const EmptyState = ({
   isMessageListLoading,
   onSelectScene,
@@ -443,6 +652,8 @@ export const ChatView = ({
   const [isMobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [isSearchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [sceneConversationPrompts, setSceneConversationPrompts] =
+    useState<SceneConversationPrompts>({});
 
   const { ttsEnabled, ttsVoiceUri, ttsRate, ttsPitch } = useSettingsStore(
     useShallow((s) => ({
@@ -505,27 +716,65 @@ export const ChatView = ({
       latestConversation ? listConversationMessages(latestConversation.id) : Promise.resolve([]),
     enabled: latestConversation !== null,
   });
+  const currentScenePrompt = useMemo(
+    () => getSceneConversationPrompt(currentConversationId, sceneConversationPrompts),
+    [currentConversationId, sceneConversationPrompts],
+  );
   const { currentSystemPrompt, currentCharacterName, currentCharacterAvatar, currentTitle } =
     useMemo(
-      () => ({
-        currentSystemPrompt: currentConversation?.characterSystemPrompt || DEFAULT_SYSTEM_PROMPT,
-        currentCharacterName: currentConversation?.characterName ?? "AI",
-        currentCharacterAvatar: currentConversation?.characterAvatar ?? null,
-        currentTitle: currentConversation?.title ?? "新しい会話",
-      }),
-      [currentConversation],
+      () => getCurrentConversationDetails(currentConversation, currentScenePrompt),
+      [currentConversation, currentScenePrompt],
     );
+  const currentSceneCard = useMemo(
+    () => findCurrentSceneCard(currentTitle, messages),
+    [currentTitle, messages],
+  );
+  const chatHeaderInfo = useMemo<ChatHeaderInfo>(
+    () =>
+      buildChatHeaderInfo({
+        currentCharacterAvatar,
+        currentCharacterName,
+        currentConversation,
+        currentSceneCard,
+        currentSystemPrompt,
+      }),
+    [
+      currentCharacterAvatar,
+      currentCharacterName,
+      currentConversation,
+      currentSceneCard,
+      currentSystemPrompt,
+    ],
+  );
 
-  const createConversationAndSelect = useCallback(async () => {
-    const activeCharacterId = useSettingsStore.getState().activeCharacterId;
-    const created = await createConversationEntry({
-      characterId: activeCharacterId ?? undefined,
-    });
-    setConversationId(created.id);
-    setMessages([]);
-    setMobileDrawerOpen(false);
-    return created;
-  }, [createConversationEntry, setConversationId, setMessages]);
+  const createConversationAndSelect = useCallback(
+    async (input?: { characterId?: string | null }) => {
+      const activeCharacterId =
+        input && "characterId" in input
+          ? input.characterId
+          : useSettingsStore.getState().activeCharacterId;
+      const created = await createConversationEntry({
+        characterId: activeCharacterId ?? undefined,
+      });
+      setConversationId(created.id);
+      setMessages([]);
+      setMobileDrawerOpen(false);
+      return created;
+    },
+    [createConversationEntry, setConversationId, setMessages],
+  );
+
+  const rememberSceneConversationPrompt = useCallback(
+    (conversationId: string, scenePrompt: SceneConversationPrompt | null) => {
+      if (!scenePrompt) return;
+
+      setSceneConversationPrompts((previous) => ({
+        ...previous,
+        [conversationId]: scenePrompt,
+      }));
+    },
+    [],
+  );
 
   const ensureConversationForSend = useCallback(async () => {
     const currentId = useChatStore.getState().currentConversationId;
@@ -824,14 +1073,16 @@ export const ChatView = ({
       }
 
       const conversation = await ensureConversationForSend();
+      const scenePrompt = sceneConversationPrompts[conversation.id];
+      const sendContext = getConversationSendContext(conversation, scenePrompt);
       await sendMessageToConversation({
         text,
         conversationId: conversation.id,
-        systemPrompt: conversation.characterSystemPrompt || DEFAULT_SYSTEM_PROMPT,
-        characterName: conversation.characterName ?? "AI",
+        systemPrompt: sendContext.systemPrompt,
+        characterName: sendContext.characterName,
       });
     },
-    [ensureConversationForSend, isOnline, sendMessageToConversation],
+    [ensureConversationForSend, isOnline, sceneConversationPrompts, sendMessageToConversation],
   );
 
   const handleStartScene = useCallback(
@@ -842,19 +1093,28 @@ export const ChatView = ({
       }
 
       try {
-        const created = await createConversationAndSelect();
+        const activeCharacterId = useSettingsStore.getState().activeCharacterId;
+        const scenePrompt = getSceneStartPrompt(scene, activeCharacterId);
+        const created = await createConversationAndSelect({ characterId: activeCharacterId });
+        rememberSceneConversationPrompt(created.id, scenePrompt);
+        const sendContext = getConversationSendContext(created, scenePrompt);
         await sendMessageToConversation({
           text: scene.firstMessage,
           conversationId: created.id,
-          systemPrompt: created.characterSystemPrompt || DEFAULT_SYSTEM_PROMPT,
-          characterName: created.characterName ?? "AI",
+          systemPrompt: sendContext.systemPrompt,
+          characterName: sendContext.characterName,
         });
       } catch (error) {
         console.error("failed to start scene", error);
         toast.error("シーン開始に失敗しました");
       }
     },
-    [createConversationAndSelect, isOnline, sendMessageToConversation],
+    [
+      createConversationAndSelect,
+      isOnline,
+      rememberSceneConversationPrompt,
+      sendMessageToConversation,
+    ],
   );
 
   // ── 再生成 ─────────────────────────────────────────────────────────────
@@ -1361,6 +1621,7 @@ export const ChatView = ({
         />
 
         <div ref={scrollContainerRef} className="flex-1 overflow-y-auto bg-chat-area">
+          <ChatHeader {...chatHeaderInfo} />
           <div className="mx-auto max-w-3xl py-4">
             {messages.length === 0 && (
               <div className="flex h-[60vh] items-center justify-center">

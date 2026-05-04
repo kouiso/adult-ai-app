@@ -93,6 +93,57 @@ describe("buildSystemPrompt", () => {
     });
     expect(result).toContain("呼び方は愛称 or 2 人だけの呼び方");
   });
+
+  it("キャラクター未設定ならシーンキャラクターを注入する", () => {
+    const result = buildSystemPrompt(
+      {
+        name: "",
+        personality: "",
+        appearance: "",
+        scenario: "朝のキッチン",
+        custom: "",
+      },
+      {
+        name: "みつき",
+        personality: "甘え上手なバーテンダー",
+        appearance: "黒髪ロング",
+        relationship: "同棲中の彼女",
+        speakingStyle: "関西弁",
+      },
+    );
+
+    expect(result).toContain("【キャラクター】");
+    expect(result).toContain("名前: みつき");
+    expect(result).toContain("甘え上手なバーテンダー");
+    expect(result).toContain("話し方: 関西弁");
+    expect(result).toContain("【外見】\n黒髪ロング");
+    expect(result).toContain("【関係性】\n同棲中の彼女");
+  });
+
+  it("既存キャラクターがあればシーンキャラクターで上書きしない", () => {
+    const result = buildSystemPrompt(
+      {
+        name: "凛花",
+        personality: "清楚な大学生",
+        appearance: "眼鏡",
+        scenario: "雨のオフィス",
+        custom: "",
+      },
+      {
+        name: "みつき",
+        personality: "甘え上手なバーテンダー",
+        appearance: "黒髪ロング",
+        relationship: "同棲中の彼女",
+        speakingStyle: "関西弁",
+      },
+    );
+
+    expect(result).toContain("名前: 凛花");
+    expect(result).toContain("清楚な大学生");
+    expect(result).toContain("眼鏡");
+    expect(result).not.toContain("名前: みつき");
+    expect(result).not.toContain("同棲中の彼女");
+  });
 });
 
 describe("getHonorificStage", () => {

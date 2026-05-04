@@ -11,12 +11,27 @@ interface PromptFields {
   totalMessageCount?: number;
 }
 
+export interface ScenePromptCharacter {
+  name: string;
+  personality: string;
+  appearance: string;
+  relationship: string;
+  speakingStyle: string;
+}
+
 interface ParsedSystemPrompt {
   personality: string;
   scenario: string;
   custom: string;
   appearance?: string;
 }
+
+type ResolvedPromptCharacter = {
+  name: string;
+  personality: string;
+  appearance: string;
+  relationship: string;
+};
 
 // サーバー側にも近い規則があるが、ここはキャラカード保存用の下書き生成を担う。
 // 理由: 編集時プレビューの安定化が目的で、実行時の最終強制はAPI側に残す必要がある。
@@ -164,22 +179,70 @@ function buildPersonalitySection(name: string, personality: string): string | nu
   return lines.join("\n");
 }
 
-export function buildSystemPrompt(fields: PromptFields): string {
+function buildScenePersonality(sceneCharacter: ScenePromptCharacter): string {
+  return [sceneCharacter.personality, `話し方: ${sceneCharacter.speakingStyle}`]
+    .filter((line) => line.trim().length > 0)
+    .join("\n");
+}
+
+function shouldUseSceneCharacter(
+  name: string,
+  personality: string,
+  sceneCharacter?: ScenePromptCharacter,
+): sceneCharacter is ScenePromptCharacter {
+  return sceneCharacter !== undefined && !name && !personality;
+}
+
+function resolvePromptCharacter(
+  name: string,
+  personality: string,
+  appearance: string,
+  sceneCharacter?: ScenePromptCharacter,
+): ResolvedPromptCharacter {
+  if (!shouldUseSceneCharacter(name, personality, sceneCharacter)) {
+    return { name, personality, appearance, relationship: "" };
+  }
+
+  return {
+    name: sanitizeField(sceneCharacter.name),
+    personality: sanitizeField(buildScenePersonality(sceneCharacter)),
+    appearance: sanitizeField(sceneCharacter.appearance),
+    relationship: sanitizeField(sceneCharacter.relationship),
+  };
+}
+
+function buildRelationshipSectionContent(
+  sceneRelationship: string,
+  totalMessageCount: number | undefined,
+): string {
+  const relationshipInstruction =
+    typeof totalMessageCount === "number" ? getHonorificStage(totalMessageCount) : "";
+
+  return [sceneRelationship, relationshipInstruction].filter((line) => line.length > 0).join("\n");
+}
+
+export function buildSystemPrompt(
+  fields: PromptFields,
+  sceneCharacter?: ScenePromptCharacter,
+): string {
   const name = sanitizeField(fields.name);
   const personality = sanitizeField(fields.personality);
   const appearance = sanitizeField(fields.appearance ?? "");
   const scenario = sanitizeField(fields.scenario);
   const custom = sanitizeField(fields.custom);
+  const resolvedCharacter = resolvePromptCharacter(name, personality, appearance, sceneCharacter);
   const memoryNotesSection = buildMemoryNotesSection(fields.memoryNotes);
-  const relationshipInstruction =
-    typeof fields.totalMessageCount === "number" ? getHonorificStage(fields.totalMessageCount) : "";
+  const relationship = buildRelationshipSectionContent(
+    resolvedCharacter.relationship,
+    fields.totalMessageCount,
+  );
 
   return [
     BASE_RULES,
     memoryNotesSection,
-    buildPersonalitySection(name, personality),
-    buildPromptSection(SECTION_APPEARANCE, appearance),
-    buildPromptSection(SECTION_RELATIONSHIP, relationshipInstruction),
+    buildPersonalitySection(resolvedCharacter.name, resolvedCharacter.personality),
+    buildPromptSection(SECTION_APPEARANCE, resolvedCharacter.appearance),
+    buildPromptSection(SECTION_RELATIONSHIP, relationship),
     buildPromptSection(SECTION_SCENARIO, scenario),
     buildPromptSection(SECTION_CUSTOM, custom),
   ]
