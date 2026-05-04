@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  API_MESSAGE_CONTENT_MAX_LENGTH,
   buildDriftCorrectionReminder,
   buildMessagesForApi,
   buildPersonaReminder,
   buildRetryMessages,
   extractFirstPerson,
   injectDriftCorrection,
+  normalizeAssistantMessageContent,
 } from "./chat-message-adapter";
 
 describe("extractFirstPerson", () => {
@@ -69,6 +71,45 @@ describe("buildMessagesForApi", () => {
     const lastUserIdx = result.findLastIndex((m) => m.role === "user");
     expect(result[lastUserIdx - 1].role).toBe("system");
     expect(result[lastUserIdx - 1].content).toContain("日本語");
+  });
+
+  it("assistant履歴からretry断片とrememberを除去する", () => {
+    const msgs = [
+      {
+        role: "assistant",
+        content:
+          "失礼しました。再度挑戦します。<response><dialogue>古い返答</dialogue></response><remember>秘密</remember><response><dialogue>新しい返答</dialogue></response>",
+        isStreaming: false,
+      },
+      { role: "user", content: "続けて", isStreaming: false },
+    ] satisfies Parameters<typeof buildMessagesForApi>[0];
+    const result = buildMessagesForApi(msgs, "prompt", "AI");
+
+    expect(result[1].content).toBe("<response><dialogue>新しい返答</dialogue></response>");
+    expect(result[1].content).not.toContain("remember");
+    expect(result[1].content).not.toContain("失礼しました");
+  });
+
+  it("API送信用の長すぎる履歴を上限内に丸める", () => {
+    const longContent = `先頭${"あ".repeat(API_MESSAGE_CONTENT_MAX_LENGTH + 100)}末尾`;
+    const result = buildMessagesForApi(
+      [{ role: "assistant", content: longContent, isStreaming: false }],
+      "prompt",
+      "AI",
+    );
+
+    expect(result[1].content.length).toBe(API_MESSAGE_CONTENT_MAX_LENGTH);
+    expect(result[1].content).toContain("末尾");
+  });
+});
+
+describe("normalizeAssistantMessageContent", () => {
+  it("最後の完全なresponseブロックだけを残す", () => {
+    const result = normalizeAssistantMessageContent(
+      "<response><dialogue>一つ目</dialogue></response>失礼しました。再度挑戦します。<response><dialogue>二つ目</dialogue></response>",
+    );
+
+    expect(result).toBe("<response><dialogue>二つ目</dialogue></response>");
   });
 });
 

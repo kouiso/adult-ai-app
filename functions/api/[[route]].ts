@@ -7,7 +7,12 @@ import { cors } from "hono/cors";
 import { z } from "zod/v4";
 
 import { DEFAULT_CHARACTER } from "../../src/data/default-character";
-import { ALL_FIRST_PERSONS, extractFirstPerson } from "../../src/lib/chat-message-adapter";
+import {
+  ALL_FIRST_PERSONS,
+  API_MESSAGE_CONTENT_MAX_LENGTH,
+  extractFirstPerson,
+  normalizeAssistantMessageContent,
+} from "../../src/lib/chat-message-adapter";
 import {
   ALLOWED_MODELS,
   DEFAULT_CHAT_MODEL,
@@ -43,16 +48,24 @@ type Bindings = {
 const TASK_ID_PATTERN = /^[\w-]{4,128}$/;
 // R2キーはサーバー側で `images/{uuid}.{ext}` 形式で生成されるため、それ以外を拒否する
 const R2_KEY_PATTERN = /^images\/[\da-f-]+\.(jpg|png)$/;
+
+function isAllowedChatModel(value: unknown): value is (typeof ALLOWED_MODELS)[number] {
+  return typeof value === "string" && ALLOWED_MODELS.some((model) => model === value);
+}
+
 const chatSchema = z.object({
   messages: z
     .array(
       z.object({
         role: z.enum(["system", "user", "assistant"]),
-        content: z.string().max(10_000),
+        content: z.string().max(API_MESSAGE_CONTENT_MAX_LENGTH),
       }),
     )
     .max(100),
-  model: z.enum(ALLOWED_MODELS).optional().default(DEFAULT_CHAT_MODEL),
+  model: z.preprocess(
+    (value) => (isAllowedChatModel(value) ? value : undefined),
+    z.enum(ALLOWED_MODELS).optional().default(DEFAULT_CHAT_MODEL),
+  ),
 });
 
 const judgeSchema = z.object({
@@ -1456,9 +1469,10 @@ function prepareAssistantContent(content: string): {
   visibleContent: string;
 } {
   const parsed = parseXmlResponse(content);
+  const normalizedContent = normalizeAssistantMessageContent(content);
   return {
     rememberNotes: parsed?.remember ?? [],
-    visibleContent: stripRememberTags(content),
+    visibleContent: stripRememberTags(normalizedContent),
   };
 }
 

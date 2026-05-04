@@ -24,6 +24,7 @@ import {
   ALL_FIRST_PERSONS,
   buildMessagesForApi,
   extractFirstPerson,
+  normalizeAssistantMessageContent,
   type ApiMessage,
 } from "@/lib/chat-message-adapter";
 import { DEFAULT_SYSTEM_PROMPT } from "@/lib/config";
@@ -1223,7 +1224,8 @@ export const ChatView = ({
           });
         },
         ({ content: finalText, warningLevel }) => {
-          updateMessage(assistantId, finalText, false, warningLevel);
+          const assistantContent = normalizeAssistantMessageContent(finalText);
+          updateMessage(assistantId, assistantContent, false, warningLevel);
           setLoading(false);
           void persistUserMessage
             .then(async () => {
@@ -1231,10 +1233,12 @@ export const ChatView = ({
                 conversationId,
                 id: assistantId,
                 role: "assistant",
-                content: finalText,
+                content: assistantContent,
               });
             })
-            .then(() => void tryGenerateTitle(conversationId, text, finalText, fallbackTitle))
+            .then(
+              () => void tryGenerateTitle(conversationId, text, assistantContent, fallbackTitle),
+            )
             .catch((error) => console.error("failed to persist assistant message", error));
         },
         (error) => {
@@ -1357,9 +1361,10 @@ export const ChatView = ({
           });
         },
         ({ content: finalText, warningLevel }) => {
-          updateMessage(messageId, finalText, false, warningLevel);
+          const assistantContent = normalizeAssistantMessageContent(finalText);
+          updateMessage(messageId, assistantContent, false, warningLevel);
           setLoading(false);
-          void updateMessageContentEntry(messageId, finalText).catch((error) =>
+          void updateMessageContentEntry(messageId, assistantContent).catch((error) =>
             console.error("failed to update message content", error),
           );
         },
@@ -1445,13 +1450,14 @@ export const ChatView = ({
           });
         },
         ({ content: finalText, warningLevel }) => {
-          updateMessage(assistantId, finalText, false, warningLevel);
+          const assistantContent = normalizeAssistantMessageContent(finalText);
+          updateMessage(assistantId, assistantContent, false, warningLevel);
           setLoading(false);
           void createMessageEntry({
             conversationId,
             id: assistantId,
             role: "assistant",
-            content: finalText,
+            content: assistantContent,
           }).catch((error) => console.error("failed to persist regenerated message", error));
         },
         (error) => {
@@ -1512,14 +1518,15 @@ export const ChatView = ({
           });
         },
         () => {
-          updateMessage(errorMessageId, accumulated, false);
+          const assistantContent = normalizeAssistantMessageContent(accumulated);
+          updateMessage(errorMessageId, assistantContent, false);
           setLoading(false);
           // 初回送信失敗時にDB未永続化のため、createで永続化
           void createMessageEntry({
             conversationId,
             id: errorMessageId,
             role: "assistant",
-            content: accumulated,
+            content: assistantContent,
           })
             .then(() => {
               // リトライ成功時もタイトル自動生成を試みる
@@ -1531,7 +1538,9 @@ export const ChatView = ({
                 )
                 .reverse()
                 .find((m) => m.role === "user");
-              if (userMsg) void tryGenerateTitle(conversationId, userMsg.content, accumulated);
+              if (userMsg) {
+                void tryGenerateTitle(conversationId, userMsg.content, assistantContent);
+              }
             })
             .catch((error) => console.error("failed to persist retried message", error));
         },
