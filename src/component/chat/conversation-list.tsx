@@ -1,6 +1,6 @@
 import { memo } from "react";
 
-import { Trash2 } from "lucide-react";
+import { Bot, Trash2 } from "lucide-react";
 
 import {
   AlertDialog,
@@ -131,24 +131,26 @@ export const ConversationList = memo(
               >
                 <p className="line-clamp-1 text-sm font-medium">{conversation.title}</p>
                 <p className="mt-1 flex items-center text-xs text-muted-foreground">
-                  {conversation.characterName !== "AI" && (
-                    <span className="mr-1 inline-flex items-center gap-1">
-                      {conversation.characterAvatar &&
+                  <span className="mr-1 inline-flex items-center gap-1">
+                    {conversation.characterName === "AI" || conversation.characterName === "" ? (
+                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-primary/20 bg-primary/10 text-primary">
+                        <Bot className="h-3.5 w-3.5" />
+                      </span>
+                    ) : conversation.characterAvatar &&
                       (conversation.characterAvatar.startsWith("http") ||
                         conversation.characterAvatar.startsWith("/")) ? (
-                        <img
-                          src={conversation.characterAvatar}
-                          alt={conversation.characterName ?? ""}
-                          className="inline-block h-6 w-6 rounded-full border border-primary/20 object-cover shadow-sm"
-                        />
-                      ) : (
-                        <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-primary/20 bg-primary/10 text-[11px] text-primary">
-                          {conversation.characterName.slice(0, 1)}
-                        </span>
-                      )}{" "}
-                      {conversation.characterName} ·{" "}
-                    </span>
-                  )}
+                      <img
+                        src={conversation.characterAvatar}
+                        alt={conversation.characterName}
+                        className="inline-block h-6 w-6 rounded-full border border-primary/20 object-cover shadow-sm"
+                      />
+                    ) : (
+                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-primary/20 bg-primary/10 text-[11px] text-primary">
+                        {conversation.characterName.slice(0, 1)}
+                      </span>
+                    )}{" "}
+                    {conversation.characterName || "AI"} ·{" "}
+                  </span>
                   {formatDateTime(conversation.updatedAt)}
                 </p>
               </button>

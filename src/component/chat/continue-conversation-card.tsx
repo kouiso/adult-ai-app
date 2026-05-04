@@ -1,8 +1,8 @@
-import { ArrowRight, Clock3 } from "lucide-react";
+import { ArrowRight, Bot, Clock3 } from "lucide-react";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/component/ui/avatar";
 import type { PersistedMessage } from "@/lib/api";
-import { getAvatarFallback } from "@/lib/utils";
+import { formatRelativeTime, getAvatarFallback } from "@/lib/utils";
 import { stripXmlTags } from "@/lib/xml-response-parser";
 
 type ContinueConversationCardProps = {
@@ -14,7 +14,7 @@ type ContinueConversationCardProps = {
   onContinue: (conversationId: string) => void;
 };
 
-function formatRelativeTime(timestamp: number): string {
+function formatElapsedTime(timestamp: number): string {
   const diffMs = Date.now() - timestamp;
   const diffMinutes = Math.max(1, Math.floor(diffMs / 60_000));
 
@@ -54,11 +54,15 @@ export const ContinueConversationCard = ({
   onContinue,
 }: ContinueConversationCardProps) => {
   const summary = buildCardSummary(messages);
+  const displayName = characterName || "AI";
+  const shouldUseDefaultAvatar = characterName === "AI" || characterName === "";
   if (!summary) return null;
 
   return (
     <section className="rounded-2xl border border-l-2 border-border/70 border-l-primary/55 bg-primary/6 p-3 shadow-[0_0_22px_oklch(0.50_0.18_350_/_10%)]">
-      <p className="text-xs font-semibold tracking-wide text-primary">昨日の続き</p>
+      <p className="text-xs font-semibold tracking-wide text-primary">
+        {formatRelativeTime(new Date(updatedAt))}
+      </p>
       <button
         type="button"
         onClick={() => onContinue(conversationId)}
@@ -66,17 +70,25 @@ export const ContinueConversationCard = ({
       >
         <div className="flex items-start gap-3">
           <Avatar size="sm">
-            {characterAvatar ? <AvatarImage src={characterAvatar} alt={characterName} /> : null}
-            <AvatarFallback>{getAvatarFallback(characterName)}</AvatarFallback>
+            {characterAvatar && !shouldUseDefaultAvatar ? (
+              <AvatarImage src={characterAvatar} alt={displayName} />
+            ) : null}
+            <AvatarFallback>
+              {shouldUseDefaultAvatar ? (
+                <Bot className="h-3.5 w-3.5" />
+              ) : (
+                getAvatarFallback(displayName)
+              )}
+            </AvatarFallback>
           </Avatar>
           <div className="min-w-0 flex-1">
             <div className="flex items-center justify-between gap-2">
               <p className="font-narrative truncate text-sm font-semibold text-foreground">
-                {characterName}
+                {displayName}
               </p>
               <span className="inline-flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
                 <Clock3 className="h-3 w-3" />
-                {formatRelativeTime(updatedAt)}
+                {formatElapsedTime(updatedAt)}
               </span>
             </div>
             <p className="mt-2 line-clamp-3 text-xs leading-5 text-muted-foreground">{summary}</p>
