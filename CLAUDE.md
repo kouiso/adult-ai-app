@@ -1,5 +1,9 @@
 # adult-ai-app
 
+## プロジェクトの存在理由
+
+月額課金のエロアプリにお金をかけずに抜きたい。Claudeで無料で抜ける質のものを自分で作る。まず自分で使い、ポートフォリオにもなり、良ければ商用化する。
+
 AI chat application with character personas, speech synthesis, and local-first storage.
 
 ## Tech Stack
