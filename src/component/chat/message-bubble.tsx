@@ -30,6 +30,7 @@ interface MessageBubbleProps {
   error?: boolean;
   warningLevel?: boolean;
   isLast?: boolean;
+  showLabel?: boolean;
   isHighlighted?: boolean;
   onSpeak?: (messageId: string, text: string) => void;
   onStopSpeaking?: () => void;
@@ -652,6 +653,7 @@ const applyBubbleDefaults = (props: MessageBubbleProps) => ({
   canSpeak: false,
   isSpeaking: false,
   isLast: false,
+  showLabel: false,
   isHighlighted: false,
   ...props,
 });
@@ -672,6 +674,7 @@ export const MessageBubble = memo((rawProps: MessageBubbleProps) => {
     canSpeak,
     isSpeaking,
     isLast,
+    showLabel,
     isHighlighted,
     onSpeak,
     onStopSpeaking,
@@ -707,6 +710,9 @@ export const MessageBubble = memo((rawProps: MessageBubbleProps) => {
         onAvatarClick={() => setShowAvatarViewer(true)}
       />
       <div className={cn("max-w-[75%] space-y-2", isUser && "text-right")}>
+        {!isUser && showLabel && (
+          <div className="text-xs text-muted-foreground">{characterName}</div>
+        )}
         <BubbleBody
           id={id}
           role={role}
