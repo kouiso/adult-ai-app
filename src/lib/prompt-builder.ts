@@ -7,6 +7,7 @@ interface PromptFields {
   appearance?: string;
   scenario: string;
   custom: string;
+  eroticProfile?: string;
   memoryNotes?: string[];
   totalMessageCount?: number;
 }
@@ -17,6 +18,11 @@ export interface ScenePromptCharacter {
   appearance: string;
   relationship: string;
   speakingStyle: string;
+  eroticPersonality: string;
+  escalationStyle: string;
+  sensitiveSpots: string;
+  afterSex: string;
+  signatureMoans: string[];
 }
 
 interface ParsedSystemPrompt {
@@ -24,6 +30,7 @@ interface ParsedSystemPrompt {
   scenario: string;
   custom: string;
   appearance?: string;
+  eroticProfile?: string;
 }
 
 type ResolvedPromptCharacter = {
@@ -31,6 +38,7 @@ type ResolvedPromptCharacter = {
   personality: string;
   appearance: string;
   relationship: string;
+  eroticProfile: string;
 };
 
 // サーバー側にも近い規則があるが、ここはキャラカード保存用の下書き生成を担う。
@@ -90,6 +98,7 @@ const SECTION_APPEARANCE = "【外見】" as const;
 const SECTION_RELATIONSHIP = "【関係性】" as const;
 const SECTION_SCENARIO = "【シナリオ】" as const;
 const SECTION_CUSTOM = "【追加設定】" as const;
+const SECTION_EROTIC_PROFILE = "【キャラクター性的特徴】" as const;
 const SECTION_CARD = "【キャラカード】" as const;
 
 export function getHonorificStage(totalMessageCount: number): string {
@@ -185,6 +194,18 @@ function buildScenePersonality(sceneCharacter: ScenePromptCharacter): string {
     .join("\n");
 }
 
+function buildSceneEroticProfile(sceneCharacter: ScenePromptCharacter): string {
+  return [
+    `性的な性格: ${sceneCharacter.eroticPersonality}`,
+    `エスカレーションスタイル: ${sceneCharacter.escalationStyle}`,
+    `性感帯: ${sceneCharacter.sensitiveSpots}`,
+    `事後の振る舞い: ${sceneCharacter.afterSex}`,
+    `特徴的な声: ${sceneCharacter.signatureMoans.join("、")}`,
+  ]
+    .filter((line) => line.trim().length > 0)
+    .join("\n");
+}
+
 function shouldUseSceneCharacter(
   name: string,
   personality: string,
@@ -200,7 +221,7 @@ function resolvePromptCharacter(
   sceneCharacter?: ScenePromptCharacter,
 ): ResolvedPromptCharacter {
   if (!shouldUseSceneCharacter(name, personality, sceneCharacter)) {
-    return { name, personality, appearance, relationship: "" };
+    return { name, personality, appearance, relationship: "", eroticProfile: "" };
   }
 
   return {
@@ -208,6 +229,7 @@ function resolvePromptCharacter(
     personality: sanitizeField(buildScenePersonality(sceneCharacter)),
     appearance: sanitizeField(sceneCharacter.appearance),
     relationship: sanitizeField(sceneCharacter.relationship),
+    eroticProfile: sanitizeField(buildSceneEroticProfile(sceneCharacter)),
   };
 }
 
@@ -231,6 +253,7 @@ export function buildSystemPrompt(
   const scenario = sanitizeField(fields.scenario);
   const custom = sanitizeField(fields.custom);
   const resolvedCharacter = resolvePromptCharacter(name, personality, appearance, sceneCharacter);
+  const eroticProfile = sanitizeField(fields.eroticProfile ?? resolvedCharacter.eroticProfile);
   const memoryNotesSection = buildMemoryNotesSection(fields.memoryNotes);
   const relationship = buildRelationshipSectionContent(
     resolvedCharacter.relationship,
@@ -245,6 +268,7 @@ export function buildSystemPrompt(
     buildPromptSection(SECTION_RELATIONSHIP, relationship),
     buildPromptSection(SECTION_SCENARIO, scenario),
     buildPromptSection(SECTION_CUSTOM, custom),
+    buildPromptSection(SECTION_EROTIC_PROFILE, eroticProfile),
   ]
     .filter((section): section is string => Boolean(section))
     .join("\n");
@@ -261,7 +285,8 @@ export function parseSystemPrompt(prompt: string): ParsedSystemPrompt {
     findLineStartMarker(normalized, SECTION_APPEARANCE) !== -1 ||
     findLineStartMarker(normalized, SECTION_RELATIONSHIP) !== -1 ||
     findLineStartMarker(normalized, SECTION_SCENARIO) !== -1 ||
-    findLineStartMarker(normalized, SECTION_CUSTOM) !== -1;
+    findLineStartMarker(normalized, SECTION_CUSTOM) !== -1 ||
+    findLineStartMarker(normalized, SECTION_EROTIC_PROFILE) !== -1;
 
   if (!hasMarkers) {
     const stripped = stripBaseRules(normalized);
@@ -273,16 +298,23 @@ export function parseSystemPrompt(prompt: string): ParsedSystemPrompt {
     SECTION_RELATIONSHIP,
     SECTION_SCENARIO,
     SECTION_CUSTOM,
+    SECTION_EROTIC_PROFILE,
     SECTION_CARD,
   ]);
   const appearance = extractSection(normalized, SECTION_APPEARANCE, [
     SECTION_RELATIONSHIP,
     SECTION_SCENARIO,
     SECTION_CUSTOM,
+    SECTION_EROTIC_PROFILE,
     SECTION_CARD,
   ]);
-  const scenario = extractSection(normalized, SECTION_SCENARIO, [SECTION_CUSTOM, SECTION_CARD]);
-  const custom = extractSection(normalized, SECTION_CUSTOM, [SECTION_CARD]);
+  const scenario = extractSection(normalized, SECTION_SCENARIO, [
+    SECTION_CUSTOM,
+    SECTION_EROTIC_PROFILE,
+    SECTION_CARD,
+  ]);
+  const custom = extractSection(normalized, SECTION_CUSTOM, [SECTION_EROTIC_PROFILE, SECTION_CARD]);
+  const eroticProfile = extractSection(normalized, SECTION_EROTIC_PROFILE, [SECTION_CARD]);
 
   // 「名前: xxx」行はpersonalityから除去（nameフィールドで管理するため）
   const personalityCleaned = personality
@@ -296,6 +328,7 @@ export function parseSystemPrompt(prompt: string): ParsedSystemPrompt {
     scenario: scenario.trim(),
     custom: custom.trim(),
     appearance: appearance.trim() || undefined,
+    eroticProfile: eroticProfile.trim() || undefined,
   };
 }
 
@@ -314,6 +347,7 @@ export function injectMemoryNotesIntoSystemPrompt(
     appearance: parsed.appearance,
     scenario: parsed.scenario,
     custom: parsed.custom,
+    eroticProfile: parsed.eroticProfile,
     memoryNotes,
     totalMessageCount,
   });

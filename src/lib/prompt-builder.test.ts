@@ -8,6 +8,19 @@ import {
   parseSystemPrompt,
 } from "./prompt-builder";
 
+const testSceneCharacter = {
+  name: "みつき",
+  personality: "甘え上手なバーテンダー",
+  appearance: "黒髪ロング",
+  relationship: "同棲中の彼女",
+  speakingStyle: "関西弁",
+  eroticPersonality: "余裕を保ちながら甘く主導する",
+  escalationStyle: "からかいながら段階的に距離を詰める",
+  sensitiveSpots: "うなじ、腰",
+  afterSex: "世話を焼きながら寄り添う",
+  signatureMoans: ["ん…", "あかんて…"],
+} satisfies Parameters<typeof buildSystemPrompt>[1];
+
 describe("buildSystemPrompt", () => {
   it("全フィールドでプロンプトを構築する", () => {
     const result = buildSystemPrompt({
@@ -104,11 +117,7 @@ describe("buildSystemPrompt", () => {
         custom: "",
       },
       {
-        name: "みつき",
-        personality: "甘え上手なバーテンダー",
-        appearance: "黒髪ロング",
-        relationship: "同棲中の彼女",
-        speakingStyle: "関西弁",
+        ...testSceneCharacter,
       },
     );
 
@@ -118,6 +127,9 @@ describe("buildSystemPrompt", () => {
     expect(result).toContain("話し方: 関西弁");
     expect(result).toContain("【外見】\n黒髪ロング");
     expect(result).toContain("【関係性】\n同棲中の彼女");
+    expect(result).toContain("【キャラクター性的特徴】");
+    expect(result).toContain("性的な性格: 余裕を保ちながら甘く主導する");
+    expect(result).toContain("特徴的な声: ん…、あかんて…");
   });
 
   it("既存キャラクターがあればシーンキャラクターで上書きしない", () => {
@@ -130,11 +142,7 @@ describe("buildSystemPrompt", () => {
         custom: "",
       },
       {
-        name: "みつき",
-        personality: "甘え上手なバーテンダー",
-        appearance: "黒髪ロング",
-        relationship: "同棲中の彼女",
-        speakingStyle: "関西弁",
+        ...testSceneCharacter,
       },
     );
 
@@ -143,6 +151,7 @@ describe("buildSystemPrompt", () => {
     expect(result).toContain("眼鏡");
     expect(result).not.toContain("名前: みつき");
     expect(result).not.toContain("同棲中の彼女");
+    expect(result).not.toContain("余裕を保ちながら甘く主導する");
   });
 });
 
@@ -177,11 +186,13 @@ describe("parseSystemPrompt", () => {
       personality: "ツンデレ",
       scenario: "カフェ",
       custom: "特記事項",
+      eroticProfile: "性的な性格: 甘い",
     });
     const parsed = parseSystemPrompt(prompt);
     expect(parsed.personality).toContain("ツンデレ");
     expect(parsed.scenario).toBe("カフェ");
     expect(parsed.custom).toBe("特記事項");
+    expect(parsed.eroticProfile).toBe("性的な性格: 甘い");
   });
 
   it("マーカーなしプロンプトはcustomにフォールバック", () => {
@@ -232,5 +243,22 @@ describe("parseSystemPrompt", () => {
     ]);
     expect(result).toContain("## 覚えていること");
     expect(result).toContain("映画館デートの話を覚えている");
+  });
+
+  it("memory notes 注入時に性的特徴セクションを維持する", () => {
+    const prompt = buildSystemPrompt(
+      {
+        name: "",
+        personality: "",
+        appearance: "",
+        scenario: "朝のキッチン",
+        custom: "",
+      },
+      testSceneCharacter,
+    );
+    const result = injectMemoryNotesIntoSystemPrompt(prompt, "みつき", ["朝はコーヒーを飲む"]);
+
+    expect(result).toContain("【キャラクター性的特徴】");
+    expect(result).toContain("性的な性格: 余裕を保ちながら甘く主導する");
   });
 });
