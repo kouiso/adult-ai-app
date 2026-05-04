@@ -6,6 +6,7 @@ import { handle } from "hono/cloudflare-pages";
 import { cors } from "hono/cors";
 import { z } from "zod/v4";
 
+import { ALL_FIRST_PERSONS, extractFirstPerson } from "../../src/lib/chat-message-adapter";
 import {
   ALLOWED_MODELS,
   DEFAULT_CHAT_MODEL,
@@ -13,6 +14,7 @@ import {
   MODEL_FALLBACKS,
 } from "../../src/lib/model";
 import { getHonorificStage, injectMemoryNotesIntoSystemPrompt } from "../../src/lib/prompt-builder";
+import { runQualityChecks } from "../../src/lib/quality-guard";
 import { detectScenePhase, getMaxTokensForPhase } from "../../src/lib/scene-phase";
 import { parseXmlResponse, stripRememberTags } from "../../src/lib/xml-response-parser";
 import {
@@ -23,6 +25,8 @@ import {
   usageLogTable,
   userTable,
 } from "../../src/schema";
+
+import type { QualityCheckContext } from "../../src/lib/quality-guard";
 type Bindings = {
   DB: Parameters<typeof drizzle>[0];
   OPENROUTER_API_KEY: string;
@@ -236,10 +240,8 @@ type CollectedRoutedChat =
   | { ok: false; error: string };
 type CollectedRoutedChatSuccess = Extract<CollectedRoutedChat, { ok: true }>;
 type QualityCheckedChat =
-  | { ok: true; chunks: Uint8Array[]; usedModel: string }
+  | { ok: true; chunks: Uint8Array[]; usedModel: string; warningLevel?: boolean }
   | { ok: false; error: string };
-
-const ACTION_TAG_PATTERN = /<action>([\S\s]*?)<\/action>/;
 
 function shouldRunClaudeJudge(phase: ScenePhase): boolean {
   return phase === "erotic" || phase === "climax";
@@ -327,42 +329,23 @@ async function claudeJudgeQuality(
   }
 }
 
-function extractActionContent(responseText: string): string {
-  return responseText.match(ACTION_TAG_PATTERN)?.[1]?.trim() ?? "";
-}
-
-function hasCrossTurnActionRepetition(
-  responseText: string,
-  previousAssistantContent: string,
-): boolean {
-  const prevAction = extractActionContent(previousAssistantContent);
-  const currentAction = extractActionContent(responseText);
-  return prevAction.length > 20 && currentAction.includes(prevAction.slice(0, 30));
-}
-
 async function checkServerSideQuality(
   responseText: string,
-  phase: ScenePhase,
-  previousAssistantContent: string | undefined,
+  qualityContext: QualityCheckContext,
   sessionToken: string | undefined,
 ): Promise<ClaudeJudgeResult> {
-  if (!responseText.includes("<response>") || !responseText.includes("<action>")) {
-    return { pass: false, reason: "xml-format-missing" };
-  }
-
-  if (phase !== "conversation" && responseText.length < 100) {
-    return { pass: false, reason: "scene-min-length" };
-  }
-
-  if (
-    previousAssistantContent &&
-    hasCrossTurnActionRepetition(responseText, previousAssistantContent)
-  ) {
-    return { pass: false, reason: "cross-turn-repetition" };
+  const deterministicResult = runQualityChecks(responseText, qualityContext);
+  if (!deterministicResult.passed) {
+    return { pass: false, reason: deterministicResult.failedCheck ?? "quality-check-failed" };
   }
 
   // 官能・絶頂フェーズだけClaude判定を追加し、判定失敗時は既存どおり通す。
-  return claudeJudgeQuality(responseText, previousAssistantContent, phase, sessionToken);
+  return claudeJudgeQuality(
+    responseText,
+    qualityContext.prevAssistantResponse,
+    qualityContext.phase,
+    sessionToken,
+  );
 }
 
 // Few-shot exemplars: demonstrate XML format with target-language (Japanese) content
@@ -1215,11 +1198,31 @@ async function collectRoutedChatResponse(
   }
 }
 
+const QUALITY_RETRY_HINTS: Record<string, string> = {
+  "wrong-first-person": "一人称がキャラクター設定と違います。指定一人称だけを使ってください。",
+  meta_remark: "説明口調、拒否、注釈をやめ、キャラクター本人として返答してください。",
+  "meta-prompt-echo": "システム指示や出力ルールを本文に書かず、会話内容だけを返してください。",
+  "user-leak": "「ユーザー」という単語を使わず、相手を自然に呼んでください。",
+  "conversation-over-escalation":
+    "会話フェーズです。キス、抱擁、脱衣、性的接触を既成事実にしないでください。",
+  "within-turn-repetition": "同じ文、台詞、比喩、文末を繰り返さず、別の語彙で書いてください。",
+  "max-length-exceeded": "1200字以内に収め、冗長な反復を削ってください。",
+  "multilingual-leak": "簡体字や日本語以外の文字混入を避け、日本語だけで書いてください。",
+  "no-english": "英単語やアルファベットを含めず、日本語だけで書いてください。",
+  "xml-format-missing":
+    "<response><action>...</action><dialogue>...</dialogue><inner>...</inner></response> を厳守してください。",
+  "scene-min-length": "シーンフェーズでは十分な長さと具体描写を含めてください。",
+  "cross-turn-repetition": "前回と同じ表現を使わず、語彙、身体反応、文構造を変えてください。",
+  "inner-missing": "<inner>にキャラクターの内心を必ず入れてください。",
+};
+
 function buildQualityRetryHint(
   lastResponseText: string,
   lastFailureReason: string | undefined,
 ): ChatMessage {
   const reasonLine = lastFailureReason ? `\n- 不合格理由: ${lastFailureReason}` : "";
+  const specificHint = lastFailureReason ? QUALITY_RETRY_HINTS[lastFailureReason] : undefined;
+  const hintLine = specificHint ? `\n- 修正指示: ${specificHint}` : "";
   const previousOutput = lastResponseText.trim().slice(0, 1200);
   const previousLine = previousOutput
     ? `\n\n前回の不合格出力（繰り返さず改善）:\n${previousOutput}`
@@ -1230,7 +1233,7 @@ function buildQualityRetryHint(
     content: `品質チェックに不合格でした。以下を改善して書き直してください:
 - 前回と異なる表現を使うこと
 - 具体的な身体描写を含めること
-- キャラの声を維持すること${reasonLine}${previousLine}`,
+- キャラの声を維持すること${reasonLine}${hintLine}${previousLine}`,
   };
 }
 
@@ -1249,7 +1252,7 @@ async function requestQualityCheckedChat(
   model: string,
   phase: ScenePhase,
   finalMessages: ChatMessage[],
-  previousAssistantContent: string | undefined,
+  qualityContext: QualityCheckContext,
 ): Promise<QualityCheckedChat> {
   let attempt = 0;
   let lastResponseText = "";
@@ -1271,8 +1274,7 @@ async function requestQualityCheckedChat(
 
     const quality = await checkServerSideQuality(
       lastResponseText,
-      phase,
-      previousAssistantContent,
+      qualityContext,
       env.CLAUDE_SESSION_TOKEN,
     );
     if (quality.pass) {
@@ -1286,7 +1288,12 @@ async function requestQualityCheckedChat(
 
   if (lastCollected) {
     console.warn(`[quality] returning last attempt after ${MAX_SERVER_RETRIES} retries`);
-    return { ok: true, chunks: lastCollected.chunks, usedModel: lastCollected.usedModel };
+    return {
+      ok: true,
+      chunks: lastCollected.chunks,
+      usedModel: lastCollected.usedModel,
+      warningLevel: true,
+    };
   }
 
   return { ok: false, error: "upstream service error" };
@@ -1295,6 +1302,31 @@ async function requestQualityCheckedChat(
 function getPreviousAssistantContent(messages: ChatMessage[]): string | undefined {
   const previousAssistantIndex = findLastIndex(messages, (message) => message.role === "assistant");
   return previousAssistantIndex >= 0 ? messages[previousAssistantIndex].content : undefined;
+}
+
+function getPreviousInnerTexts(messages: ChatMessage[]): string[] {
+  return messages
+    .filter((message) => message.role === "assistant")
+    .slice(-5)
+    .map((message) => parseXmlResponse(message.content)?.inner ?? "")
+    .filter((inner) => inner.length >= 5);
+}
+
+function buildServerQualityContext(
+  messages: ChatMessage[],
+  phase: ScenePhase,
+): QualityCheckContext {
+  const systemPrompt = messages.find((message) => message.role === "system")?.content ?? "";
+  const firstPerson = extractFirstPerson(systemPrompt);
+  return {
+    phase,
+    prevAssistantResponse: getPreviousAssistantContent(messages),
+    firstPerson: firstPerson ?? undefined,
+    wrongFirstPersons: firstPerson
+      ? ALL_FIRST_PERSONS.filter((candidate) => candidate !== firstPerson)
+      : undefined,
+    prevInnerTexts: getPreviousInnerTexts(messages),
+  };
 }
 
 const DEFAULT_CHARACTER_ID = "default-character" as const;
@@ -2736,14 +2768,14 @@ const app = new Hono<{ Bindings: Bindings }>()
 
     const phase = detectScenePhase(messages);
     const finalMessages = augmentMessages(messages, phase);
-    const previousAssistantContent = getPreviousAssistantContent(messages);
+    const qualityContext = buildServerQualityContext(messages, phase);
 
     const qualityResult = await requestQualityCheckedChat(
       c.env,
       model,
       phase,
       finalMessages,
-      previousAssistantContent,
+      qualityContext,
     );
 
     if (!qualityResult.ok) {
@@ -2759,6 +2791,7 @@ const app = new Hono<{ Bindings: Bindings }>()
         "Cache-Control": "no-cache",
         Connection: "keep-alive",
         "x-model-used": qualityResult.usedModel,
+        "x-quality-warning": qualityResult.warningLevel ? "1" : "0",
       },
     });
   })
