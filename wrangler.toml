@@ -15,6 +15,7 @@ bucket_name = "adult-ai-images"
 
 [vars]
 # Non-secret vars go here
+AUTH_TOKEN = "CHANGE_ME_BEFORE_DEPLOY"
 
 # Secret vars are set via: wrangler secret put OPENROUTER_API_KEY
 # wrangler secret put NOVITA_API_KEY

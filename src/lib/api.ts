@@ -17,6 +17,34 @@ function parseSseChunk(data: string): string | "[DONE]" | null {
 
 // UIの再レンダーを間引くため、チャンクをバッファして一定間隔でフラッシュする
 const STREAM_FLUSH_INTERVAL_MS = 50;
+const AUTH_TOKEN_KEY = "auth_token";
+export const AUTH_TOKEN_INVALID_EVENT = "auth-token-invalid";
+
+function buildAuthHeaders(headersInit?: HeadersInit): Headers {
+  const headers = new Headers(headersInit);
+  const token = localStorage.getItem(AUTH_TOKEN_KEY);
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+  return headers;
+}
+
+function redirectToLogin(): void {
+  localStorage.removeItem(AUTH_TOKEN_KEY);
+  window.location.hash = "#/";
+  window.dispatchEvent(new Event(AUTH_TOKEN_INVALID_EVENT));
+}
+
+export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const response = await fetch(input, {
+    ...init,
+    headers: buildAuthHeaders(init?.headers),
+  });
+  if (response.status === 401) {
+    redirectToLogin();
+  }
+  return response;
+}
 
 type SseLineResult = "done" | "continue";
 
@@ -86,7 +114,7 @@ export async function streamChat(
   onError: (error: string) => void,
 ): Promise<void> {
   try {
-    const response = await fetch("/api/chat", {
+    const response = await apiFetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ messages, model }),
@@ -120,7 +148,7 @@ export async function streamChatWithQualityGuard(
   void qualityContext;
 
   try {
-    const response = await fetch("/api/chat", {
+    const response = await apiFetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ messages, model }),
@@ -158,7 +186,7 @@ export async function generateImage(
   phase?: ScenePhase,
 ): Promise<{ task_id: string } | { error: string }> {
   try {
-    const response = await fetch("/api/image", {
+    const response = await apiFetch("/api/image", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -199,7 +227,7 @@ const novitaTaskResultSchema = z
 type NovitaTaskResult = z.infer<typeof novitaTaskResultSchema>;
 
 export async function getImageTaskResult(taskId: string): Promise<NovitaTaskResult> {
-  const response = await fetch(`/api/image/task/${encodeURIComponent(taskId)}`);
+  const response = await apiFetch(`/api/image/task/${encodeURIComponent(taskId)}`);
   if (!response.ok) {
     throw new Error(`task result fetch failed: ${response.status}`);
   }
@@ -228,6 +256,10 @@ const createConversationSchema = z.object({
   conversation: conversationSummarySchema,
 });
 
+const generateTitleResponseSchema = z.object({
+  title: z.string().optional(),
+});
+
 const persistedMessageSchema = z.object({
   id: z.string(),
   role: z.enum(["system", "user", "assistant"]),
@@ -245,7 +277,7 @@ export type ConversationSummary = z.infer<typeof conversationSummarySchema>;
 export type PersistedMessage = z.infer<typeof persistedMessageSchema>;
 
 export async function listConversations(): Promise<ConversationSummary[]> {
-  const response = await fetch("/api/conversations");
+  const response = await apiFetch("/api/conversations");
   if (!response.ok) {
     throw new Error(`list conversations failed: ${response.status}`);
   }
@@ -256,7 +288,7 @@ export async function createConversation(input?: {
   title?: string;
   characterId?: string;
 }): Promise<ConversationSummary> {
-  const response = await fetch("/api/conversations", {
+  const response = await apiFetch("/api/conversations", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ title: input?.title, characterId: input?.characterId }),
@@ -268,7 +300,7 @@ export async function createConversation(input?: {
 }
 
 export async function deleteConversation(conversationId: string): Promise<void> {
-  const response = await fetch(`/api/conversations/${encodeURIComponent(conversationId)}`, {
+  const response = await apiFetch(`/api/conversations/${encodeURIComponent(conversationId)}`, {
     method: "DELETE",
   });
   if (!response.ok) {
@@ -277,7 +309,7 @@ export async function deleteConversation(conversationId: string): Promise<void> 
 }
 
 export async function deleteAllConversations(): Promise<void> {
-  const response = await fetch("/api/conversations", {
+  const response = await apiFetch("/api/conversations", {
     method: "DELETE",
   });
   if (!response.ok) {
@@ -289,11 +321,14 @@ export async function updateConversationTitle(
   conversationId: string,
   title: string,
 ): Promise<void> {
-  const response = await fetch(`/api/conversations/${encodeURIComponent(conversationId)}/title`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title }),
-  });
+  const response = await apiFetch(
+    `/api/conversations/${encodeURIComponent(conversationId)}/title`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title }),
+    },
+  );
   if (!response.ok) {
     throw new Error(`update conversation title failed: ${response.status}`);
   }
@@ -303,7 +338,7 @@ export async function updateConversationCharacter(
   conversationId: string,
   characterId: string,
 ): Promise<void> {
-  const response = await fetch(
+  const response = await apiFetch(
     `/api/conversations/${encodeURIComponent(conversationId)}/character`,
     {
       method: "PATCH",
@@ -321,7 +356,7 @@ export async function generateConversationTitle(
   messages: { role: "system" | "user" | "assistant"; content: string }[],
   model: string,
 ): Promise<string | null> {
-  const response = await fetch(
+  const response = await apiFetch(
     `/api/conversations/${encodeURIComponent(conversationId)}/generate-title`,
     {
       method: "POST",
@@ -330,14 +365,16 @@ export async function generateConversationTitle(
     },
   );
   if (!response.ok) return null;
-  const data: { title?: string } = await response.json();
+  const data = generateTitleResponseSchema.parse(await response.json());
   return data.title ?? null;
 }
 
 export async function listConversationMessages(
   conversationId: string,
 ): Promise<PersistedMessage[]> {
-  const response = await fetch(`/api/conversations/${encodeURIComponent(conversationId)}/messages`);
+  const response = await apiFetch(
+    `/api/conversations/${encodeURIComponent(conversationId)}/messages`,
+  );
   if (!response.ok) {
     throw new Error(`list messages failed: ${response.status}`);
   }
@@ -352,7 +389,7 @@ export async function createConversationMessage(input: {
   imageUrl?: string;
   imageKey?: string;
 }): Promise<void> {
-  const response = await fetch(
+  const response = await apiFetch(
     `/api/conversations/${encodeURIComponent(input.conversationId)}/messages`,
     {
       method: "POST",
@@ -375,7 +412,7 @@ export async function deleteMessagesAfterMessage(
   conversationId: string,
   messageId: string,
 ): Promise<void> {
-  const response = await fetch(
+  const response = await apiFetch(
     `/api/conversations/${encodeURIComponent(conversationId)}/messages-after/${encodeURIComponent(messageId)}`,
     { method: "DELETE" },
   );
@@ -389,7 +426,7 @@ export async function updateMessageImage(input: {
   imageUrl?: string;
   imageKey?: string;
 }): Promise<void> {
-  const response = await fetch(`/api/messages/${encodeURIComponent(input.messageId)}/image`, {
+  const response = await apiFetch(`/api/messages/${encodeURIComponent(input.messageId)}/image`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -412,7 +449,7 @@ export async function persistImageToR2(
   imageUrl: string,
   messageId: string,
 ): Promise<{ imageKey: string } | { error: string }> {
-  const response = await fetch("/api/image/persist", {
+  const response = await apiFetch("/api/image/persist", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ imageUrl, messageId }),
@@ -424,7 +461,7 @@ export async function persistImageToR2(
 }
 
 export async function updateMessageContent(messageId: string, content: string): Promise<void> {
-  const response = await fetch(`/api/messages/${encodeURIComponent(messageId)}/content`, {
+  const response = await apiFetch(`/api/messages/${encodeURIComponent(messageId)}/content`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ content }),
@@ -466,7 +503,7 @@ export type CharacterInput = {
 };
 
 export async function listCharacters(): Promise<Character[]> {
-  const response = await fetch("/api/characters");
+  const response = await apiFetch("/api/characters");
   if (!response.ok) {
     throw new Error(`list characters failed: ${response.status}`);
   }
@@ -474,7 +511,7 @@ export async function listCharacters(): Promise<Character[]> {
 }
 
 export async function createCharacter(input: CharacterInput): Promise<Character> {
-  const response = await fetch("/api/characters", {
+  const response = await apiFetch("/api/characters", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
@@ -486,7 +523,7 @@ export async function createCharacter(input: CharacterInput): Promise<Character>
 }
 
 export async function updateCharacter(id: string, input: CharacterInput): Promise<void> {
-  const response = await fetch(`/api/characters/${encodeURIComponent(id)}`, {
+  const response = await apiFetch(`/api/characters/${encodeURIComponent(id)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
@@ -497,7 +534,7 @@ export async function updateCharacter(id: string, input: CharacterInput): Promis
 }
 
 export async function deleteCharacter(id: string): Promise<void> {
-  const response = await fetch(`/api/characters/${encodeURIComponent(id)}`, {
+  const response = await apiFetch(`/api/characters/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
   if (!response.ok) {

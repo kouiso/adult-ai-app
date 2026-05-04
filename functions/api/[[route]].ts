@@ -29,6 +29,7 @@ import {
 import type { QualityCheckContext } from "../../src/lib/quality-guard";
 type Bindings = {
   DB: Parameters<typeof drizzle>[0];
+  AUTH_TOKEN: string;
   OPENROUTER_API_KEY: string;
   NOVITA_API_KEY: string;
   CLAUDE_SESSION_TOKEN?: string;
@@ -445,6 +446,9 @@ function findLastIndex<T>(arr: T[], predicate: (item: T) => boolean): number {
 const getUserEmail = (c: { req: { header: (key: string) => string | undefined } }) => {
   const accessEmail = c.req.header("CF-Access-Authenticated-User-Email");
   if (accessEmail) return accessEmail;
+
+  const authorization = c.req.header("Authorization");
+  if (authorization?.startsWith("Bearer ")) return "token-auth@adult-ai-app.local";
 
   const host = c.req.header("host") ?? "";
   // ローカル開発: localhost / 127.0.0.1 / プライベートIP (192.168.x.x) を許可
@@ -2202,19 +2206,13 @@ const app = new Hono<{ Bindings: Bindings }>()
     }),
   )
 
-  // ── 認証ミドルウェア（R2画像配信以外の全エンドポイントで認証を強制） ──
+  // ── 認証ミドルウェア（全APIエンドポイントでBearerトークンを強制） ──
   .use("*", async (c, next) => {
-    // R2画像配信はpublicエンドポイント（ブラウザからの直接読み込み用）
-    if (c.req.path.startsWith("/api/image/r2/")) {
-      return next();
-    }
-
-    const userEmail = getUserEmail(c);
-    if (!userEmail) {
+    const token = c.env.AUTH_TOKEN;
+    const authorization = c.req.header("Authorization") ?? "";
+    if (!token || authorization !== `Bearer ${token}`) {
       return c.json({ error: "unauthorized" }, 401);
     }
-    // リクエストコンテキストにユーザー情報を保存（各ルートで再取得不要）
-    c.set("userEmail" as never, userEmail as never);
     return next();
   })
 
