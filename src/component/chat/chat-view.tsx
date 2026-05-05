@@ -127,10 +127,8 @@ const firstNonEmptyString = (...values: unknown[]): string | null => {
   return null;
 };
 
-const readMessageCreatedAt = (message: ChatMessage): number | null => {
-  const createdAt = (message as ChatMessage & { createdAt?: unknown }).createdAt;
-  return typeof createdAt === "number" ? createdAt : null;
-};
+const readMessageCreatedAt = (message: ChatMessage): number | null =>
+  typeof message.createdAt === "number" ? message.createdAt : null;
 
 const buildCurrentConversationSearchResults = ({
   messages,
@@ -154,6 +152,7 @@ const buildCurrentConversationSearchResults = ({
 
   return messages
     .filter((message) => message.content.toLowerCase().includes(normalizedQuery))
+    .slice(0, MESSAGE_SEARCH_RESULT_LIMIT)
     .map((message) => ({
       messageId: message.id,
       conversationId,
@@ -881,6 +880,28 @@ const getSearchScopeButtonClassName = (isSelected: boolean) =>
 const isSearchScopeFetching = (scope: SearchScope, isFetching: boolean) =>
   scope === "all" && isFetching;
 
+type GroupedSearchResults = {
+  conversationId: string;
+  conversationTitle: string;
+  results: MessageSearchResult[];
+};
+
+const groupSearchResultsByConversation = (results: MessageSearchResult[]): GroupedSearchResults[] =>
+  results.reduce<GroupedSearchResults[]>((groups, result) => {
+    const existingGroup = groups.find((group) => group.conversationId === result.conversationId);
+    if (existingGroup) {
+      existingGroup.results.push(result);
+      return groups;
+    }
+
+    groups.push({
+      conversationId: result.conversationId,
+      conversationTitle: result.conversationTitle,
+      results: [result],
+    });
+    return groups;
+  }, []);
+
 const GlobalSearchResults = ({
   isOpen,
   isFetching,
@@ -896,6 +917,7 @@ const GlobalSearchResults = ({
   const results = resultsByScope[searchScope];
   const scopeLabel = SEARCH_SCOPE_LABEL[searchScope];
   const isFetchingSelectedScope = isSearchScopeFetching(searchScope, isFetching);
+  const groupedResults = groupSearchResultsByConversation(results);
 
   return (
     <div className="border-b border-border/50 bg-background/95 px-4 py-2">
@@ -925,24 +947,28 @@ const GlobalSearchResults = ({
           <div className="px-3 py-3 text-sm text-muted-foreground">{scopeLabel}に一致なし</div>
         ) : (
           <div className="divide-y divide-border/60">
-            {results.map((result) => (
-              <button
-                key={result.messageId}
-                type="button"
-                onClick={() => onSelectResult(result)}
-                className="block w-full px-3 py-2 text-left transition-colors hover:bg-accent/60"
-              >
-                <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-                  <span className="line-clamp-1 font-medium text-foreground">
-                    {result.conversationTitle}
-                  </span>
-                  <span className="shrink-0">{formatSearchResultTime(result.createdAt)}</span>
+            {groupedResults.map((group) => (
+              <section key={group.conversationId}>
+                <div className="border-b border-border/40 bg-muted/35 px-3 py-1.5 text-xs font-medium text-foreground">
+                  {group.conversationTitle}
                 </div>
-                <p className="mt-1 line-clamp-2 text-sm leading-5">{result.snippet}</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {result.role === "user" ? "あなた" : result.characterName}
-                </p>
-              </button>
+                <div className="divide-y divide-border/40">
+                  {group.results.map((result) => (
+                    <button
+                      key={result.messageId}
+                      type="button"
+                      onClick={() => onSelectResult(result)}
+                      className="block w-full px-3 py-2 text-left transition-colors hover:bg-accent/60"
+                    >
+                      <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                        <span>{result.role === "user" ? "あなた" : result.characterName}</span>
+                        <span className="shrink-0">{formatSearchResultTime(result.createdAt)}</span>
+                      </div>
+                      <p className="mt-1 line-clamp-2 text-sm leading-5">{result.snippet}</p>
+                    </button>
+                  ))}
+                </div>
+              </section>
             ))}
           </div>
         )}
