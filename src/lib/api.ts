@@ -273,8 +273,24 @@ const listMessagesSchema = z.object({
   messages: z.array(persistedMessageSchema),
 });
 
+const messageSearchResultSchema = z.object({
+  messageId: z.string(),
+  conversationId: z.string(),
+  conversationTitle: z.string(),
+  role: z.enum(["system", "user", "assistant"]),
+  snippet: z.string(),
+  createdAt: z.number(),
+  characterName: z.string(),
+  characterAvatar: z.string().nullable(),
+});
+
+const messageSearchSchema = z.object({
+  results: z.array(messageSearchResultSchema),
+});
+
 export type ConversationSummary = z.infer<typeof conversationSummarySchema>;
 export type PersistedMessage = z.infer<typeof persistedMessageSchema>;
+export type MessageSearchResult = z.infer<typeof messageSearchResultSchema>;
 
 export async function listConversations(): Promise<ConversationSummary[]> {
   const response = await apiFetch("/api/conversations");
@@ -379,6 +395,24 @@ export async function listConversationMessages(
     throw new Error(`list messages failed: ${response.status}`);
   }
   return listMessagesSchema.parse(await response.json()).messages;
+}
+
+export async function searchConversationMessages(
+  query: string,
+  limit = 25,
+): Promise<MessageSearchResult[]> {
+  const normalizedQuery = query.trim();
+  if (!normalizedQuery) return [];
+
+  const params = new URLSearchParams({
+    q: normalizedQuery,
+    limit: String(limit),
+  });
+  const response = await apiFetch(`/api/conversations/search/messages?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error(`search messages failed: ${response.status}`);
+  }
+  return messageSearchSchema.parse(await response.json()).results;
 }
 
 export async function createConversationMessage(input: {

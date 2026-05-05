@@ -167,6 +167,8 @@ const LAST_CHUNK_TIMEOUT_MS = 30_000;
 const FIRST_TOKEN_TIMEOUT_LABEL = "first-token-timeout";
 const LAST_CHUNK_TIMEOUT_LABEL = "last-chunk-timeout";
 const MAX_SERVER_RETRIES = 3;
+const MESSAGE_SEARCH_SNIPPET_LENGTH = 160;
+const MESSAGE_SEARCH_SNIPPET_RADIUS = 64;
 const MODEL_FALLBACK_PATTERNS = [
   /model_not_available/i,
   /content_policy/i,
@@ -244,6 +246,11 @@ const messageUpdateContentSchema = z.object({
   content: z.string().max(20_000),
 });
 
+const messageSearchSchema = z.object({
+  q: z.string().trim().min(1).max(100),
+  limit: z.coerce.number().int().min(1).max(50).optional().default(25),
+});
+
 const idSchema = z.string().min(1).max(128);
 
 type ScenePhase = ReturnType<typeof detectScenePhase>;
@@ -298,6 +305,8 @@ function parseClaudeJudgeVerdict(verdict: string): ClaudeJudgeResult {
   const reason = verdict.split(":").slice(2).join(":") || "Claude judge rejected";
   return { pass: false, reason: `claude-judge: ${reason}` };
 }
+
+const escapeSqlLikePattern = (value: string) => value.replace(/[%\\_]/g, "\\$&");
 
 async function requestClaudeJudgeVerdict(
   token: string,
@@ -2588,6 +2597,84 @@ const app = new Hono<{ Bindings: Bindings }>()
       return c.json({ title });
     },
   )
+
+  .get("/conversations/search/messages", zValidator("query", messageSearchSchema), async (c) => {
+    const userEmail = getUserEmail(c);
+    if (!userEmail) {
+      return c.json({ error: "unauthorized" }, 401);
+    }
+
+    const { q, limit } = c.req.valid("query");
+    const database = drizzle(c.env.DB);
+    const userId = await ensureUser(database, userEmail);
+    const normalizedQuery = q.toLowerCase();
+    const likePattern = `%${escapeSqlLikePattern(normalizedQuery)}%`;
+
+    const rows = await database
+      .select({
+        messageId: messageTable.id,
+        conversationId: conversationTable.id,
+        conversationTitle: conversationTable.title,
+        role: messageTable.role,
+        snippet: sql<string>`
+          CASE
+            WHEN instr(lower(${messageTable.content}), ${normalizedQuery}) > 0 THEN
+              (CASE
+                WHEN max(1, instr(lower(${messageTable.content}), ${normalizedQuery}) - ${MESSAGE_SEARCH_SNIPPET_RADIUS}) > 1
+                THEN '...'
+                ELSE ''
+              END) ||
+              substr(
+                ${messageTable.content},
+                max(1, instr(lower(${messageTable.content}), ${normalizedQuery}) - ${MESSAGE_SEARCH_SNIPPET_RADIUS}),
+                ${MESSAGE_SEARCH_SNIPPET_LENGTH}
+              ) ||
+              (CASE
+                WHEN length(${messageTable.content}) >
+                  max(1, instr(lower(${messageTable.content}), ${normalizedQuery}) - ${MESSAGE_SEARCH_SNIPPET_RADIUS}) + ${MESSAGE_SEARCH_SNIPPET_LENGTH} - 1
+                THEN '...'
+                ELSE ''
+              END)
+            ELSE
+              substr(${messageTable.content}, 1, ${MESSAGE_SEARCH_SNIPPET_LENGTH}) ||
+              (CASE
+                WHEN length(${messageTable.content}) > ${MESSAGE_SEARCH_SNIPPET_LENGTH}
+                THEN '...'
+                ELSE ''
+              END)
+          END
+        `,
+        createdAt: messageTable.createdAt,
+        characterName: characterTable.name,
+        characterAvatar: characterTable.avatar,
+      })
+      .from(messageTable)
+      .innerJoin(conversationTable, eq(messageTable.conversationId, conversationTable.id))
+      .leftJoin(characterTable, eq(conversationTable.characterId, characterTable.id))
+      .where(
+        and(
+          eq(messageTable.userId, userId),
+          eq(conversationTable.userId, userId),
+          ne(messageTable.role, "system"),
+          sql`lower(${messageTable.content}) LIKE ${likePattern} ESCAPE '\\'`,
+        ),
+      )
+      .orderBy(desc(messageTable.createdAt))
+      .limit(limit);
+
+    return c.json({
+      results: rows.map((row) => ({
+        messageId: row.messageId,
+        conversationId: row.conversationId,
+        conversationTitle: row.conversationTitle,
+        role: row.role,
+        snippet: row.snippet.replace(/\s+/g, " ").trim(),
+        createdAt: row.createdAt,
+        characterName: row.characterName ?? "AI",
+        characterAvatar: row.characterAvatar ?? null,
+      })),
+    });
+  })
 
   .get("/conversations/:conversationId/messages", async (c) => {
     const userEmail = getUserEmail(c);

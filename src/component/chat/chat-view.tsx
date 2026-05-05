@@ -1,7 +1,7 @@
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useQuery } from "@tanstack/react-query";
-import { ArrowDown, Menu, Search, Sparkles, UserPlus, X } from "lucide-react";
+import { ArrowDown, Loader2, Menu, Search, Sparkles, UserPlus, X } from "lucide-react";
 import { toast } from "sonner";
 import { useShallow } from "zustand/react/shallow";
 
@@ -15,9 +15,11 @@ import {
   getImageTaskResult,
   listConversationMessages,
   persistImageToR2,
+  searchConversationMessages,
   streamChat,
   streamChatWithQualityGuard,
   type ConversationSummary,
+  type MessageSearchResult,
   type PersistedMessage,
 } from "@/lib/api";
 import {
@@ -28,6 +30,7 @@ import {
   type ApiMessage,
 } from "@/lib/chat-message-adapter";
 import { DEFAULT_SYSTEM_PROMPT } from "@/lib/config";
+import { buildMessageSearchSnippet } from "@/lib/message-search";
 import { buildSystemPrompt, parseSystemPrompt } from "@/lib/prompt-builder";
 import type { QualityCheckContext } from "@/lib/quality-guard";
 import { queryKey } from "@/lib/query-key";
@@ -55,12 +58,18 @@ const SCENE_INTRO_KIND = "scene-intro";
 const POLL_MAX_DELAY_MS = 10_000;
 const AUTO_IMAGE_RECENT_TURN_LIMIT = 3;
 const AUTO_IMAGE_START_DELAY_MS = 700;
+const MESSAGE_SEARCH_RESULT_LIMIT = 25;
+const MESSAGE_SEARCH_DEBOUNCE_MS = 300;
+const SEARCH_JUMP_SUPPRESS_AUTO_SCROLL_MS = 350;
 const AUTO_IMAGE_PHASE_TRANSITIONS = new Set([
   "conversation:intimate",
   "intimate:erotic",
   "erotic:climax",
   "climax:afterglow",
 ]);
+
+const getMessageSelector = (messageId: string) =>
+  `[data-message-id="${messageId.replace(/["\\]/g, "\\$&")}"]`;
 
 type ImagePollingResult =
   | { status: "succeeded"; imageUrl: string }
@@ -70,6 +79,15 @@ type ImagePollingResult =
 type MessagePair = { user?: string; assistant?: string };
 type SceneConversationPrompt = { systemPrompt: string; characterName: string };
 type SceneConversationPrompts = Record<string, SceneConversationPrompt>;
+type SearchScope = "current" | "all";
+type SearchResultsByScope = Record<SearchScope, MessageSearchResult[]>;
+type VisibleMessage = ChatMessage & { role: "user" | "assistant" };
+
+const SEARCH_SCOPES: SearchScope[] = ["current", "all"];
+const SEARCH_SCOPE_LABEL: Record<SearchScope, string> = {
+  current: "現在の会話",
+  all: "全会話",
+};
 
 type ChatHeaderInfo = {
   name: string;
@@ -107,6 +125,44 @@ const firstNonEmptyString = (...values: unknown[]): string | null => {
   }
 
   return null;
+};
+
+const readMessageCreatedAt = (message: ChatMessage): number | null =>
+  typeof message.createdAt === "number" ? message.createdAt : null;
+
+const buildCurrentConversationSearchResults = ({
+  messages,
+  query,
+  conversationId,
+  conversationTitle,
+  characterName,
+  characterAvatar,
+  fallbackCreatedAt,
+}: {
+  messages: VisibleMessage[];
+  query: string;
+  conversationId: string | null;
+  conversationTitle: string;
+  characterName: string;
+  characterAvatar: string | null;
+  fallbackCreatedAt: number;
+}): MessageSearchResult[] => {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!conversationId || normalizedQuery.length === 0) return [];
+
+  return messages
+    .filter((message) => message.content.toLowerCase().includes(normalizedQuery))
+    .slice(0, MESSAGE_SEARCH_RESULT_LIMIT)
+    .map((message) => ({
+      messageId: message.id,
+      conversationId,
+      conversationTitle,
+      role: message.role,
+      snippet: buildMessageSearchSnippet(message.content, query),
+      createdAt: readMessageCreatedAt(message) ?? fallbackCreatedAt,
+      characterName,
+      characterAvatar,
+    }));
 };
 
 const readSceneCharacterInfo = (scene: SceneCard | null): SceneCharacterInfo | null => {
@@ -795,10 +851,205 @@ const SearchBar = ({
   );
 };
 
+type GlobalSearchResultsProps = {
+  isOpen: boolean;
+  isFetching: boolean;
+  query: string;
+  resultsByScope: SearchResultsByScope;
+  searchScope: SearchScope;
+  onScopeChange: (scope: SearchScope) => void;
+  onSelectResult: (result: MessageSearchResult) => void;
+};
+
+const formatSearchResultTime = (timestamp: number) =>
+  new Date(timestamp).toLocaleString("ja-JP", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+const getSearchScopeButtonClassName = (isSelected: boolean) =>
+  [
+    "rounded px-2.5 py-1 text-xs font-medium transition-colors",
+    isSelected
+      ? "bg-background text-foreground shadow-sm"
+      : "text-muted-foreground hover:text-foreground",
+  ].join(" ");
+
+const isSearchScopeFetching = (scope: SearchScope, isFetching: boolean) =>
+  scope === "all" && isFetching;
+
+type GroupedSearchResults = {
+  conversationId: string;
+  conversationTitle: string;
+  results: MessageSearchResult[];
+};
+
+const groupSearchResultsByConversation = (results: MessageSearchResult[]): GroupedSearchResults[] =>
+  results.reduce<GroupedSearchResults[]>((groups, result) => {
+    const existingGroup = groups.find((group) => group.conversationId === result.conversationId);
+    if (existingGroup) {
+      existingGroup.results.push(result);
+      return groups;
+    }
+
+    groups.push({
+      conversationId: result.conversationId,
+      conversationTitle: result.conversationTitle,
+      results: [result],
+    });
+    return groups;
+  }, []);
+
+const GlobalSearchResults = ({
+  isOpen,
+  isFetching,
+  query,
+  resultsByScope,
+  searchScope,
+  onScopeChange,
+  onSelectResult,
+}: GlobalSearchResultsProps) => {
+  const trimmedQuery = query.trim();
+  if (!isOpen || !trimmedQuery) return null;
+
+  const results = resultsByScope[searchScope];
+  const scopeLabel = SEARCH_SCOPE_LABEL[searchScope];
+  const isFetchingSelectedScope = isSearchScopeFetching(searchScope, isFetching);
+  const groupedResults = groupSearchResultsByConversation(results);
+
+  return (
+    <div className="border-b border-border/50 bg-background/95 px-4 py-2">
+      <div className="mx-auto max-h-72 max-w-3xl overflow-y-auto rounded-md border border-border/70 bg-card/85 shadow-sm">
+        <div className="flex items-center justify-between gap-3 border-b border-border/60 px-3 py-2">
+          <div className="inline-flex rounded-md bg-muted p-0.5">
+            {SEARCH_SCOPES.map((scope) => (
+              <button
+                key={scope}
+                type="button"
+                onClick={() => onScopeChange(scope)}
+                className={getSearchScopeButtonClassName(scope === searchScope)}
+                aria-pressed={scope === searchScope}
+              >
+                {SEARCH_SCOPE_LABEL[scope]}
+              </button>
+            ))}
+          </div>
+          <span className="shrink-0 text-xs text-muted-foreground">{results.length}件</span>
+        </div>
+        {isFetchingSelectedScope ? (
+          <div className="flex items-center gap-2 px-3 py-3 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            {scopeLabel}から検索中
+          </div>
+        ) : results.length === 0 ? (
+          <div className="px-3 py-3 text-sm text-muted-foreground">{scopeLabel}に一致なし</div>
+        ) : (
+          <div className="divide-y divide-border/60">
+            {groupedResults.map((group) => (
+              <section key={group.conversationId}>
+                <div className="border-b border-border/40 bg-muted/35 px-3 py-1.5 text-xs font-medium text-foreground">
+                  {group.conversationTitle}
+                </div>
+                <div className="divide-y divide-border/40">
+                  {group.results.map((result) => (
+                    <button
+                      key={result.messageId}
+                      type="button"
+                      onClick={() => onSelectResult(result)}
+                      className="block w-full px-3 py-2 text-left transition-colors hover:bg-accent/60"
+                    >
+                      <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                        <span>{result.role === "user" ? "あなた" : result.characterName}</span>
+                        <span className="shrink-0">{formatSearchResultTime(result.createdAt)}</span>
+                      </div>
+                      <p className="mt-1 line-clamp-2 text-sm leading-5">{result.snippet}</p>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 type ChatViewProps = {
   // EmptyState の「AIでキャラクター作成」ボタンから親の CharacterManager Sheet を開くため
   onOpenCharacterManager?: () => void;
   onOpenManualCharacterCreate?: () => void;
+};
+
+const useDebouncedMessageSearchQuery = (isSearchOpen: boolean, normalizedSearchQuery: string) => {
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
+  const nextDebouncedSearchQuery = isSearchOpen ? normalizedSearchQuery : "";
+  const debounceDelay = nextDebouncedSearchQuery ? MESSAGE_SEARCH_DEBOUNCE_MS : 0;
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(
+      () => setDebouncedSearchQuery(nextDebouncedSearchQuery),
+      debounceDelay,
+    );
+    return () => window.clearTimeout(timeoutId);
+  }, [debounceDelay, nextDebouncedSearchQuery]);
+
+  return {
+    debouncedSearchQuery,
+    isSearchDebouncing:
+      nextDebouncedSearchQuery.length > 0 && debouncedSearchQuery !== nextDebouncedSearchQuery,
+  };
+};
+
+const isAnySearchLoading = (isFetching: boolean, isDebouncing: boolean) =>
+  [isFetching, isDebouncing].some(Boolean);
+
+const isGlobalMessageSearchEnabled = (
+  isSearchOpen: boolean,
+  searchScope: SearchScope,
+  debouncedSearchQuery: string,
+) => [isSearchOpen, searchScope === "all", debouncedSearchQuery.length > 0].every(Boolean);
+
+const useAutoScrollToBottom = (
+  messages: ChatMessage[],
+  scrollToBottom: () => void,
+  suppressAutoScrollRef: { current: boolean },
+) => {
+  useEffect(() => {
+    if (suppressAutoScrollRef.current) return;
+    scrollToBottom();
+  }, [messages, scrollToBottom, suppressAutoScrollRef]);
+};
+
+const usePendingSearchJump = ({
+  messages,
+  pendingSearchMessageId,
+  suppressAutoScrollRef,
+  setPendingSearchMessageId,
+}: {
+  messages: ChatMessage[];
+  pendingSearchMessageId: string | null;
+  suppressAutoScrollRef: { current: boolean };
+  setPendingSearchMessageId: (messageId: string | null) => void;
+}) => {
+  useEffect(() => {
+    if (!pendingSearchMessageId) return;
+
+    const target = document.querySelector(getMessageSelector(pendingSearchMessageId));
+    if (!target && messages.length === 0) return;
+
+    if (target) target.scrollIntoView({ block: "center", behavior: "smooth" });
+    const timeoutId = window.setTimeout(
+      () => {
+        suppressAutoScrollRef.current = false;
+        setPendingSearchMessageId(null);
+      },
+      target ? SEARCH_JUMP_SUPPRESS_AUTO_SCROLL_MS : 0,
+    );
+    return () => window.clearTimeout(timeoutId);
+  }, [messages, pendingSearchMessageId, setPendingSearchMessageId, suppressAutoScrollRef]);
 };
 
 export const ChatView = ({
@@ -816,7 +1067,9 @@ export const ChatView = ({
   const isOnline = useNetworkStatus();
   const [isMobileDrawerOpen, setMobileDrawerOpen] = useState(false);
   const [isSearchOpen, setSearchOpen] = useState(false);
+  const [searchScope, setSearchScope] = useState<SearchScope>("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [pendingSearchMessageId, setPendingSearchMessageId] = useState<string | null>(null);
   const [imageGenerationCount, setImageGenerationCount] = useState(0);
   const [activeAutoImageMessageIds, setActiveAutoImageMessageIds] = useState<Set<string>>(
     () => new Set(),
@@ -836,6 +1089,7 @@ export const ChatView = ({
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
   const previousScenePhaseRef = useRef<ScenePhase>("conversation");
   const pendingAutoImageAssistantIdsRef = useRef<Set<string>>(new Set());
+  const suppressAutoScrollRef = useRef(false);
   const wasOfflineRef = useRef(false);
 
   const {
@@ -853,6 +1107,19 @@ export const ChatView = ({
     loadMessages,
   } = useChatQuery(currentConversationId);
 
+  const normalizedSearchQuery = searchQuery.trim();
+  const { debouncedSearchQuery, isSearchDebouncing } = useDebouncedMessageSearchQuery(
+    isSearchOpen,
+    normalizedSearchQuery,
+  );
+  const { data: globalSearchResults = [], isFetching: isGlobalSearchFetching } = useQuery({
+    queryKey: queryKey.messageSearch(debouncedSearchQuery, MESSAGE_SEARCH_RESULT_LIMIT),
+    queryFn: () => searchConversationMessages(debouncedSearchQuery, MESSAGE_SEARCH_RESULT_LIMIT),
+    enabled: isGlobalMessageSearchEnabled(isSearchOpen, searchScope, debouncedSearchQuery),
+    staleTime: 5_000,
+  });
+  const isGlobalSearchPending = isAnySearchLoading(isGlobalSearchFetching, isSearchDebouncing);
+
   const handleSpeakEnd = useCallback(() => setSpeakingMessageId(null), []);
   const { speak, stop, isSpeaking } = useSpeechSynthesis(
     ttsVoiceUri,
@@ -868,9 +1135,7 @@ export const ChatView = ({
     });
   }, []);
 
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages, scrollToBottom]);
+  useAutoScrollToBottom(messages, scrollToBottom, suppressAutoScrollRef);
 
   useEffect(() => {
     if (!isOnline) {
@@ -1044,6 +1309,24 @@ export const ChatView = ({
     },
     [conversations, loadMessages, setConversationId, setMessages],
   );
+
+  const handleSelectSearchResult = useCallback(
+    (result: MessageSearchResult) => {
+      suppressAutoScrollRef.current = true;
+      setPendingSearchMessageId(result.messageId);
+      if (result.conversationId !== currentConversationId) {
+        void handleSelectConversation(result.conversationId);
+      }
+    },
+    [currentConversationId, handleSelectConversation],
+  );
+
+  usePendingSearchJump({
+    messages,
+    pendingSearchMessageId,
+    suppressAutoScrollRef,
+    setPendingSearchMessageId,
+  });
 
   const handleCreateConversation = useCallback(async () => {
     try {
@@ -1730,13 +2013,39 @@ export const ChatView = ({
   );
 
   const visibleMessages = useMemo(
-    () =>
-      messages.filter(
-        (m): m is ChatMessage & { role: "user" | "assistant" } =>
-          m.role === "user" || m.role === "assistant",
-      ),
+    () => messages.filter((m): m is VisibleMessage => m.role === "user" || m.role === "assistant"),
     [messages],
   );
+
+  const currentSearchResults = useMemo(
+    () =>
+      buildCurrentConversationSearchResults({
+        messages: visibleMessages,
+        query: searchQuery,
+        conversationId: currentConversationId,
+        conversationTitle: currentTitle,
+        characterName: currentCharacterName,
+        characterAvatar: currentCharacterAvatar,
+        fallbackCreatedAt: currentConversation?.updatedAt ?? 0,
+      }),
+    [
+      currentCharacterAvatar,
+      currentCharacterName,
+      currentConversation?.updatedAt,
+      currentConversationId,
+      currentTitle,
+      searchQuery,
+      visibleMessages,
+    ],
+  );
+  const searchResultsByScope = useMemo<SearchResultsByScope>(
+    () => ({
+      current: currentSearchResults,
+      all: globalSearchResults,
+    }),
+    [currentSearchResults, globalSearchResults],
+  );
+  const scopedSearchMatchCount = searchResultsByScope[searchScope].length;
 
   // 検索クエリにマッチするメッセージIDのSet（ハイライト表示用）
   const highlightedMessageIds = useMemo(() => {
@@ -1820,12 +2129,21 @@ export const ChatView = ({
         <SearchBar
           isSearchOpen={isSearchOpen}
           searchQuery={searchQuery}
-          matchCount={highlightedMessageIds.size}
+          matchCount={scopedSearchMatchCount}
           onCloseSearch={() => {
             setSearchOpen(false);
             setSearchQuery("");
           }}
           onQueryChange={setSearchQuery}
+        />
+        <GlobalSearchResults
+          isOpen={isSearchOpen}
+          isFetching={isGlobalSearchPending}
+          query={searchQuery}
+          resultsByScope={searchResultsByScope}
+          searchScope={searchScope}
+          onScopeChange={setSearchScope}
+          onSelectResult={handleSelectSearchResult}
         />
 
         <div ref={scrollContainerRef} className="flex-1 overflow-y-auto bg-chat-area">
