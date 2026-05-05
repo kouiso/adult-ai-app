@@ -278,7 +278,7 @@ const messageSearchResultSchema = z.object({
   conversationId: z.string(),
   conversationTitle: z.string(),
   role: z.enum(["system", "user", "assistant"]),
-  content: z.string(),
+  snippet: z.string(),
   createdAt: z.number(),
   characterName: z.string(),
   characterAvatar: z.string().nullable(),

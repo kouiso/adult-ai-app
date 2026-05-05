@@ -159,7 +159,7 @@ const buildCurrentConversationSearchResults = ({
       conversationId,
       conversationTitle,
       role: message.role,
-      content: message.content,
+      snippet: buildMessageSearchSnippet(message.content, query),
       createdAt: readMessageCreatedAt(message) ?? fallbackCreatedAt,
       characterName,
       characterAvatar,
@@ -938,9 +938,7 @@ const GlobalSearchResults = ({
                   </span>
                   <span className="shrink-0">{formatSearchResultTime(result.createdAt)}</span>
                 </div>
-                <p className="mt-1 line-clamp-2 text-sm leading-5">
-                  {buildMessageSearchSnippet(result.content, trimmedQuery)}
-                </p>
+                <p className="mt-1 line-clamp-2 text-sm leading-5">{result.snippet}</p>
                 <p className="mt-1 text-xs text-muted-foreground">
                   {result.role === "user" ? "あなた" : result.characterName}
                 </p>
@@ -1290,9 +1288,11 @@ export const ChatView = ({
     (result: MessageSearchResult) => {
       suppressAutoScrollRef.current = true;
       setPendingSearchMessageId(result.messageId);
-      void handleSelectConversation(result.conversationId);
+      if (result.conversationId !== currentConversationId) {
+        void handleSelectConversation(result.conversationId);
+      }
     },
-    [handleSelectConversation],
+    [currentConversationId, handleSelectConversation],
   );
 
   usePendingSearchJump({

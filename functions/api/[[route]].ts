@@ -167,6 +167,8 @@ const LAST_CHUNK_TIMEOUT_MS = 30_000;
 const FIRST_TOKEN_TIMEOUT_LABEL = "first-token-timeout";
 const LAST_CHUNK_TIMEOUT_LABEL = "last-chunk-timeout";
 const MAX_SERVER_RETRIES = 3;
+const MESSAGE_SEARCH_SNIPPET_LENGTH = 160;
+const MESSAGE_SEARCH_SNIPPET_RADIUS = 64;
 const MODEL_FALLBACK_PATTERNS = [
   /model_not_available/i,
   /content_policy/i,
@@ -2605,7 +2607,8 @@ const app = new Hono<{ Bindings: Bindings }>()
     const { q, limit } = c.req.valid("query");
     const database = drizzle(c.env.DB);
     const userId = await ensureUser(database, userEmail);
-    const likePattern = `%${escapeSqlLikePattern(q.toLowerCase())}%`;
+    const normalizedQuery = q.toLowerCase();
+    const likePattern = `%${escapeSqlLikePattern(normalizedQuery)}%`;
 
     const rows = await database
       .select({
@@ -2613,7 +2616,34 @@ const app = new Hono<{ Bindings: Bindings }>()
         conversationId: conversationTable.id,
         conversationTitle: conversationTable.title,
         role: messageTable.role,
-        content: messageTable.content,
+        snippet: sql<string>`
+          CASE
+            WHEN instr(lower(${messageTable.content}), ${normalizedQuery}) > 0 THEN
+              (CASE
+                WHEN max(1, instr(lower(${messageTable.content}), ${normalizedQuery}) - ${MESSAGE_SEARCH_SNIPPET_RADIUS}) > 1
+                THEN '...'
+                ELSE ''
+              END) ||
+              substr(
+                ${messageTable.content},
+                max(1, instr(lower(${messageTable.content}), ${normalizedQuery}) - ${MESSAGE_SEARCH_SNIPPET_RADIUS}),
+                ${MESSAGE_SEARCH_SNIPPET_LENGTH}
+              ) ||
+              (CASE
+                WHEN length(${messageTable.content}) >
+                  max(1, instr(lower(${messageTable.content}), ${normalizedQuery}) - ${MESSAGE_SEARCH_SNIPPET_RADIUS}) + ${MESSAGE_SEARCH_SNIPPET_LENGTH} - 1
+                THEN '...'
+                ELSE ''
+              END)
+            ELSE
+              substr(${messageTable.content}, 1, ${MESSAGE_SEARCH_SNIPPET_LENGTH}) ||
+              (CASE
+                WHEN length(${messageTable.content}) > ${MESSAGE_SEARCH_SNIPPET_LENGTH}
+                THEN '...'
+                ELSE ''
+              END)
+          END
+        `,
         createdAt: messageTable.createdAt,
         characterName: characterTable.name,
         characterAvatar: characterTable.avatar,
@@ -2638,7 +2668,7 @@ const app = new Hono<{ Bindings: Bindings }>()
         conversationId: row.conversationId,
         conversationTitle: row.conversationTitle,
         role: row.role,
-        content: row.content,
+        snippet: row.snippet.replace(/\s+/g, " ").trim(),
         createdAt: row.createdAt,
         characterName: row.characterName ?? "AI",
         characterAvatar: row.characterAvatar ?? null,
